@@ -28,7 +28,7 @@
   let maVisible = false;
 
   // ---------------------------------------------------------
-  // CSV 載入
+  // CSV 載入（已修正變數錯誤）
   // ---------------------------------------------------------
   function loadCSV() {
     const stockList = [
@@ -38,13 +38,16 @@
       "3715","3081","1560","3711","3211","5347","1319","3044","3217","5274",
       "3008","2327","2357","2439","2884","3037","3045","3583","8996","8299"
     ];
-    const stock = list[Math.floor(Math.random() * list.length)];
+
+    // ❗ FIX: 原本是 list → list 未定義
+    const stock = stockList[Math.floor(Math.random() * stockList.length)];
     global.__currentStock = stock;
 
     fetch(`data/${stock}.csv`)
       .then(r => r.text())
       .then(text => {
         const lines = text.split("\n").slice(1);
+
         data = lines
           .filter(l => l.trim() !== "")
           .map(l => {
@@ -60,6 +63,7 @@
           });
 
         indicators = Indicators.computeAll(data);
+
         const ctx = Signals.buildSignalContext(data);
         allSignals = Signals.evaluateSignalsForAll(ctx);
 
@@ -80,7 +84,6 @@
     const shown = data.slice(0, currentIndex);
     const indType = U.el("indicatorSelect").value;
 
-    // 型態偵測
     const tline = Trend.findTrendlines(shown);
     const w = WM.isWBottom(shown);
     const m = WM.isMTop(shown);
@@ -90,7 +93,6 @@
     if (w) pat += `W底(${w.neck.toFixed(2)}) `;
     if (m) pat += `M頭(${m.neck.toFixed(2)}) `;
     if (tri) pat += `${tri.type} `;
-
     U.el("kPattern").innerText = pat || "（無明顯型態）";
 
     // 多空訊號
@@ -102,7 +104,6 @@
       U.el("signalBox").innerText = "多空訊號：OFF";
     }
 
-    // 圖表更新
     Chart.update(shown, indicators, {
       showMA: maVisible,
       showBB: indType === "bb",
@@ -118,7 +119,7 @@
   }
 
   // ---------------------------------------------------------
-  // 資產統計（含已實現總損益）
+  // 資產統計
   // ---------------------------------------------------------
   function updateStats() {
     const price = data[currentIndex - 1].close;
@@ -137,6 +138,8 @@
     U.el("holdingValue").innerText = U.formatNumber(holdingValue);
     U.el("totalAsset").innerText = U.formatNumber(total);
     U.el("roi").innerText = roi;
+
+    // 固定欄位
     U.el("realizedTotalBox").innerText = U.formatNumber(realizedTotal) + " 元";
   }
 
@@ -149,12 +152,9 @@
 
     trades.forEach(t => {
       const li = document.createElement("li");
-      if (t.type === "buy")
-        li.textContent = `${t.date} 買 ${t.qty} @ ${t.price}`;
-      else if (t.type === "sell")
-        li.textContent = `${t.date} 賣 ${t.qty} @ ${t.price}`;
-      else
-        li.textContent = `${t.date} 不動作`;
+      if (t.type === "buy") li.textContent = `${t.date} 買 ${t.qty} @ ${t.price}`;
+      else if (t.type === "sell") li.textContent = `${t.date} 賣 ${t.qty} @ ${t.price}`;
+      else li.textContent = `${t.date} 不動作`;
       ul.appendChild(li);
     });
 
@@ -178,8 +178,7 @@
     lots.forEach(l => {
       const unreal = (price - l.price) * l.qty;
       const li = document.createElement("li");
-      li.textContent =
-        `${l.date} ${l.qty} @ ${l.price} → 未實現 ${U.formatNumber(unreal)} 元`;
+      li.textContent = `${l.date} ${l.qty} @ ${l.price} → 未實現 ${U.formatNumber(unreal)} 元`;
       ul.appendChild(li);
     });
 
@@ -261,7 +260,7 @@
   }
 
   // ---------------------------------------------------------
-  // 時間軸控制
+  // 下一天 / 前一天
   // ---------------------------------------------------------
   function nextDay() {
     if (currentIndex < data.length - 1) {
@@ -279,9 +278,9 @@
     }
   }
 
-  // --------------------------------------------------------------
-  // 遊戲結束專業總結
-  // --------------------------------------------------------------
+  // ---------------------------------------------------------
+  // 遊戲結束（已修正 selectedStock 錯誤）
+  // ---------------------------------------------------------
   function checkGameEnd() {
     if (currentIndex < data.length) return;
 
@@ -332,17 +331,21 @@
 
     const summary =
       `【遊戲結束】\n` +
-      `本次操作個股：${selectedStock}\n\n` +
+      `本次操作個股：${global.__currentStock}\n\n` +
       `最終總資產：${U.formatNumber(totalValue)} 元\n` +
       `報酬率：${roi}%\n` +
       `已實現損益：${U.formatNumber(realizedTotal)} 元\n\n` +
-      `【策略優點】\n${good.join("；") || "無明顯優勢"}\n\n` +
-      `【策略缺點】\n${bad.join("；") || "無重大缺失"}\n\n` +
-      `【專業改善建議】\n${suggest.join("；")}`;
+      `【策略優點】\n${good.join("；") || "無"}\n\n` +
+      `【策略缺點】\n${bad.join("；") || "無"}\n\n` +
+      `【改善建議】\n${
+        suggest.length
+          ? suggest.join("；")
+          : "策略架構完整，可持續優化進場與出場節奏"
+      }`;
 
     U.el("feedback").innerText = summary;
 
-    alert(`遊戲結束（${selectedStock}）\n報酬率：${roi}%`);
+    alert(`遊戲結束（${global.__currentStock}）\n報酬率：${roi}%`);
   }
 
   // ---------------------------------------------------------
