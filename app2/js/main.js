@@ -119,20 +119,32 @@
     updateHoldings();
   }
 
-  // --------------------------------------------------------------
-  // 資產統計
-  // --------------------------------------------------------------
+  // ---------------------------------------------------------
+  // 資產統計（含已實現總損益）
+  // ---------------------------------------------------------
   function updateStats() {
     const price = data[currentIndex - 1].close;
-    const hv = position * price;
-    const total = cash + hv;
+
+    const holdingValue = position * price;
+
+    // ★ 正確加入已實現總損益
+    const realizedTotal = realizedList.reduce(
+      (sum, r) => sum + (r.realized || 0),
+      0
+    );
+
+    const total = cash + holdingValue;
     const roi = ((total / INITIAL_CASH - 1) * 100).toFixed(2);
 
     U.el("cash").innerText = U.formatNumber(cash);
     U.el("position").innerText = position;
-    U.el("holdingValue").innerText = U.formatNumber(hv);
+    U.el("holdingValue").innerText = U.formatNumber(holdingValue);
     U.el("totalAsset").innerText = U.formatNumber(total);
     U.el("roi").innerText = roi;
+
+    // ★ 新增：右側固定欄位（已實現總損益）
+    U.el("realizedTotalBox").innerText =
+      U.formatNumber(realizedTotal) + " 元";
   }
 
   // --------------------------------------------------------------
