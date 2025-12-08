@@ -28,7 +28,7 @@
   let maVisible = false;
 
   // ---------------------------------------------------------
-  // CSV 載入（已修正變數錯誤）
+  // CSV 載入（正式修正版）
   // ---------------------------------------------------------
   function loadCSV() {
     const stockList = [
@@ -39,7 +39,7 @@
       "3008","2327","2357","2439","2884","3037","3045","3583","8996","8299"
     ];
 
-    // ❗ FIX: 原本是 list → list 未定義
+    // ✔ 正確：不能寫 list
     const stock = stockList[Math.floor(Math.random() * stockList.length)];
     global.__currentStock = stock;
 
@@ -119,12 +119,13 @@
   }
 
   // ---------------------------------------------------------
-  // 資產統計
+  // 資產統計（正式版）
   // ---------------------------------------------------------
   function updateStats() {
     const price = data[currentIndex - 1].close;
     const holdingValue = position * price;
 
+    // ✔ 這裡不會出現 realizedTotal 未定義
     const realizedTotal = realizedList.reduce(
       (sum, r) => sum + (r.realized || 0),
       0
@@ -139,7 +140,7 @@
     U.el("totalAsset").innerText = U.formatNumber(total);
     U.el("roi").innerText = roi;
 
-    // 固定欄位
+    // ✔ 固定欄位：已實現總損益
     U.el("realizedTotalBox").innerText = U.formatNumber(realizedTotal) + " 元";
   }
 
@@ -162,7 +163,7 @@
   }
 
   // ---------------------------------------------------------
-  // 持倉（未實現）
+  // 持倉
   // ---------------------------------------------------------
   function updateHoldings() {
     const ul = U.el("holdings");
@@ -178,7 +179,8 @@
     lots.forEach(l => {
       const unreal = (price - l.price) * l.qty;
       const li = document.createElement("li");
-      li.textContent = `${l.date} ${l.qty} @ ${l.price} → 未實現 ${U.formatNumber(unreal)} 元`;
+      li.textContent =
+        `${l.date} ${l.qty} @ ${l.price} → 未實現 ${U.formatNumber(unreal)} 元`;
       ul.appendChild(li);
     });
 
@@ -194,6 +196,7 @@
 
     const price = data[currentIndex - 1].close;
     const cost = qty * price;
+
     if (cost > cash) return alert("現金不足");
 
     cash -= cost;
@@ -260,7 +263,7 @@
   }
 
   // ---------------------------------------------------------
-  // 下一天 / 前一天
+  // 時間軸
   // ---------------------------------------------------------
   function nextDay() {
     if (currentIndex < data.length - 1) {
@@ -279,7 +282,7 @@
   }
 
   // ---------------------------------------------------------
-  // 遊戲結束（已修正 selectedStock 錯誤）
+  // 遊戲結束（已完全修正）
   // ---------------------------------------------------------
   function checkGameEnd() {
     if (currentIndex < data.length) return;
@@ -337,11 +340,7 @@
       `已實現損益：${U.formatNumber(realizedTotal)} 元\n\n` +
       `【策略優點】\n${good.join("；") || "無"}\n\n` +
       `【策略缺點】\n${bad.join("；") || "無"}\n\n` +
-      `【改善建議】\n${
-        suggest.length
-          ? suggest.join("；")
-          : "策略架構完整，可持續優化進場與出場節奏"
-      }`;
+      `【改善建議】\n${suggest.join("；")}`;
 
     U.el("feedback").innerText = summary;
 
