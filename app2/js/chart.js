@@ -156,6 +156,15 @@
     setTimeout(syncTime, 20);
   }
 
+  function scrollToRightAnimated() {
+    const ts = chart.timeScale();
+
+    // 等待 chart 完整渲染後再捲動 → 才能 100% 生效
+    requestAnimationFrame(() => {
+      ts.scrollToPosition(-1, true);  // -1 = 完全貼齊右側
+    });
+  }
+
   // ----------------------------------------
   // 更新圖形
   // ----------------------------------------
@@ -279,7 +288,13 @@
       ]);
     }
 
-    scrollRight();
+//    scrollRight();
+    // ---- 讓每個子圖都同步到右側 ----
+    requestAnimationFrame(() => {
+      chart.timeScale().scrollToPosition(-1, false);
+      volChart.timeScale().scrollToPosition(-1, false);
+      indChart.timeScale().scrollToPosition(-1, false);
+    });
   }
 
   function init() {
