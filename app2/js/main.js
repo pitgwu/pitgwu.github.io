@@ -78,6 +78,9 @@
 
         const ctx = Signals.buildSignalContext(data);
         allSignals = Signals.evaluateSignalsForAll(ctx);
+		
+		// ★ 新增：初始化到最後一天
+        currentIndex = data.length - 1;
 
         Chart.init();
         bindEvents();
