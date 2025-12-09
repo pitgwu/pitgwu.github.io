@@ -128,31 +128,41 @@
     updateHoldings();
   }
 
-  // -------------------------------------------------------------------
-  // 資產統計（含未實現/已實現）
-  // -------------------------------------------------------------------
-  function updateStats() {
-    const price = data[currentIndex - 1].close;
+// ---------------------------------------------------------
+// 資產統計（含已實現 & 未實現）
+// ---------------------------------------------------------
+function updateStats() {
+  const price = data[currentIndex - 1].close;
 
-    const holdingValue = position * price;
+  // 未實現總損益（所有 lots）
+  const unrealTotal = lots.reduce((sum, lot) => {
+    return sum + (price - lot.price) * lot.qty;
+  }, 0);
 
-    const realizedTotal = realizedList.reduce(
-      (sum, r) => sum + (r.realized || 0),
-      0
-    );
+  // 已實現損益
+  const realizedTotal = realizedList.reduce(
+    (sum, r) => sum + (r.realized || 0),
+    0
+  );
 
-    const total = cash + holdingValue;
-    const roi = ((total / INITIAL_CASH - 1) * 100).toFixed(2);
+  const holdingValue = position * price;
+  const total = cash + holdingValue;
+  const roi = ((total / INITIAL_CASH - 1) * 100).toFixed(2);
 
-    U.el("cash").innerText = U.formatNumber(cash);
-    U.el("position").innerText = position;
-    U.el("holdingValue").innerText = U.formatNumber(holdingValue);
-    U.el("totalAsset").innerText = U.formatNumber(total);
-    U.el("roi").innerText = roi;
+  U.el("cash").innerText = U.formatNumber(cash);
+  U.el("position").innerText = position;
+  U.el("holdingValue").innerText = U.formatNumber(holdingValue);
+  U.el("totalAsset").innerText = U.formatNumber(total);
+  U.el("roi").innerText = roi;
 
-    U.el("realizedTotalBox").innerText =
-      "已實現損益：" + U.formatNumber(realizedTotal) + " 元";
-  }
+  // ★ 新增：更新未實現 & 已實現總損益 UI
+  U.el("realizedTotalBox").innerText =
+    U.formatNumber(realizedTotal) + " 元";
+
+  U.el("unrealizedTotalBox").innerText =
+    U.formatNumber(unrealTotal) + " 元";
+}
+
 
 // ---------------------------------------------------------
 // 交易紀錄（捲軸、隨時間自動下移）
