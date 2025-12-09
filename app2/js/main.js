@@ -62,6 +62,11 @@
             };
           });
 
+        if (!data.length) {
+          alert("資料為空");
+          return;
+        }
+
         // 避免 currentIndex 超出資料範圍
         if (currentIndex >= data.length) {
           currentIndex = data.length - 1;
@@ -82,6 +87,15 @@
         alert("讀取 CSV 失敗：" + e.message);
         console.error(e);
       });
+  }
+
+  // -------------------------------------------------------------------
+  // 工具：計算「總未實現損益」
+  // -------------------------------------------------------------------
+  function calcUnrealTotal(currentPrice) {
+    return lots.reduce((sum, lot) => {
+      return sum + (currentPrice - lot.price) * lot.qty;
+    }, 0);
   }
 
   // -------------------------------------------------------------------
@@ -146,12 +160,8 @@
     // ★ 用「目前這根 K 棒」的價
     const price = data[currentIndex].close;
 
-    // 未實現總損益（所有 lots）
-    const unrealTotal = lots.reduce((sum, lot) => {
-      return sum + (price - lot.price) * lot.qty;
-    }, 0);
+    const unrealTotal = calcUnrealTotal(price);
 
-    // 已實現損益
     const realizedTotal = realizedList.reduce(
       (sum, r) => sum + (r.realized || 0),
       0
@@ -305,7 +315,7 @@
   }
 
   // ---------------------------------------------------------
-  // 前一天 / 下一天（動畫右移）
+  // 前一天 / 下一天
   // ---------------------------------------------------------
   function nextDay() {
     if (!data.length) return;
@@ -341,8 +351,11 @@
 
     const finalPrice = data[data.length - 1].close;
     const holdingValue = position * finalPrice;
-    const totalValue = cash + holdingValue;
 
+    // ★ 統一用 calcUnrealTotal 計算「未實現總損益」
+    const unrealTotal = calcUnrealTotal(finalPrice);
+
+    const totalValue = cash + holdingValue;
     const roi = ((totalValue / INITIAL_CASH - 1) * 100).toFixed(2);
 
     const realizedTotal = realizedList.reduce(
@@ -394,7 +407,8 @@
       `最終總資產：${U.formatNumber(totalValue)} 元\n` +
       `報酬率：${roi}%\n` +
       `已實現損益：${U.formatNumber(realizedTotal)} 元\n` +
-      `未實現損益：${U.formatNumber(holdingValue)} 元\n\n` +
+      `未實現總損益：${U.formatNumber(unrealTotal)} 元\n` +
+      `目前持股市值：${U.formatNumber(holdingValue)} 元\n\n` +
       `【策略優點】\n${good.join("；") || "無明顯優勢"}\n\n` +
       `【策略缺點】\n${bad.join("；") || "無重大缺失"}\n\n` +
       `【專業改善建議】\n${suggest.join("；")}`;
