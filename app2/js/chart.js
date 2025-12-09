@@ -1,8 +1,7 @@
 // js/chart.js
 // ==============================================
-// 盤感訓練專用 K 線 Chart Manager (最終整合版)
+// 盤感訓練專用 K 線 Chart Manager
 // ==============================================
-
 (function (global) {
   "use strict";
 
@@ -138,37 +137,11 @@
   }
 
   // ----------------------------------------
-  // 三圖同步捲動
-  // ----------------------------------------
-  function syncTime() {
-    const range = chart.timeScale().getVisibleRange();
-    if (!range) return;
-
-    volChart.timeScale().setVisibleRange(range);
-    indChart.timeScale().setVisibleRange(range);
-  }
-
-  // ----------------------------------------
-  // 自動右對齊
-  // ----------------------------------------
-  function scrollRight() {
-    chart.timeScale().scrollToPosition(-1, true);
-    setTimeout(syncTime, 20);
-  }
-
-  function scrollToRightAnimated() {
-    const ts = chart.timeScale();
-
-    // 等待 chart 完整渲染後再捲動 → 才能 100% 生效
-    requestAnimationFrame(() => {
-      ts.scrollToPosition(-1, true);  // -1 = 完全貼齊右側
-    });
-  }
-
-  // ----------------------------------------
   // 更新圖形
   // ----------------------------------------
   function update(shown, ind, opt) {
+    if (!shown || !shown.length) return;
+
     const closes = U.closesOf(shown);
 
     candle.setData(shown);
@@ -281,19 +254,23 @@
         { time: shown[W.p4.index].time, value: W.p4.price },
       ]);
 
-      const lastT = shown[shown.length - 1].time;
+      const lastT2 = shown[shown.length - 1].time;
       wNeck.setData([
         { time: shown[W.p1.index].time, value: W.neck },
-        { time: lastT, value: W.neck },
+        { time: lastT2, value: W.neck },
       ]);
     }
 
-//    scrollRight();
-    // ---- 讓每個子圖都同步到右側 ----
+    // ---- 讓三個圖都貼齊最新一根 K 棒（右側）並對齊範圍 ----
     requestAnimationFrame(() => {
-      chart.timeScale().scrollToPosition(-1, false);
-      volChart.timeScale().scrollToPosition(-1, false);
-      indChart.timeScale().scrollToPosition(-1, false);
+      const ts = chart.timeScale();
+      ts.scrollToPosition(-1, false);
+
+      const range = ts.getVisibleRange();
+      if (range) {
+        volChart.timeScale().setVisibleRange(range);
+        indChart.timeScale().setVisibleRange(range);
+      }
     });
   }
 
