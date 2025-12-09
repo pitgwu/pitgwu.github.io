@@ -1,7 +1,5 @@
 // js/chart.js
-// ==============================================
 // 盤感訓練專用 K 線 Chart Manager
-// ==============================================
 (function (global) {
   "use strict";
 
@@ -20,9 +18,6 @@
   let wLine1, wLine2, wNeck;
   let triUp, triLow;
 
-  // ----------------------------------------
-  // 固定式 Chart 設定（不可縮放 / 不可平移）
-  // ----------------------------------------
   function fixedChartConfig(el, height) {
     return LightweightCharts.createChart(el, {
       width: el.clientWidth,
@@ -42,7 +37,6 @@
         borderColor: "#ccc",
         timeVisible: true,
         barSpacing: 8,
-
         fixLeftEdge: true,
         fixRightEdge: true,
         rightBarStaysOnScroll: true,
@@ -65,9 +59,6 @@
     });
   }
 
-  // ----------------------------------------
-  // 主 Chart 初始化
-  // ----------------------------------------
   function initMain() {
     const el = document.getElementById("chart");
     chart = fixedChartConfig(el, 420);
@@ -105,13 +96,9 @@
     wNeck = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
   }
 
-  // ----------------------------------------
-  // Volume Chart
-  // ----------------------------------------
   function initVolume() {
     const el = document.getElementById("volume");
     volChart = fixedChartConfig(el, 100);
-
     volChart.timeScale().applyOptions({ visible:false });
 
     volSeries = volChart.addHistogramSeries({
@@ -120,13 +107,9 @@
     });
   }
 
-  // ----------------------------------------
-  // Indicator Chart
-  // ----------------------------------------
   function initIndicator() {
     const el = document.getElementById("indicator");
     indChart = fixedChartConfig(el, 150);
-
     indChart.timeScale().applyOptions({ visible:false });
 
     indL1 = indChart.addLineSeries({ color:"#1f77b4", lineWidth:2 });
@@ -136,9 +119,6 @@
     });
   }
 
-  // ----------------------------------------
-  // 更新圖形
-  // ----------------------------------------
   function update(shown, ind, opt) {
     if (!shown || !shown.length) return;
 
@@ -261,7 +241,7 @@
       ]);
     }
 
-    // ---- 讓三個圖都貼齊最新一根 K 棒（右側）並對齊範圍 ----
+    // ---- 三個圖一起貼齊最新一根 K 棒 ----
     requestAnimationFrame(() => {
       const ts = chart.timeScale();
       ts.scrollToPosition(-1, false);
