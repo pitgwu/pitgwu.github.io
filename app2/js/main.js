@@ -142,6 +142,12 @@
 
     // ✔ 固定欄位：已實現總損益
     U.el("realizedTotalBox").innerText = U.formatNumber(realizedTotal) + " 元";
+	
+	const unrealizedTotal =
+    lots.reduce((s, l) => s + (price - l.price) * l.qty, 0);
+
+    U.el("unrealizedTotalBox").innerText =
+      U.formatNumber(unrealizedTotal) + " 元";
   }
 
   // ---------------------------------------------------------
