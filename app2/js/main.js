@@ -241,7 +241,7 @@
     const qty = parseInt(U.el("shareInput").value, 10);
     if (!qty) return;
 
-    const price = data[currentIndex].close;
+    const price = data[currentIndex].close; // ★ 今日收盤價
     const cost = qty * price;
 
     if (cost > cash) return alert("現金不足");
@@ -252,8 +252,10 @@
     lots.push({ qty, price, date: data[currentIndex].time });
     trades.push({ type: "buy", qty, price, date: data[currentIndex].time });
 
-    nextDay();
+    // ★ 不再自動跳到下一天
+    updateDisplays();
   }
+
 
   // ---------------------------------------------------------
   // 賣出（FIFO 出場）
@@ -265,7 +267,7 @@
     if (!qty) return;
     if (qty > position) return alert("持股不足");
 
-    const price = data[currentIndex].close;
+    const price = data[currentIndex].close; // ★ 今日收盤價
 
     let remain = qty;
     let realized = 0;
@@ -273,8 +275,8 @@
     while (remain > 0 && lots.length) {
       const lot = lots[0];
       const use = Math.min(remain, lot.qty);
-
-      realized += (price - lot.price) * use;
+ 
+     realized += (price - lot.price) * use;
 
       lot.qty -= use;
       remain -= use;
@@ -298,8 +300,10 @@
       date: data[currentIndex].time
     });
 
-    nextDay();
+    // ★ 不再自動跳到下一天
+    updateDisplays();
   }
+
 
   // ---------------------------------------------------------
   // 不動作（進入下一天）
@@ -311,7 +315,9 @@
       type: "hold",
       date: data[currentIndex].time
     });
-    nextDay();
+
+    // ★ 不再自動跳到下一天
+    updateDisplays();
   }
 
   // ---------------------------------------------------------
