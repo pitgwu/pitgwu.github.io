@@ -1,50 +1,79 @@
 // js/chart.js
+// ==============================================
+// 盤感訓練專用 K 線 Chart Manager (最終整合版)
+// ==============================================
+
 (function (global) {
   "use strict";
 
   const U = global.Util;
 
-  let chart, candleSeries;
+  let chart, candle;
   let volChart, volSeries;
-  let indChart, line1, line2, histSeries;
+  let indChart, indL1, indL2, indHist;
 
-  let ma5Series, ma10Series, ma20Series;
-  let bbUpperSeries, bbMidSeries, bbLowerSeries;
+  let ma5, ma10, ma20;
+  let bbU, bbM, bbL;
 
   let resLine, supLine;
-  let trendLineUp, trendLineDown;
+  let trendUp, trendDn;
 
-  // W 底線
-  let wLine1, wLine2;
-  // 三角形
-  let triUpLine, triLowLine;
+  let wLine1, wLine2, wNeck;
+  let triUp, triLow;
 
-  // -----------------------------------------------------
-  function fixedCfg(el, height) {
+  // ----------------------------------------
+  // 固定式 Chart 設定（不可縮放 / 不可平移）
+  // ----------------------------------------
+  function fixedChartConfig(el, height) {
     return LightweightCharts.createChart(el, {
       width: el.clientWidth,
       height,
-      layout: { background: { color: "#fff" }, textColor: "#222" },
 
-      rightPriceScale: { borderColor: "#ccc", autoScale: true },
+      layout: {
+        background: { color: "#ffffff" },
+        textColor: "#222"
+      },
+
+      rightPriceScale: {
+        borderColor: "#ccc",
+        autoScale: true,
+      },
+
       timeScale: {
         borderColor: "#ccc",
         timeVisible: true,
         barSpacing: 8,
+
+        fixLeftEdge: true,
+        fixRightEdge: true,
         rightBarStaysOnScroll: true,
+
         scrollEnabled: false,
-        zoomEnabled: false
+        zoomEnabled: false,
+        shiftVisibleRangeOnResize: false,
+      },
+
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: false,
+      },
+
+      handleScale: {
+        mouseWheel: false,
+        axisPressedMouseMove: false,
+        pinch: false,
       },
     });
   }
 
-  // -----------------------------------------------------
-  // Init 主圖
-  // -----------------------------------------------------
-  function initMainChart() {
-    chart = fixedCfg(document.getElementById("chart"), 420);
+  // ----------------------------------------
+  // 主 Chart 初始化
+  // ----------------------------------------
+  function initMain() {
+    const el = document.getElementById("chart");
+    chart = fixedChartConfig(el, 420);
 
-    candleSeries = chart.addCandlestickSeries({
+    candle = chart.addCandlestickSeries({
       upColor: "#ff0000",
       downColor: "#00aa00",
       borderUpColor: "#ff0000",
@@ -55,208 +84,208 @@
 
     const noScale = () => ({ priceRange: null });
 
-    ma5Series  = chart.addLineSeries({ color:"#ff0000", autoscaleInfoProvider:noScale });
-    ma10Series = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider:noScale });
-    ma20Series = chart.addLineSeries({ color:"#0000ff", autoscaleInfoProvider:noScale });
+    ma5 = chart.addLineSeries({ color:"#f00", lineWidth:1, autoscaleInfoProvider:noScale });
+    ma10 = chart.addLineSeries({ color:"#0a0", lineWidth:1, autoscaleInfoProvider:noScale });
+    ma20 = chart.addLineSeries({ color:"#00f", lineWidth:1, autoscaleInfoProvider:noScale });
 
-    bbUpperSeries = chart.addLineSeries({ color:"#ffaa00", autoscaleInfoProvider:noScale });
-    bbMidSeries   = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider:noScale });
-    bbLowerSeries = chart.addLineSeries({ color:"#00aa00", autoscaleInfoProvider:noScale });
+    bbU = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider:noScale });
+    bbM = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider:noScale });
+    bbL = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider:noScale });
 
-    resLine = chart.addLineSeries({ color:"#ff4444", lineWidth:1 });
+    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
     supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1 });
 
-    trendLineUp   = chart.addLineSeries({ color:"#00aa88", lineWidth:2 });
-    trendLineDown = chart.addLineSeries({ color:"#aa0044", lineWidth:2 });
+    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2 });
+    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2 });
 
-    wLine1 = chart.addLineSeries({ color:"#aa33ff", lineWidth:2 });
-    wLine2 = chart.addLineSeries({ color:"#aa33ff", lineWidth:2 });
+    triUp = chart.addLineSeries({ color:"#aa6600", lineWidth:1 });
+    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1 });
 
-    triUpLine = chart.addLineSeries({ color:"#3333ff", lineWidth:2 });
-    triLowLine = chart.addLineSeries({ color:"#ff33aa", lineWidth:2 });
+    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
+    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
+    wNeck = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
   }
 
-  function initVolumeChart() {
-    volChart = fixedCfg(document.getElementById("volume"), 100);
-    volChart.applyOptions({ timeScale: { visible: false } });
+  // ----------------------------------------
+  // Volume Chart
+  // ----------------------------------------
+  function initVolume() {
+    const el = document.getElementById("volume");
+    volChart = fixedChartConfig(el, 100);
+
+    volChart.timeScale().applyOptions({ visible:false });
 
     volSeries = volChart.addHistogramSeries({
-      color: "#a3c4ff",
-      priceFormat: { type: "volume" },
+      color:"#a3c4ff",
+      priceFormat:{ type:"volume" },
     });
   }
 
-  function initIndicatorChart() {
-    indChart = fixedCfg(document.getElementById("indicator"), 150);
-    indChart.applyOptions({ timeScale: { visible: false } });
+  // ----------------------------------------
+  // Indicator Chart
+  // ----------------------------------------
+  function initIndicator() {
+    const el = document.getElementById("indicator");
+    indChart = fixedChartConfig(el, 150);
 
-    line1 = indChart.addLineSeries({ color:"#1f77b4", lineWidth:2 });
-    line2 = indChart.addLineSeries({ color:"#aa00aa", lineWidth:2 });
-    histSeries = indChart.addHistogramSeries({});
+    indChart.timeScale().applyOptions({ visible:false });
+
+    indL1 = indChart.addLineSeries({ color:"#1f77b4", lineWidth:2 });
+    indL2 = indChart.addLineSeries({ color:"#aa00aa", lineWidth:2 });
+    indHist = indChart.addHistogramSeries({
+      priceFormat:{ type:"volume" }
+    });
   }
 
-  // -----------------------------------------------------
-  // 右側自動貼齊
-  // -----------------------------------------------------
-  function scrollToRightAnimated() {
-    const ts = chart.timeScale();
-    ts.scrollToPosition(-1, true);
+  // ----------------------------------------
+  // 三圖同步捲動
+  // ----------------------------------------
+  function syncTime() {
+    const range = chart.timeScale().getVisibleRange();
+    if (!range) return;
+
+    volChart.timeScale().setVisibleRange(range);
+    indChart.timeScale().setVisibleRange(range);
   }
 
-  // -----------------------------------------------------
-  // 3 份圖同步對齊
-  // -----------------------------------------------------
-  function syncTimeScale() {
-    const mainTS = chart.timeScale();
-    const vis = mainTS.getVisibleRange();
-    if (!vis) return;
-
-    volChart.timeScale().setVisibleRange(vis);
-    indChart.timeScale().setVisibleRange(vis);
+  // ----------------------------------------
+  // 自動右對齊
+  // ----------------------------------------
+  function scrollRight() {
+    chart.timeScale().scrollToPosition(-1, true);
+    setTimeout(syncTime, 20);
   }
 
-  // -----------------------------------------------------
-  // 主更新
-  // -----------------------------------------------------
-  function update(shown, indicators, opt = {}) {
-
-    candleSeries.setData(shown);
-    volSeries.setData(shown.map(c => ({ time:c.time, value:c.volume })));
-
+  // ----------------------------------------
+  // 更新圖形
+  // ----------------------------------------
+  function update(shown, ind, opt) {
     const closes = U.closesOf(shown);
 
-    // ================= MA =================
+    candle.setData(shown);
+    volSeries.setData(shown.map(c => ({ time:c.time, value:c.volume })));
+
+    // MA
     if (opt.showMA) {
-      const ma5 = U.sma(closes,5);
-      const ma10 = U.sma(closes,10);
-      const ma20 = U.sma(closes,20);
+      const m5 = U.sma(closes,5);
+      const m10 = U.sma(closes,10);
+      const m20 = U.sma(closes,20);
 
-      ma5Series.setData(shown.map((c,i)=>({time:c.time,value:ma5[i]})));
-      ma10Series.setData(shown.map((c,i)=>({time:c.time,value:ma10[i]})));
-      ma20Series.setData(shown.map((c,i)=>({time:c.time,value:ma20[i]})));
+      ma5.setData(shown.map((c,i)=>({time:c.time,value:m5[i]})));
+      ma10.setData(shown.map((c,i)=>({time:c.time,value:m10[i]})));
+      ma20.setData(shown.map((c,i)=>({time:c.time,value:m20[i]})));
     } else {
-      // MA OFF → 清全部
-      ma5Series.setData([]);
-      ma10Series.setData([]);
-      ma20Series.setData([]);
-
-      trendLineUp.setData([]);
-      trendLineDown.setData([]);
-      wLine1.setData([]);
-      wLine2.setData([]);
-      triUpLine.setData([]);
-      triLowLine.setData([]);
+      ma5.setData([]); ma10.setData([]); ma20.setData([]);
     }
 
-    // ================= BB =================
+    // Bollinger
     if (opt.showBB) {
-      bbUpperSeries.setData(shown.map((c,i)=>({ time:c.time, value:indicators.BB.upper[i] })));
-      bbMidSeries.setData(shown.map((c,i)=>({ time:c.time, value:indicators.BB.mid[i] })));
-      bbLowerSeries.setData(shown.map((c,i)=>({ time:c.time, value:indicators.BB.lower[i] })));
+      bbU.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.upper[i]})));
+      bbM.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.mid[i]})));
+      bbL.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.lower[i]})));
     } else {
-      bbUpperSeries.setData([]);
-      bbMidSeries.setData([]);
-      bbLowerSeries.setData([]);
+      bbU.setData([]); bbM.setData([]); bbL.setData([]);
     }
 
-    // ================= 指標 (KD, RSI, MACD) =================
-    switch (opt.indicatorType) {
-      case "kd":
-        line1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
-        line2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
-        histSeries.setData([]);
-        break;
-      case "rsi":
-        line1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
-        line2.setData([]);
-        histSeries.setData([]);
-        break;
-      case "macd":
-        line1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
-        line2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
-        histSeries.setData(shown.map((c,i)=>({
-          time:c.time,
-          value: indicators.MACDHist[i],
-          color: indicators.MACDHist[i]>=0 ? "#26a69a" : "#ff6b6b"
-        })));
-        break;
+    // KD / RSI / MACD
+    indL1.setData([]); indL2.setData([]); indHist.setData([]);
+
+    if (opt.indicatorType === "kd") {
+      indL1.setData(shown.map((c,i)=>({time:c.time,value:ind.K[i]})));
+      indL2.setData(shown.map((c,i)=>({time:c.time,value:ind.D[i]})));
+    }
+    else if (opt.indicatorType === "rsi") {
+      indL1.setData(shown.map((c,i)=>({time:c.time,value:ind.RSI[i]})));
+    }
+    else if (opt.indicatorType === "macd") {
+      indL1.setData(shown.map((c,i)=>({time:c.time,value:ind.MACD[i]})));
+      indL2.setData(shown.map((c,i)=>({time:c.time,value:ind.MACDSignal[i]})));
+      indHist.setData(shown.map((c,i)=>({
+        time:c.time,
+        value:ind.MACDHist[i],
+        color: ind.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
+      })));
     }
 
-    // ================= 支撐壓力 =================
-    const lines = global.SupportResistance.findLines(shown, 20);
-    const last = shown[shown.length-1].time;
+    // 支撐壓力
+    const SR = global.SupportResistance.findLines(shown, 20);
+    const lastT = shown[shown.length - 1].time;
 
-    resLine.setData(lines[0]?[{time:last,value:lines[0].price}]:[]);
-    supLine.setData(lines[1]?[{time:last,value:lines[1].price}]:[]);
+    resLine.setData(SR[0] ? [{ time:lastT, value:SR[0].price }] : []);
+    supLine.setData(SR[1] ? [{ time:lastT, value:SR[1].price }] : []);
 
-    // ================= 趨勢線 =================
-    trendLineUp.setData([]);
-    trendLineDown.setData([]);
+    // 趨勢線
+    trendUp.setData([]);
+    trendDn.setData([]);
 
-    if (opt.trendlines && opt.showMA) {
-      const up = opt.trendlines.upLines;
-      const down = opt.trendlines.downLines;
+    if (opt.showMA && opt.trendlines) {
+      const { upLines, downLines } = opt.trendlines;
 
-      if (up?.length) {
-        const u = up[up.length-1];
-        trendLineUp.setData([
-          {time: shown[u.p1.index].time, value: u.p1.price},
-          {time: shown[u.p2.index].time, value: u.p2.price},
+      if (upLines?.length) {
+        const u = upLines[upLines.length - 1];
+        trendUp.setData([
+          { time: shown[u.p1.index].time, value: u.p1.price },
+          { time: shown[u.p2.index].time, value: u.p2.price },
         ]);
       }
-      if (down?.length) {
-        const d = down[down.length-1];
-        trendLineDown.setData([
-          {time: shown[d.p1.index].time, value: d.p1.price},
-          {time: shown[d.p2.index].time, value: d.p2.price},
+
+      if (downLines?.length) {
+        const d = downLines[downLines.length - 1];
+        trendDn.setData([
+          { time: shown[d.p1.index].time, value: d.p1.price },
+          { time: shown[d.p2.index].time, value: d.p2.price },
         ]);
       }
     }
 
-    // ================= W 底畫線 =================
+    // 三角收斂
+    triUp.setData([]);
+    triLow.setData([]);
+
+    if (opt.showMA && opt.triangle) {
+      const T = opt.triangle;
+      triUp.setData([
+        { time: shown[T.upperLine.p1.index].time, value: T.upperLine.p1.price },
+        { time: shown[T.upperLine.p2.index].time, value: T.upperLine.p2.price },
+      ]);
+      triLow.setData([
+        { time: shown[T.lowerLine.p1.index].time, value: T.lowerLine.p1.price },
+        { time: shown[T.lowerLine.p2.index].time, value: T.lowerLine.p2.price },
+      ]);
+    }
+
+    // W 底
     wLine1.setData([]);
     wLine2.setData([]);
-    if (opt.wPattern && opt.showMA) {
-      const w = opt.wPattern;
+    wNeck.setData([]);
+
+    if (opt.showMA && opt.wPattern) {
+      const W = opt.wPattern;
 
       wLine1.setData([
-        {time: shown[w.p1.index].time, value: w.p1.price},
-        {time: shown[w.p2.index].time, value: w.p2.price},
+        { time: shown[W.p1.index].time, value: W.p1.price },
+        { time: shown[W.p2.index].time, value: W.p2.price },
       ]);
+
       wLine2.setData([
-        {time: shown[w.p3.index].time, value: w.p3.price},
-        {time: shown[w.p4.index].time, value: w.p4.price},
+        { time: shown[W.p3.index].time, value: W.p3.price },
+        { time: shown[W.p4.index].time, value: W.p4.price },
+      ]);
+
+      const lastT = shown[shown.length - 1].time;
+      wNeck.setData([
+        { time: shown[W.p1.index].time, value: W.neck },
+        { time: lastT, value: W.neck },
       ]);
     }
 
-    // ================= 三角收斂 =================
-    triUpLine.setData([]);
-    triLowLine.setData([]);
-    if (opt.triangle && opt.showMA) {
-      const t = opt.triangle;
-
-      triUpLine.setData([
-        {time: shown[t.upperLine.p1.index].time, value: t.upperLine.p1.price},
-        {time: shown[t.upperLine.p2.index].time, value: t.upperLine.p2.price}
-      ]);
-
-      triLowLine.setData([
-        {time: shown[t.lowerLine.p1.index].time, value: t.lowerLine.p1.price},
-        {time: shown[t.lowerLine.p2.index].time, value: t.lowerLine.p2.price}
-      ]);
-    }
-
-    // === 動畫推到右側（主圖） ===
-    scrollToRightAnimated();
-
-    // === 等主圖動畫結束後 → 三份圖同步對齊 ===
-    setTimeout(syncTimeScale, 30);
+    scrollRight();
   }
 
   function init() {
-    initMainChart();
-    initVolumeChart();
-    initIndicatorChart();
+    initMain();
+    initVolume();
+    initIndicator();
   }
 
   global.ChartManager = { init, update };
