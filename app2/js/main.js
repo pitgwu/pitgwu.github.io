@@ -79,7 +79,8 @@
         // 一開始顯示最後一根 K 棒（例如 2025-01-01）
         currentIndex = data.length - 1;
 
-        U.el("initialCash").innerText = U.formatNumber(INITIAL_CASH);
+        if (U.el("initialCash"))
+          U.el("initialCash").innerText = INITIAL_CASH.toLocaleString();
         U.el("stockName").innerText = `目前個股：${stock}`;
 
         indicators = Indicators.computeAll(data);
