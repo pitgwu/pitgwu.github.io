@@ -1,4 +1,5 @@
 // js/chart.js
+// 盤感訓練專用 K 線 Chart Manager
 (function (global) {
   "use strict";
 
@@ -29,21 +30,32 @@
 
       rightPriceScale: {
         borderColor: "#ccc",
-        autoScale: true
+        autoScale: true,
       },
 
       timeScale: {
         borderColor: "#ccc",
         timeVisible: true,
         barSpacing: 8,
-        scrollEnabled: false,
-        zoomEnabled: false,
         fixLeftEdge: true,
         fixRightEdge: true,
+        rightBarStaysOnScroll: true,
+
+        scrollEnabled: false,
+        zoomEnabled: false,
+        shiftVisibleRangeOnResize: false,
       },
 
-      handleScroll: { mouseWheel: false, pressedMouseMove: false },
-      handleScale: { mouseWheel: false, axisPressedMouseMove: false, pinch: false }
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: false,
+      },
+
+      handleScale: {
+        mouseWheel: false,
+        axisPressedMouseMove: false,
+        pinch: false,
+      },
     });
   }
 
@@ -91,7 +103,7 @@
 
     volSeries = volChart.addHistogramSeries({
       color:"#a3c4ff",
-      priceFormat:{ type:"volume" }
+      priceFormat:{ type:"volume" },
     });
   }
 
@@ -102,14 +114,17 @@
 
     indL1 = indChart.addLineSeries({ color:"#1f77b4", lineWidth:2 });
     indL2 = indChart.addLineSeries({ color:"#aa00aa", lineWidth:2 });
-    indHist = indChart.addHistogramSeries({ priceFormat:{ type:"volume" } });
+    indHist = indChart.addHistogramSeries({
+      priceFormat:{ type:"volume" }
+    });
   }
 
   function update(shown, ind, opt) {
-    if (!shown.length) return;
+    if (!shown || !shown.length) return;
 
     const closes = U.closesOf(shown);
 
+    // K 線 & 成交量
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time:c.time, value:c.volume })));
 
@@ -126,7 +141,7 @@
       ma5.setData([]); ma10.setData([]); ma20.setData([]);
     }
 
-    // BB
+    // Bollinger
     if (opt.showBB) {
       bbU.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.upper[i]})));
       bbM.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.mid[i]})));
@@ -136,9 +151,7 @@
     }
 
     // KD / RSI / MACD
-    indL1.setData([]);
-    indL2.setData([]);
-    indHist.setData([]);
+    indL1.setData([]); indL2.setData([]); indHist.setData([]);
 
     if (opt.indicatorType === "kd") {
       indL1.setData(shown.map((c,i)=>({time:c.time,value:ind.K[i]})));
@@ -170,6 +183,7 @@
 
     if (opt.showMA && opt.trendlines) {
       const { upLines, downLines } = opt.trendlines;
+
       if (upLines?.length) {
         const u = upLines[upLines.length - 1];
         trendUp.setData([
@@ -177,6 +191,7 @@
           { time: shown[u.p2.index].time, value: u.p2.price },
         ]);
       }
+
       if (downLines?.length) {
         const d = downLines[downLines.length - 1];
         trendDn.setData([
@@ -194,11 +209,11 @@
       const T = opt.triangle;
       triUp.setData([
         { time: shown[T.upperLine.p1.index].time, value: T.upperLine.p1.price },
-        { time: shown[T.upperLine.p2.index].time, value: T.upperLine.p2.price }
+        { time: shown[T.upperLine.p2.index].time, value: T.upperLine.p2.price },
       ]);
       triLow.setData([
         { time: shown[T.lowerLine.p1.index].time, value: T.lowerLine.p1.price },
-        { time: shown[T.lowerLine.p2.index].time, value: T.lowerLine.p2.price }
+        { time: shown[T.lowerLine.p2.index].time, value: T.lowerLine.p2.price },
       ]);
     }
 
@@ -209,19 +224,30 @@
 
     if (opt.showMA && opt.wPattern) {
       const W = opt.wPattern;
+
       wLine1.setData([
         { time: shown[W.p1.index].time, value: W.p1.price },
-        { time: shown[W.p2.index].time, value: W.p2.price }
+        { time: shown[W.p2.index].time, value: W.p2.price },
       ]);
+
       wLine2.setData([
         { time: shown[W.p3.index].time, value: W.p3.price },
-        { time: shown[W.p4.index].time, value: W.p4.price }
+        { time: shown[W.p4.index].time, value: W.p4.price },
       ]);
+
+      const lastT2 = shown[shown.length - 1].time;
       wNeck.setData([
         { time: shown[W.p1.index].time, value: W.neck },
-        { time: shown[shown.length - 1].time, value: W.neck }
+        { time: lastT2, value: W.neck },
       ]);
     }
+
+    // ✅ 每次更新後，三張圖一起貼齊右側
+    requestAnimationFrame(() => {
+      chart.timeScale().scrollToPosition(-1, false);
+      volChart.timeScale().scrollToPosition(-1, false);
+      indChart.timeScale().scrollToPosition(-1, false);
+    });
   }
 
   function init() {
