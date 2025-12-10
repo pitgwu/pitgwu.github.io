@@ -12,20 +12,23 @@
 
   const INITIAL_CASH = 5000000;
 
+  // ★ 模擬正式開始日期（從這天起做決策）
+  const START_DATE = "2025-01-02";
+
   let data = [];
-  // currentIndex = 目前所在 K 棒 index（0-based）
+  // currentIndex = 目前所在 K 棒的索引（0-based, 對應 data[index]）
   let currentIndex = 0;
 
   let cash = INITIAL_CASH;
-  let position = 0;        // 總持股
-  let lots = [];           // 分批持倉 [{qty, price, date}]
-  let trades = [];         // 交易紀錄
-  let realizedList = [];   // 每次賣出已實現損益紀錄 [{qty, realized, date}]
+  let position = 0;
+  let lots = [];
+  let trades = [];
+  let realizedList = [];
 
   let indicators = null;
   let allSignals = null;
 
-  // MA / 多空訊號預設 OFF
+  // MA / 訊號預設 OFF
   let signalVisible = false;
   let maVisible = false;
 
@@ -62,7 +65,7 @@
           .map(l => {
             const c = l.split(",");
             return {
-              time: c[0],           // YYYY-MM-DD
+              time: c[0],              // YYYY-MM-DD
               open: +c[1],
               high: +c[2],
               low: +c[3],
@@ -76,16 +79,22 @@
           return;
         }
 
-        // ✅ 一開始不要從最前面，而是讓畫面有一小段歷史可以看
-        const SHOW_WINDOW = 20;
-        currentIndex = Math.max(SHOW_WINDOW - 1, data.length - 1);
+        // ★ 尋找第一筆 time >= START_DATE，當作模擬起始點
+        let startIndex = data.findIndex(d => d.time >= START_DATE);
+        if (startIndex === -1) {
+          // 若沒有 >= START_DATE，就用最後一天
+          startIndex = data.length - 1;
+        }
+        currentIndex = startIndex;
 
+        // 顯示初始資金與股票代號
         if (U.el("initialCash"))
           U.el("initialCash").innerText = INITIAL_CASH.toLocaleString();
 
-        if (U.el("stockName")) {
-          U.el("stockName").style.display = "block";
-          U.el("stockName").innerText = `目前個股：${stock}`;
+        const sn = U.el("stockName");
+        if (sn) {
+          sn.style.display = "block";
+          sn.innerText = `目前個股：${stock}`;
         }
 
         indicators = Indicators.computeAll(data);
@@ -109,13 +118,11 @@
   function updateDisplays() {
     if (!data.length) return;
 
-    // ✅ currentIndex = 當下這根 K 棒
+    // ★ 顯示從第 0 根 ~ currentIndex 的所有 K 棒（右側對齊）
     const shown = data.slice(0, currentIndex + 1);
     const indType = U.el("indicatorSelect").value;
 
-    // -----------------------------
     // 型態偵測
-    // -----------------------------
     const tline = Trend.findTrendlines(shown);
     const w = WM.isWBottom(shown);
     const m = WM.isMTop(shown);
@@ -129,9 +136,7 @@
     U.el("kPattern").innerText =
       parts.length ? pat + parts.join(" / ") : pat + "尚無明顯型態";
 
-    // -----------------------------
-    // 多空訊號
-    // -----------------------------
+    // 多空訊號（對應 currentIndex 當天）
     if (signalVisible) {
       const sigArr = allSignals[currentIndex] || [];
       const txt = sigArr
@@ -142,9 +147,7 @@
       U.el("signalBox").innerText = "多空訊號：OFF";
     }
 
-    // -----------------------------
-    // 更新圖表
-    // -----------------------------
+    // 更新 K 線 / 成交量 / 指標
     Chart.update(shown, indicators, {
       showMA: maVisible,
       showBB: indType === "bb",
@@ -233,21 +236,7 @@
   }
 
   // ---------------------------------------------------
-  // 共用：往下一天（不做任何交易）
-  // ---------------------------------------------------
-  function goNextDay() {
-    if (!data.length) return;
-
-    if (currentIndex < data.length - 1) {
-      currentIndex++;
-      updateDisplays();
-    } else {
-      checkGameEnd();
-    }
-  }
-
-  // ---------------------------------------------------
-  // 買進（✅ 用「當天」收盤價 + 日期，然後才前進到下一天）
+  // 買進（使用當日收盤價，紀錄當日日期，然後跳到下一天）
   // ---------------------------------------------------
   function doBuy() {
     if (!data.length) return;
@@ -255,8 +244,8 @@
     const qty = parseInt(U.el("shareInput").value, 10);
     if (!qty) return;
 
-    const bar = data[currentIndex];   // 當下這根 K 棒
-    const price = bar.close;
+    const today = data[currentIndex];
+    const price = today.close;
     const cost = qty * price;
 
     if (cost > cash) return alert("現金不足");
@@ -264,15 +253,14 @@
     cash -= cost;
     position += qty;
 
-    lots.push({ qty, price, date: bar.time });
-    trades.push({ type: "buy", qty, price, date: bar.time });
+    lots.push({ qty, price, date: today.time });
+    trades.push({ type: "buy", qty, price, date: today.time });
 
-    // ✅ 交易紀錄時間 = 當下 K 棒時間，之後再往右推進 1 天
-    goNextDay();
+    nextDay(); // ✅ 使用當日價成交後，再移到下一天
   }
 
   // ---------------------------------------------------
-  // 賣出（FIFO，✅ 用「當天」收盤價）
+  // 賣出（FIFO，使用當日收盤價，然後跳到下一天）
   // ---------------------------------------------------
   function doSell() {
     if (!data.length) return;
@@ -281,8 +269,8 @@
     if (!qty) return;
     if (qty > position) return alert("持股不足");
 
-    const bar = data[currentIndex];
-    const price = bar.close;
+    const today = data[currentIndex];
+    const price = today.close;
 
     let remain = qty;
     let realized = 0;
@@ -305,40 +293,46 @@
     realizedList.push({
       qty,
       realized,
-      date: bar.time
+      date: today.time
     });
 
     trades.push({
       type: "sell",
       qty,
       price,
-      date: bar.time
+      date: today.time
     });
 
-    goNextDay();
+    nextDay(); // ✅ 成交後往右推一天
   }
 
   // ---------------------------------------------------
-  // 不動作（當日記一筆 hold，再往右推一天）
+  // 不動作（記錄當日 hold，然後跳到下一天）
   // ---------------------------------------------------
   function doHold() {
     if (!data.length) return;
 
-    const bar = data[currentIndex];
-
+    const today = data[currentIndex];
     trades.push({
       type: "hold",
-      date: bar.time
+      date: today.time
     });
 
-    goNextDay();
+    nextDay();
   }
 
   // ---------------------------------------------------
-  // 手動前一天 / 下一天（下一天不記錄交易）
+  // 前一天 / 下一天
   // ---------------------------------------------------
   function nextDay() {
-    goNextDay();
+    if (!data.length) return;
+
+    if (currentIndex < data.length - 1) {
+      currentIndex++;
+      updateDisplays();
+    } else {
+      checkGameEnd();
+    }
   }
 
   function prevDay() {
@@ -355,7 +349,6 @@
   function checkGameEnd() {
     if (!data.length) return;
 
-    // 保證在最後一天
     currentIndex = data.length - 1;
     updateDisplays();
 
@@ -381,34 +374,34 @@
     if (roi >= 12)
       good.push("整體報酬率顯著優於大盤，策略具備明確正期望值");
     else if (roi >= 0)
-      good.push("能有效控制回撤，資金曲線維持在相對穩定區間");
+      good.push("能有效控制回撤，整體資金曲線維持穩定");
     else
-      bad.push("回撤幅度過大，進出場規則與風險控管需重新檢視");
+      bad.push("回撤過深，進出場規則與停損機制需重新檢視");
 
     if (realizedTotal > 0)
-      good.push("已實現損益為正，出場節奏與停利策略相對健康");
+      good.push("已實現損益為正，出場節奏與獲利了結相對合理");
     else
-      bad.push("虧損單處置不夠果斷，拖累整體績效表現");
+      bad.push("部分虧損單未及時處理，拖累整體績效");
 
     const tradeCount = trades.filter(t => t.type !== "hold").length;
 
     if (tradeCount > 20)
-      bad.push("交易頻率偏高，可能過度反應短期雜訊，增加手續費與決策壓力");
+      bad.push("交易頻率偏高，可能過度反應短線雜訊");
     if (tradeCount < 4)
-      bad.push("進場次數偏少，可能錯失關鍵波段與明顯機會");
+      bad.push("進場次數偏少，可能錯過多次關鍵波段行情");
 
     if (lots.length > 0)
-      bad.push("結束時仍有未平倉部位，顯示有『凹單』或過度抱股的風險");
+      bad.push("結束時仍有持倉，存在『凹單』或持股過久的風險");
 
     if (realizedTotal <= 0)
-      suggest.push("建立明確且可量化的停損機制（例如固定百分比或 ATR），避免單筆虧損過大");
+      suggest.push("建立明確停損機制（例如固定% 或 ATR），避免單筆虧損過度放大");
     if (tradeCount > 18)
-      suggest.push("適度降低交易頻率，聚焦於高勝率、高盈虧比的型態與價量結構");
+      suggest.push("降低交易次數，聚焦於高勝率、高盈虧比的型態與價量結構");
     if (lots.length > 0)
-      suggest.push("避免習慣性凹單，可規劃分批出場、移動停利與風險上限控制");
+      suggest.push("避免習慣性凹單，可規劃分批出場與移動停利策略");
 
     if (!suggest.length)
-      suggest.push("策略架構整體健康，可進一步優化加碼邏輯與獲利了結的分段目標");
+      suggest.push("策略架構大致健康，可進一步優化加碼規則與獲利目標設定");
 
     const summary =
       `🎉【模擬交易結束】\n` +
@@ -422,7 +415,8 @@
       `【專業改善建議】\n${suggest.join("；")}`;
 
     U.el("feedback").innerText = summary;
-    U.el("stockName").innerText = `模擬結束，本次個股：${stock}`;
+    const sn = U.el("stockName");
+    if (sn) sn.innerText = `模擬結束，本次個股：${stock}`;
 
     alert(`模擬結束（${stock}）\n報酬率：${roi}%`);
   }

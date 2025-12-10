@@ -124,7 +124,6 @@
 
     const closes = U.closesOf(shown);
 
-    // K 線 & 成交量
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time:c.time, value:c.volume })));
 
@@ -242,7 +241,7 @@
       ]);
     }
 
-    // ✅ 每次更新後，三張圖一起貼齊右側
+    // ★ 每次更新都貼齊右側（含三張圖）
     requestAnimationFrame(() => {
       chart.timeScale().scrollToPosition(-1, false);
       volChart.timeScale().scrollToPosition(-1, false);
