@@ -12,12 +12,12 @@
 
   const INITIAL_CASH = 5000000;
 
-  // ★ 模擬正式開始日期（從這天起做決策）
+  // ★ 模擬開始日期：只從這一天開始出現 K 線 & 交易
   const START_DATE = "2025-01-02";
 
   let data = [];
-  // currentIndex = 目前所在 K 棒的索引（0-based, 對應 data[index]）
-  let currentIndex = 0;
+  let currentIndex = 0;     // 目前所在「全資料」的 index
+  let gameStartIndex = 0;   // 模擬起始 index（對應 START_DATE）
 
   let cash = INITIAL_CASH;
   let position = 0;
@@ -65,7 +65,7 @@
           .map(l => {
             const c = l.split(",");
             return {
-              time: c[0],              // YYYY-MM-DD
+              time: c[0].trim(), // YYYY-MM-DD
               open: +c[1],
               high: +c[2],
               low: +c[3],
@@ -79,22 +79,26 @@
           return;
         }
 
-        // ★ 尋找第一筆 time >= START_DATE，當作模擬起始點
-        let startIndex = data.findIndex(d => d.time >= START_DATE);
-        if (startIndex === -1) {
-          // 若沒有 >= START_DATE，就用最後一天
-          startIndex = data.length - 1;
-        }
+        // ★ 尋找 START_DATE 的 index（先找 ==，沒有再找 >）
+        let idxEq = data.findIndex(d => d.time === START_DATE);
+        let idxGt = data.findIndex(d => d.time > START_DATE);
+        let startIndex;
+        if (idxEq !== -1) startIndex = idxEq;
+        else if (idxGt !== -1) startIndex = idxGt;
+        else startIndex = data.length - 1;  // 萬一沒有 2025 年，就用最後一天
+
+        gameStartIndex = startIndex;
         currentIndex = startIndex;
 
-        // 顯示初始資金與股票代號
+        // 初始資金
         if (U.el("initialCash"))
           U.el("initialCash").innerText = INITIAL_CASH.toLocaleString();
 
+        // ★ 一開始隱藏個股代號，直到遊戲結束才公布
         const sn = U.el("stockName");
         if (sn) {
-          sn.style.display = "block";
-          sn.innerText = `目前個股：${stock}`;
+          sn.style.display = "none";
+          sn.innerText = "模擬進行中..."; // 先放保留字
         }
 
         indicators = Indicators.computeAll(data);
@@ -118,11 +122,11 @@
   function updateDisplays() {
     if (!data.length) return;
 
-    // ★ 顯示從第 0 根 ~ currentIndex 的所有 K 棒（右側對齊）
-    const shown = data.slice(0, currentIndex + 1);
+    // ★ 只顯示從 START_DATE 對應的 gameStartIndex 開始的 K 棒
+    const shown = data.slice(gameStartIndex, currentIndex + 1);
     const indType = U.el("indicatorSelect").value;
 
-    // 型態偵測
+    // 型態偵測（用顯示中的子區間 shown）
     const tline = Trend.findTrendlines(shown);
     const w = WM.isWBottom(shown);
     const m = WM.isMTop(shown);
@@ -136,7 +140,7 @@
     U.el("kPattern").innerText =
       parts.length ? pat + parts.join(" / ") : pat + "尚無明顯型態";
 
-    // 多空訊號（對應 currentIndex 當天）
+    // 多空訊號：用「全局 index」的 currentIndex
     if (signalVisible) {
       const sigArr = allSignals[currentIndex] || [];
       const txt = sigArr
@@ -236,7 +240,7 @@
   }
 
   // ---------------------------------------------------
-  // 買進（使用當日收盤價，紀錄當日日期，然後跳到下一天）
+  // 買進（當日價成交 → 記錄當日日期 → 往右一天）
   // ---------------------------------------------------
   function doBuy() {
     if (!data.length) return;
@@ -256,11 +260,12 @@
     lots.push({ qty, price, date: today.time });
     trades.push({ type: "buy", qty, price, date: today.time });
 
-    nextDay(); // ✅ 使用當日價成交後，再移到下一天
+    // ★ 用今天的價錢成交完，才往右移一天
+    nextDay();
   }
 
   // ---------------------------------------------------
-  // 賣出（FIFO，使用當日收盤價，然後跳到下一天）
+  // 賣出（FIFO，當日價成交 → 往右一天）
   // ---------------------------------------------------
   function doSell() {
     if (!data.length) return;
@@ -303,11 +308,11 @@
       date: today.time
     });
 
-    nextDay(); // ✅ 成交後往右推一天
+    nextDay();
   }
 
   // ---------------------------------------------------
-  // 不動作（記錄當日 hold，然後跳到下一天）
+  // 不動作（記錄當日 hold → 往右一天）
   // ---------------------------------------------------
   function doHold() {
     if (!data.length) return;
@@ -337,14 +342,15 @@
 
   function prevDay() {
     if (!data.length) return;
-    if (currentIndex > 0) {
+    // ★ 不允許退到 START_DATE 之前
+    if (currentIndex > gameStartIndex) {
       currentIndex--;
       updateDisplays();
     }
   }
 
   // ---------------------------------------------------
-  // 遊戲結束：專業總結
+  // 遊戲結束：專業總結 + 公布個股號碼
   // ---------------------------------------------------
   function checkGameEnd() {
     if (!data.length) return;
@@ -415,8 +421,12 @@
       `【專業改善建議】\n${suggest.join("；")}`;
 
     U.el("feedback").innerText = summary;
+
     const sn = U.el("stockName");
-    if (sn) sn.innerText = `模擬結束，本次個股：${stock}`;
+    if (sn) {
+      sn.style.display = "block";
+      sn.innerText = `模擬結束，本次個股：${stock}`;
+    }
 
     alert(`模擬結束（${stock}）\n報酬率：${roi}%`);
   }

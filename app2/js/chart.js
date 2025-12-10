@@ -74,26 +74,26 @@
 
     const noScale = () => ({ priceRange: null });
 
-    ma5 = chart.addLineSeries({ color:"#f00", lineWidth:1, autoscaleInfoProvider:noScale });
-    ma10 = chart.addLineSeries({ color:"#0a0", lineWidth:1, autoscaleInfoProvider:noScale });
-    ma20 = chart.addLineSeries({ color:"#00f", lineWidth:1, autoscaleInfoProvider:noScale });
+    ma5  = chart.addLineSeries({ color:"#f00",    lineWidth:1, autoscaleInfoProvider:noScale });
+    ma10 = chart.addLineSeries({ color:"#0a0",    lineWidth:1, autoscaleInfoProvider:noScale });
+    ma20 = chart.addLineSeries({ color:"#00f",    lineWidth:1, autoscaleInfoProvider:noScale });
 
-    bbU = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider:noScale });
-    bbM = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider:noScale });
-    bbL = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider:noScale });
+    bbU  = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider:noScale });
+    bbM  = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider:noScale });
+    bbL  = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider:noScale });
 
-    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
-    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1 });
+    resLine  = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
+    supLine  = chart.addLineSeries({ color:"#44aa44", lineWidth:1 });
 
-    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2 });
-    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2 });
+    trendUp  = chart.addLineSeries({ color:"#00aa88", lineWidth:2 });
+    trendDn  = chart.addLineSeries({ color:"#aa0044", lineWidth:2 });
 
-    triUp = chart.addLineSeries({ color:"#aa6600", lineWidth:1 });
-    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1 });
+    triUp    = chart.addLineSeries({ color:"#aa6600", lineWidth:1 });
+    triLow   = chart.addLineSeries({ color:"#5588ff", lineWidth:1 });
 
-    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
-    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
-    wNeck = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
+    wLine1   = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
+    wLine2   = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
+    wNeck    = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
   }
 
   function initVolume() {
@@ -129,11 +129,11 @@
 
     // MA
     if (opt.showMA) {
-      const m5 = U.sma(closes,5);
+      const m5  = U.sma(closes,5);
       const m10 = U.sma(closes,10);
       const m20 = U.sma(closes,20);
 
-      ma5.setData(shown.map((c,i)=>({time:c.time,value:m5[i]})));
+      ma5.setData (shown.map((c,i)=>({time:c.time,value:m5[i]})));
       ma10.setData(shown.map((c,i)=>({time:c.time,value:m10[i]})));
       ma20.setData(shown.map((c,i)=>({time:c.time,value:m20[i]})));
     } else {
