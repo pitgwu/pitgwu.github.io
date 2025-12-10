@@ -13,13 +13,14 @@
   const INITIAL_CASH = 5000000;
 
   let data = [];
+  // currentIndex = 目前所在 K 棒 index（0-based）
   let currentIndex = 0;
 
   let cash = INITIAL_CASH;
   let position = 0;
-  let lots = [];
-  let trades = [];
-  let realizedList = [];
+  let lots = [];        // { qty, price, date }
+  let trades = [];      // { type, qty, price, date }
+  let realizedList = []; // { qty, realized, date }
 
   let indicators = null;
   let allSignals = null;
@@ -28,7 +29,7 @@
   let maVisible = false;
 
   // ----------------------------------------------------
-  // 計算未實現損益
+  // 工具：計算未實現總損益
   // ----------------------------------------------------
   function calcUnrealTotal(price) {
     return lots.reduce((sum, lot) => {
@@ -75,11 +76,11 @@
           return;
         }
 
-        // ✔ 找到第一筆 >= 2025 的資料
+        // ✔ 一開始就定位在第一根 >= 2025-01-01 的 K 棒
         const startIdx = data.findIndex(d => d.time >= "2025-01-01");
         currentIndex = startIdx >= 0 ? startIdx : data.length - 1;
 
-        // 顯示個股
+        // 顯示初始狀態
         U.el("initialCash").innerText = INITIAL_CASH.toLocaleString();
         U.el("stockName").innerText = `目前個股：${stock}`;
 
@@ -93,6 +94,7 @@
       })
       .catch(e => {
         alert("讀取 CSV 失敗：" + e.message);
+        console.error(e);
       });
   }
 
@@ -103,48 +105,43 @@
     if (!data.length) return;
 
     const indType = U.el("indicatorSelect").value;
-    const shownCount = currentIndex + 1;
 
-    // 型態偵測必須用到 "目前顯示區間"
-    const partial = data.slice(0, shownCount);
+    // 目前顯示區間（含 currentIndex）
+    const shown = data.slice(0, currentIndex + 1);
 
-    const tline = Trend.findTrendlines(partial);
-    const w = WM.isWBottom(partial);
-    const m = WM.isMTop(partial);
-    const tri = TRI.detectTriangle(partial);
+    // ---- 型態偵測（用 shown）----
+    const tline = Trend.findTrendlines(shown);
+    const w = WM.isWBottom(shown);
+    const m = WM.isMTop(shown);
+    const tri = TRI.detectTriangle(shown);
 
-    let txt = "即時型態偵測：";
+    let pat = "即時型態偵測：";
     const parts = [];
-    if (w) parts.push(`W底(頸線${w.neck.toFixed(2)})`);
-    if (m) parts.push(`M頭(頸線${m.neck.toFixed(2)})`);
+    if (w) parts.push(`W底(頸線 ${w.neck.toFixed(2)})`);
+    if (m) parts.push(`M頭(頸線 ${m.neck.toFixed(2)})`);
     if (tri) parts.push(tri.type);
     U.el("kPattern").innerText =
-      parts.length ? txt + parts.join(" / ") : txt + "尚無明顯型態";
+      parts.length ? pat + parts.join(" / ") : pat + "尚無明顯型態";
 
-    // 多空訊號
+    // ---- 多空訊號（用 currentIndex）----
     if (signalVisible) {
       const sig = allSignals[currentIndex] || [];
+      const txt = sig.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、");
       U.el("signalBox").innerText =
-        "多空訊號：" +
-        (sig.length ? sig.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") : "暫無");
+        "多空訊號：" + (txt || "暫無明確訊號");
     } else {
       U.el("signalBox").innerText = "多空訊號：OFF";
     }
 
-    // ✔ chart 不再使用 slice（避免 index 失真）
-    Chart.update(
-      data,
-      indicators,
-      {
-        showMA: maVisible,
-        showBB: indType === "bb",
-        indicatorType: indType,
-        trendlines: maVisible ? tline : null,
-        wPattern: maVisible ? w : null,
-        triangle: maVisible ? tri : null
-      },
-      currentIndex
-    );
+    // ---- 更新圖表（只丟 shown）----
+    Chart.update(shown, indicators, {
+      showMA: maVisible,
+      showBB: indType === "bb",
+      indicatorType: indType,
+      trendlines: maVisible ? tline : null,
+      wPattern: maVisible ? w : null,
+      triangle: maVisible ? tri : null
+    });
 
     updateStats();
     updateTradeLog();
@@ -152,16 +149,21 @@
   }
 
   // ----------------------------------------------------
-  // 資產顯示
+  // 資產統計
   // ----------------------------------------------------
   function updateStats() {
+    if (!data.length) return;
+
     const price = data[currentIndex].close;
     const holdingValue = position * price;
     const total = cash + holdingValue;
     const roi = ((total / INITIAL_CASH - 1) * 100).toFixed(2);
 
-    const unreal = calcUnrealTotal(price);
-    const realized = realizedList.reduce((s, r) => s + r.realized, 0);
+    const unrealTotal = calcUnrealTotal(price);
+    const realizedTotal = realizedList.reduce(
+      (sum, r) => sum + (r.realized || 0),
+      0
+    );
 
     U.el("cash").innerText = U.formatNumber(cash);
     U.el("position").innerText = position;
@@ -169,8 +171,8 @@
     U.el("totalAsset").innerText = U.formatNumber(total);
     U.el("roi").innerText = roi;
 
-    U.el("realizedTotalBox").innerText = U.formatNumber(realized) + " 元";
-    U.el("unrealizedTotalBox").innerText = U.formatNumber(unreal) + " 元";
+    U.el("realizedTotalBox").innerText = U.formatNumber(realizedTotal) + " 元";
+    U.el("unrealizedTotalBox").innerText = U.formatNumber(unrealTotal) + " 元";
   }
 
   // ----------------------------------------------------
@@ -182,12 +184,12 @@
 
     trades.forEach(t => {
       const li = document.createElement("li");
-      li.textContent =
-        t.type === "buy"
-          ? `${t.date} 買 ${t.qty} @ ${t.price}`
-          : t.type === "sell"
-          ? `${t.date} 賣 ${t.qty} @ ${t.price}`
-          : `${t.date} 不動作`;
+      if (t.type === "buy")
+        li.textContent = `${t.date} 買 ${t.qty} @ ${t.price}`;
+      else if (t.type === "sell")
+        li.textContent = `${t.date} 賣 ${t.qty} @ ${t.price}`;
+      else
+        li.textContent = `${t.date} 不動作`;
       ul.appendChild(li);
     });
 
@@ -195,18 +197,18 @@
   }
 
   // ----------------------------------------------------
-  // 持倉紀錄
+  // 持倉明細
   // ----------------------------------------------------
   function updateHoldings() {
     const ul = U.el("holdings");
     ul.innerHTML = "";
 
-    const price = data[currentIndex].close;
-
     if (!lots.length) {
       ul.innerHTML = "<li>無持倉</li>";
       return;
     }
+
+    const price = data[currentIndex].close;
 
     lots.forEach(l => {
       const unreal = (price - l.price) * l.qty;
@@ -220,9 +222,11 @@
   }
 
   // ----------------------------------------------------
-  // 買進（使用今日收盤價）
+  // 買進（用「當日收盤價」，然後自動跳到下一天）
   // ----------------------------------------------------
   function doBuy() {
+    if (!data.length) return;
+
     const qty = parseInt(U.el("shareInput").value, 10);
     if (!qty) return;
 
@@ -232,26 +236,19 @@
 
     cash -= cost;
     position += qty;
-    lots.push({
-      qty,
-      price,
-      date: data[currentIndex].time
-    });
 
-    trades.push({
-      type: "buy",
-      qty,
-      price,
-      date: data[currentIndex].time
-    });
+    lots.push({ qty, price, date: data[currentIndex].time });
+    trades.push({ type: "buy", qty, price, date: data[currentIndex].time });
 
-    updateDisplays();
+    nextDay(); // ✔ 交易後往右推一天
   }
 
   // ----------------------------------------------------
-  // 賣出（FIFO）
+  // 賣出（FIFO，用當日收盤價，然後往右推一天）
   // ----------------------------------------------------
   function doSell() {
+    if (!data.length) return;
+
     const qty = parseInt(U.el("shareInput").value, 10);
     if (!qty) return;
     if (qty > position) return alert("持股不足");
@@ -263,46 +260,40 @@
     while (remain > 0 && lots.length) {
       const lot = lots[0];
       const use = Math.min(remain, lot.qty);
+
       realized += (price - lot.price) * use;
+
       lot.qty -= use;
       remain -= use;
+
       if (lot.qty === 0) lots.shift();
     }
 
     cash += qty * price;
     position -= qty;
 
-    realizedList.push({
-      qty,
-      realized,
-      date: data[currentIndex].time
-    });
+    realizedList.push({ qty, realized, date: data[currentIndex].time });
+    trades.push({ type: "sell", qty, price, date: data[currentIndex].time });
 
-    trades.push({
-      type: "sell",
-      qty,
-      price,
-      date: data[currentIndex].time
-    });
-
-    updateDisplays();
+    nextDay();
   }
 
   // ----------------------------------------------------
-  // 不動作
+  // 不動作（記錄日期，往右推一天）
   // ----------------------------------------------------
   function doHold() {
-    trades.push({
-      type: "hold",
-      date: data[currentIndex].time
-    });
-    updateDisplays();
+    if (!data.length) return;
+
+    trades.push({ type: "hold", date: data[currentIndex].time });
+    nextDay();
   }
 
   // ----------------------------------------------------
-  // 時間軸移動
+  // 時間軸控制
   // ----------------------------------------------------
   function nextDay() {
+    if (!data.length) return;
+
     if (currentIndex < data.length - 1) {
       currentIndex++;
       updateDisplays();
@@ -312,6 +303,8 @@
   }
 
   function prevDay() {
+    if (!data.length) return;
+
     if (currentIndex > 0) {
       currentIndex--;
       updateDisplays();
@@ -319,19 +312,24 @@
   }
 
   // ----------------------------------------------------
-  // 模擬結束
+  // 遊戲結束：專業總結
   // ----------------------------------------------------
   function checkGameEnd() {
+    if (!data.length) return;
+
     currentIndex = data.length - 1;
     updateDisplays();
 
-    const price = data[currentIndex].close;
-    const holdingValue = price * position;
-    const total = cash + holdingValue;
+    const finalPrice = data[currentIndex].close;
+    const holdingValue = position * finalPrice;
+    const totalValue = cash + holdingValue;
 
-    const roi = ((total / INITIAL_CASH - 1) * 100).toFixed(2);
-    const realized = realizedList.reduce((s, r) => s + r.realized, 0);
-    const unreal = calcUnrealTotal(price);
+    const roi = ((totalValue / INITIAL_CASH - 1) * 100).toFixed(2);
+    const realizedTotal = realizedList.reduce(
+      (sum, r) => sum + (r.realized || 0),
+      0
+    );
+    const unrealTotal = calcUnrealTotal(finalPrice);
 
     const stock = global.__currentStock;
 
@@ -342,44 +340,43 @@
     if (roi >= 12)
       good.push("整體報酬率顯著優於大盤，策略具備明確正期望值");
     else if (roi >= 0)
-      good.push("能有效控制回撤，整體資金曲線維持穩定");
+      good.push("能有效控制回撤，資金曲線維持相對穩定");
     else
-      bad.push("回撤過深，進出場規則與停損機制需重新檢視");
+      bad.push("回撤過深，進出場與停損機制需要重新檢視與調整");
 
     if (realizedTotal > 0)
-      good.push("已實現損益為正，出場節奏與獲利了結相對合理");
+      good.push("已實現損益為正，出場節奏與獲利了結邏輯相對合理");
     else
-      bad.push("部分虧損單未及時處理，拖累整體績效");
+      bad.push("部分虧損單未及時處理，拖累整體績效與資金使用效率");
 
     const tradeCount = trades.filter(t => t.type !== "hold").length;
-
     if (tradeCount > 20)
-      bad.push("交易頻率偏高，可能過度反應短線雜訊");
+      bad.push("交易頻率偏高，容易受到短線雜訊影響決策品質");
     if (tradeCount < 4)
-      bad.push("進場次數偏少，可能錯過多次關鍵波段行情");
+      bad.push("進場次數偏少，可能錯過多段關鍵行情與訓練機會");
 
     if (lots.length > 0)
-      bad.push("結束時仍有持倉，存在『凹單』或持股過久的風險");
+      bad.push("期末仍有持倉，存在凹單或過度戀棧持股的風險傾向");
 
     if (realizedTotal <= 0)
-      suggest.push("建立明確停損機制（例如固定% 或 ATR），避免單筆虧損過度放大");
+      suggest.push("建立明確且可量化的停損機制（固定百分比或 ATR），避免單筆虧損失控");
     if (tradeCount > 18)
-      suggest.push("降低交易次數，聚焦於高勝率、高盈虧比的型態與價量結構");
+      suggest.push("降低交易頻率，聚焦於高勝率、高盈虧比的型態與價量結構");
     if (lots.length > 0)
-      suggest.push("避免習慣性凹單，可規劃分批出場與移動停利策略");
+      suggest.push("避免習慣性凹單，可規劃分批出場、移動停利與風險分散策略");
 
     if (!suggest.length)
-      suggest.push("策略架構大致健康，可進一步優化加碼規則與獲利目標設定");
+      suggest.push("策略架構整體健康，可進一步優化加碼節奏與獲利目標設定，以提升長期期望值");
 
     const summary =
       `🎉【模擬交易結束】\n` +
       `交易標的：${stock}\n\n` +
-      `最終總資產：${U.formatNumber(total)} 元\n` +
+      `最終總資產：${U.formatNumber(totalValue)} 元\n` +
       `報酬率：${roi}%\n` +
-      `已實現損益：${U.formatNumber(realized)} 元\n` +
-      `未實現損益：${U.formatNumber(unreal)} 元\n\n` +
+      `已實現總損益：${U.formatNumber(realizedTotal)} 元\n` +
+      `未實現總損益：${U.formatNumber(unrealTotal)} 元\n\n` +
       `【策略優點】\n${good.join("；") || "暫無明顯優勢"}\n\n` +
-      `【策略缺點】\n${bad.join("；") || "暫無"}\n\n` +
+      `【策略缺點】\n${bad.join("；") || "暫無重大缺失"}\n\n` +
       `【專業改善建議】\n${suggest.join("；")}`;
 
     U.el("feedback").innerText = summary;
@@ -394,7 +391,6 @@
   function bindEvents() {
     U.el("nextDay").onclick = nextDay;
     U.el("prevDay").onclick = prevDay;
-
     U.el("buy").onclick = doBuy;
     U.el("sell").onclick = doSell;
     U.el("hold").onclick = doHold;
