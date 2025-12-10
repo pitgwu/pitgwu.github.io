@@ -83,8 +83,10 @@
         if (U.el("initialCash"))
           U.el("initialCash").innerText = INITIAL_CASH.toLocaleString();
 
-        if (U.el("stockName"))
+        if (U.el("stockName")) {
+          U.el("stockName").style.display = "block";
           U.el("stockName").innerText = `目前個股：${stock}`;
+        }
 
         indicators = Indicators.computeAll(data);
 
