@@ -77,8 +77,9 @@
         let startIdx = data.findIndex(d => d.time >= "2025-01-02");
         if (startIdx < 0) startIdx = data.length - 1;
 
-        // 要顯示前 40 根，所以 index 至少是 40
-        currentIndex = Math.max(startIdx, 40);
+        // 顯示最近 40 根 K 棒，右邊停在最後一根（例如 2024-12-24）
+        const WINDOW = 40;
+        currentIndex = Math.max(0, data.length - WINDOW);
 
         // MA / 指標相關資料
         indicators = Indicators.computeAll(data);
