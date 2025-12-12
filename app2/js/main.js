@@ -73,12 +73,15 @@
 
         if (!data.length) return alert("CSV 空白");
 
-        // 找到 2025-01-02 對應位置
-        let startIdx = data.findIndex(d => d.time >= "2025-01-02");
-        if (startIdx < 0) startIdx = data.length - 1;
+        // ⭐ 起始交易日 = 2025-01-02
+        let startIdx = data.findIndex(d => d.time === "2025-01-02");
+        if (startIdx < 0) {
+          alert("找不到 2025-01-02，請檢查 CSV");
+          startIdx = 0;
+        }
 
-        // 要顯示前 40 根，所以 index 至少是 40
-        currentIndex = Math.max(startIdx, 40);
+        // ⭐ 交易日就是這一天
+        currentIndex = startIdx;
 
         // MA / 指標相關資料
         indicators = Indicators.computeAll(data);
