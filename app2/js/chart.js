@@ -1,7 +1,5 @@
 // js/chart.js
-// ==============================================
-// 盤感訓練專用 K 線 Chart Manager (最終整合版)
-// ==============================================
+// 盤感訓練專用 K 線 Chart Manager（含固定視窗 40 根）
 
 (function (global) {
   "use strict";
@@ -21,43 +19,33 @@
   let wLine1, wLine2, wNeck;
   let triUp, triLow;
 
-  // ----------------------------------------
-  // 固定式 Chart 設定（不可縮放 / 不可平移）
-  // ----------------------------------------
   function fixedChartConfig(el, height) {
     return LightweightCharts.createChart(el, {
       width: el.clientWidth,
       height,
-
       layout: {
         background: { color: "#ffffff" },
         textColor: "#222"
       },
-
       rightPriceScale: {
         borderColor: "#ccc",
         autoScale: true,
       },
-
       timeScale: {
         borderColor: "#ccc",
         timeVisible: true,
         barSpacing: 8,
-
-        fixLeftEdge: true,
-        fixRightEdge: true,
+        fixLeftEdge: false,
+        fixRightEdge: false,
         rightBarStaysOnScroll: true,
-
         scrollEnabled: false,
         zoomEnabled: false,
         shiftVisibleRangeOnResize: false,
       },
-
       handleScroll: {
         mouseWheel: false,
         pressedMouseMove: false,
       },
-
       handleScale: {
         mouseWheel: false,
         axisPressedMouseMove: false,
@@ -66,9 +54,6 @@
     });
   }
 
-  // ----------------------------------------
-  // 主 Chart 初始化
-  // ----------------------------------------
   function initMain() {
     const el = document.getElementById("chart");
     chart = fixedChartConfig(el, 420);
@@ -106,13 +91,9 @@
     wNeck = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
   }
 
-  // ----------------------------------------
-  // Volume Chart
-  // ----------------------------------------
   function initVolume() {
     const el = document.getElementById("volume");
     volChart = fixedChartConfig(el, 100);
-
     volChart.timeScale().applyOptions({ visible:false });
 
     volSeries = volChart.addHistogramSeries({
@@ -121,13 +102,9 @@
     });
   }
 
-  // ----------------------------------------
-  // Indicator Chart
-  // ----------------------------------------
   function initIndicator() {
     const el = document.getElementById("indicator");
     indChart = fixedChartConfig(el, 150);
-
     indChart.timeScale().applyOptions({ visible:false });
 
     indL1 = indChart.addLineSeries({ color:"#1f77b4", lineWidth:2 });
@@ -137,48 +114,37 @@
     });
   }
 
-  // ----------------------------------------
-  // 三圖同步捲動
-  // ----------------------------------------
-  function syncTime() {
-    const range = chart.timeScale().getVisibleRange();
-    if (!range) return;
-
-    volChart.timeScale().setVisibleRange(range);
-    indChart.timeScale().setVisibleRange(range);
+  function syncToRight() {
+    requestAnimationFrame(() => {
+      chart.timeScale().scrollToPosition(-1, false);
+      volChart.timeScale().scrollToPosition(-1, false);
+      indChart.timeScale().scrollToPosition(-1, false);
+    });
   }
 
-  // ----------------------------------------
-  // 自動右對齊
-  // ----------------------------------------
-  function scrollRight() {
-    chart.timeScale().scrollToPosition(-1, true);
-    setTimeout(syncTime, 20);
-  }
-
-  // ----------------------------------------
-  // 更新圖形
-  // ----------------------------------------
   function update(shown, ind, opt) {
-    const closes = U.closesOf(shown);
+    const fullData = opt.fullData;
+    const visible = opt.visibleBars || 40;
 
-    candle.setData(shown);
-    volSeries.setData(shown.map(c => ({ time:c.time, value:c.volume })));
+    // ★ 1. 不用 shown，K 線永遠用完整資料
+    candle.setData(fullData);
+    volSeries.setData(fullData.map(c => ({ time:c.time, value:c.volume })));
 
     // MA
+    const closes = shown.map(c => c.close);
     if (opt.showMA) {
       const m5 = U.sma(closes,5);
       const m10 = U.sma(closes,10);
       const m20 = U.sma(closes,20);
 
-      ma5.setData(shown.map((c,i)=>({time:c.time,value:m5[i]})));
-      ma10.setData(shown.map((c,i)=>({time:c.time,value:m10[i]})));
-      ma20.setData(shown.map((c,i)=>({time:c.time,value:m20[i]})));
+      ma5.setData(shown.map((c,i)=>({ time:c.time, value:m5[i] })));
+      ma10.setData(shown.map((c,i)=>({ time:c.time, value:m10[i] })));
+      ma20.setData(shown.map((c,i)=>({ time:c.time, value:m20[i] })));
     } else {
       ma5.setData([]); ma10.setData([]); ma20.setData([]);
     }
 
-    // Bollinger
+    // BB
     if (opt.showBB) {
       bbU.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.upper[i]})));
       bbM.setData(shown.map((c,i)=>({time:c.time,value:ind.BB.mid[i]})));
@@ -187,7 +153,7 @@
       bbU.setData([]); bbM.setData([]); bbL.setData([]);
     }
 
-    // KD / RSI / MACD
+    // 指標（KD/RSI/MACD）
     indL1.setData([]); indL2.setData([]); indHist.setData([]);
 
     if (opt.indicatorType === "kd") {
@@ -206,6 +172,7 @@
         color: ind.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
+
 
     // 支撐壓力
     const SR = global.SupportResistance.findLines(shown, 20);
@@ -272,14 +239,30 @@
         { time: shown[W.p4.index].time, value: W.p4.price },
       ]);
 
-      const lastT = shown[shown.length - 1].time;
+      const lastT2 = shown[shown.length - 1].time;
       wNeck.setData([
         { time: shown[W.p1.index].time, value: W.neck },
-        { time: lastT, value: W.neck },
+        { time: lastT2, value: W.neck },
       ]);
     }
 
-    scrollRight();
+    // ★ 2. 設定可見視窗範圍（最後 visible 根）
+    const total = fullData.length;
+    const leftIndex = Math.max(0, total - visible);
+    chart.timeScale().setVisibleRange({
+      from: fullData[leftIndex].time,
+      to:   fullData[total - 1].time
+    });
+    volChart.timeScale().setVisibleRange({
+      from: fullData[leftIndex].time,
+      to:   fullData[total - 1].time
+    });
+    indChart.timeScale().setVisibleRange({
+      from: fullData[leftIndex].time,
+      to:   fullData[total - 1].time
+    });
+
+    syncToRight();
   }
 
   function init() {
