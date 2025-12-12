@@ -6,15 +6,15 @@
 
   let chart, candle;
   let volChart, volSeries;
-  let indChart, indL1, indL2, indHist;
+  let indChart;
 
+  // 主圖
   let ma5, ma10, ma20;
   let bbU, bbM, bbL;
 
-  let resLine, supLine;
-  let trendUp, trendDn;
-  let triUp, triLow;
-  let wLine1, wLine2, wNeck;
+  // Indicator：分兩組（關鍵）
+  let indAutoL1, indAutoL2;     // KD / RSI
+  let macdL1, macdL2, macdHist; // MACD（固定比例）
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -35,7 +35,7 @@
   }
 
   function init() {
-    // ===== 主圖 =====
+    /* ================= 主圖 ================= */
     chart = fixedChart(document.getElementById("chart"), 420);
 
     candle = chart.addCandlestickSeries({
@@ -55,58 +55,52 @@
     bbM = chart.addLineSeries({ color: "#0066cc" });
     bbL = chart.addLineSeries({ color: "#008800" });
 
-    resLine = chart.addLineSeries({ color: "#dd4444", lineWidth: 1 });
-    supLine = chart.addLineSeries({ color: "#44aa44", lineWidth: 1 });
-
-    trendUp = chart.addLineSeries({ color: "#00aa88", lineWidth: 2 });
-    trendDn = chart.addLineSeries({ color: "#aa0044", lineWidth: 2 });
-
-    triUp  = chart.addLineSeries({ color: "#aa6600", lineWidth: 1 });
-    triLow = chart.addLineSeries({ color: "#5588ff", lineWidth: 1 });
-
-    wLine1 = chart.addLineSeries({ color: "#cc00cc", lineWidth: 1 });
-    wLine2 = chart.addLineSeries({ color: "#cc00cc", lineWidth: 1 });
-    wNeck  = chart.addLineSeries({ color: "#cc00cc", lineWidth: 1 });
-
-    // ===== 成交量 =====
+    /* ================= 成交量 ================= */
     volChart = fixedChart(document.getElementById("volume"), 100);
     volChart.timeScale().applyOptions({ visible: false });
     volSeries = volChart.addHistogramSeries({
       priceFormat: { type: "volume" }
     });
 
-    // ===== 指標區 =====
+    /* ================= 指標區 ================= */
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
 
-    // ❗ MACD 專用固定 scale
+    // 🔹 KD / RSI（自動比例）
+    indAutoL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
+    indAutoL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
+
+    // 🔹 MACD（固定比例）
     const macdScale = () => ({
       priceRange: { minValue: -5, maxValue: 5 }
     });
 
-    indL1 = indChart.addLineSeries({ lineWidth: 2 });
-    indL2 = indChart.addLineSeries({ lineWidth: 2 });
-    indHist = indChart.addHistogramSeries();
+    macdL1 = indChart.addLineSeries({
+      lineWidth: 2,
+      color: "#1f77b4",
+      autoscaleInfoProvider: macdScale
+    });
 
-    // 預設不鎖 scale（給 KD / RSI 用）
-    indL1.applyOptions({ autoscaleInfoProvider: null });
-    indL2.applyOptions({ autoscaleInfoProvider: null });
-    indHist.applyOptions({ autoscaleInfoProvider: null });
+    macdL2 = indChart.addLineSeries({
+      lineWidth: 2,
+      color: "#aa00aa",
+      autoscaleInfoProvider: macdScale
+    });
 
-    // 存給 update 用
-    indChart.__macdScale = macdScale;
+    macdHist = indChart.addHistogramSeries({
+      autoscaleInfoProvider: macdScale
+    });
   }
 
   function update(shown, indicators, opt) {
     if (!shown || !shown.length) return;
-
     const visibleBars = opt.visibleBars || 40;
 
-    // ===== K 線 / 成交量 =====
+    /* ===== K 線 / 成交量 ===== */
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // ===== 均線 =====
+    /* ===== 均線 ===== */
     if (opt.showMA) {
       const closes = shown.map(c => c.close);
       ma5.setData(U.sma(closes,5).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
@@ -116,7 +110,7 @@
       ma5.setData([]); ma10.setData([]); ma20.setData([]);
     }
 
-    // ===== 布林通道（比例正常，不動）=====
+    /* ===== 布林通道 ===== */
     if (opt.showBB) {
       bbU.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.upper[i]})));
       bbM.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.mid[i]})));
@@ -125,38 +119,27 @@
       bbU.setData([]); bbM.setData([]); bbL.setData([]);
     }
 
-    // ===== 指標清空 =====
-    indL1.setData([]); indL2.setData([]); indHist.setData([]);
+    /* ===== 清空所有指標 ===== */
+    indAutoL1.setData([]); indAutoL2.setData([]);
+    macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
 
-    // 🔑 根據指標切換 scale
-    if (opt.indicatorType === "macd") {
-      indL1.applyOptions({ autoscaleInfoProvider: indChart.__macdScale });
-      indL2.applyOptions({ autoscaleInfoProvider: indChart.__macdScale });
-      indHist.applyOptions({ autoscaleInfoProvider: indChart.__macdScale });
-    } else {
-      indL1.applyOptions({ autoscaleInfoProvider: null });
-      indL2.applyOptions({ autoscaleInfoProvider: null });
-      indHist.applyOptions({ autoscaleInfoProvider: null });
-    }
-
-    // ===== KD / RSI / MACD =====
+    /* ===== 指標切換（核心） ===== */
     if (opt.indicatorType === "kd") {
-      indL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
-      indL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
+      indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
+      indAutoL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
     }
     else if (opt.indicatorType === "rsi") {
-      indL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
+      indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
     }
     else if (opt.indicatorType === "macd") {
-      indL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
-      indL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
-      indHist.setData(shown.map((c,i)=>({
+      macdL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
+      macdL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
+      macdHist.setData(shown.map((c,i)=>({
         time: c.time,
         value: indicators.MACDHist[i],
         color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
-
 
     // 5️⃣ 支撐壓力（如果你的 supportResistance.js 有載入）
     //    沒有就不畫，避免再噴錯
