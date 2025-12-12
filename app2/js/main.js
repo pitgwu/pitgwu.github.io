@@ -80,7 +80,8 @@
         // 讓 currentIndex = 至少 40
         //currentIndex = Math.max(startIdx, 40);
 		// 讓 currentIndex = 至少 40
-		currentIndex = Math.min(40, data.length - 1);
+		//currentIndex = Math.min(40, data.length - 1);
+		currentIndex = 40;
 
         // MA / 指標相關資料
         indicators = Indicators.computeAll(data);
