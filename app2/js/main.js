@@ -74,11 +74,13 @@
         if (!data.length) return alert("CSV 空白");
 
         // 找到 2025-01-02 對應位置
-        let startIdx = data.findIndex(d => d.time >= "2025-01-02");
-        if (startIdx < 0) startIdx = data.length - 1;
+        //let startIdx = data.findIndex(d => d.time >= "2025-01-02");
+        //if (startIdx < 0) startIdx = data.length - 1;
 
         // 讓 currentIndex = 至少 40
-        currentIndex = Math.max(startIdx, 40);
+        //currentIndex = Math.max(startIdx, 40);
+		// 讓 currentIndex = 至少 40
+		currentIndex = Math.min(40, data.length - 1);
 
         // MA / 指標相關資料
         indicators = Indicators.computeAll(data);
