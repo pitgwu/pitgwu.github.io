@@ -217,11 +217,13 @@
     }
 
     // 5️⃣ 固定視窗 40 根，右對齊當日 K 棒
-    requestAnimationFrame(() => {
-      chart.timeScale().scrollToPosition(-1, false);
-      volChart.timeScale().scrollToPosition(-1, false);
-      indChart.timeScale().scrollToPosition(-1, false);
-    });
+    const start = Math.max(0, shown.length - visibleBars);
+    const from = shown[start].time;
+    const to   = shown[shown.length - 1].time;
+
+    chart.timeScale().setVisibleRange({ from, to });
+    volChart.timeScale().setVisibleRange({ from, to });
+    indChart.timeScale().setVisibleRange({ from, to });
   }
 
   global.ChartManager = { init, update };
