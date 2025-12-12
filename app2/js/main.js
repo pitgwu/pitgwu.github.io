@@ -11,6 +11,7 @@
   const TRI = global.PatternTriangle;
 
   const INITIAL_CASH = 5000000;
+  const WINDOW = 40;
 
   let data = [];
   let currentIndex = 0; // index = 當日交易日期所對應的 K 棒 index
@@ -73,15 +74,11 @@
 
         if (!data.length) return alert("CSV 空白");
 
-        // 找到 2025-01-02 對應位置
-        //let startIdx = data.findIndex(d => d.time >= "2025-01-02");
-        //if (startIdx < 0) startIdx = data.length - 1;
-
-        // 讓 currentIndex = 至少 40
-        //currentIndex = Math.max(startIdx, 40);
-		// 讓 currentIndex = 至少 40
-		//currentIndex = Math.min(40, data.length - 1);
-		currentIndex = 40;
+        // ⭐ 關鍵：currentIndex = 畫面右側那一根
+        currentIndex = Math.min(
+          data.length - 1,
+          Math.max(WINDOW - 1, data.length - WINDOW)
+        );
 
         // MA / 指標相關資料
         indicators = Indicators.computeAll(data);
@@ -98,7 +95,8 @@
   // 主畫面更新
   // ----------------------------------------------------------
   function updateDisplays() {
-    const shown = data.slice(0, currentIndex + 1);
+    const viewStart = Math.max(0, currentIndex - WINDOW + 1);
+    const shown = data.slice(viewStart, currentIndex + 1);
     const indType = U.el("indicatorSelect").value;
 
     // 型態偵測
