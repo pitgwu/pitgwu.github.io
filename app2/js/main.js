@@ -14,16 +14,16 @@
   const WINDOW = 40;
 
   let data = [];
-  let currentIndex = 0; // index = 當日交易日期所對應的 K 棒 index
+  let currentIndex = 0; // index = 當日交易日期所對應的 K 棒 index（full data index）
 
   let cash = INITIAL_CASH;
   let position = 0;
   let lots = [];          // 分批買入
   let trades = [];        // 所有交易紀錄
-  let realizedList = [];  // 已實現損益
+  let realizedList = [];  // 已實現損益（每次賣出一筆）
 
-  let indicators = null;
-  let allSignals = null;
+  let indicators = null;  // 對應 full data 的指標 arrays
+  let allSignals = null;  // 對應 full data 的 signals arrays
 
   let signalVisible = false;
   let maVisible = false;
@@ -32,9 +32,7 @@
   // 1️⃣ 計算「總未實現損益」
   // ----------------------------------------------------------
   function calcUnrealTotal(currentPrice) {
-    return lots.reduce((sum, lot) => {
-      return sum + (currentPrice - lot.price) * lot.qty;
-    }, 0);
+    return lots.reduce((sum, lot) => sum + (currentPrice - lot.price) * lot.qty, 0);
   }
 
   // ----------------------------------------------------------
@@ -52,10 +50,14 @@
     const stock = stockList[Math.floor(Math.random() * stockList.length)];
     global.__currentStock = stock;
 
-    U.el("stockName").innerText = ""; // 一開始隱藏
+    // 一開始隱藏股票號碼（結束時才公布）
+    if (U.el("stockName")) U.el("stockName").innerText = "";
 
     fetch(`data/${stock}.csv`)
-      .then(r => r.text())
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
       .then(text => {
         const lines = text.split("\n").slice(1);
         data = lines
@@ -72,17 +74,22 @@
             };
           });
 
-        if (!data.length) return alert("CSV 空白");
+        if (!data.length) {
+          alert("CSV 空白");
+          return;
+        }
 
-        // ⭐ 關鍵：currentIndex = 畫面右側那一根
-        currentIndex = Math.min(
-          data.length - 1,
-          Math.max(WINDOW - 1, data.length - WINDOW)
-        );
+        // ⭐ 起始：讓畫面停在「第 WINDOW 根」或資料尾端（但視窗要可滑動推進）
+        // 例如資料很長 → currentIndex = WINDOW-1（先保留前 40 根歷史）
+        // 資料不足 40 根 → currentIndex = data.length-1
+        currentIndex = Math.min(data.length - 1, WINDOW - 1);
 
-        // MA / 指標相關資料
+        // 計算 full indicators
         indicators = Indicators.computeAll(data);
-        allSignals = Signals.evaluateSignalsForAll(Signals.buildSignalContext(data));
+
+        // signals（對應 full data index）
+        const ctx = Signals.buildSignalContext(data);
+        allSignals = Signals.evaluateSignalsForAll(ctx);
 
         Chart.init();
         bindEvents();
@@ -92,31 +99,44 @@
   }
 
   // ----------------------------------------------------------
-  // 主畫面更新
+  // 主畫面更新（視窗固定 WINDOW 根，右端 = currentIndex）
   // ----------------------------------------------------------
   function updateDisplays() {
+    if (!data.length) return;
+
     const viewStart = Math.max(0, currentIndex - WINDOW + 1);
     const shown = data.slice(viewStart, currentIndex + 1);
     const indType = U.el("indicatorSelect").value;
 
-    // 型態偵測
+    // 型態偵測用 shown（index 以 shown 內部為準）
+	// -----------------------------
+    // 型態偵測（W 底 / M 頭 / 三角）
+    // -----------------------------
     const tline = Trend.findTrendlines(shown);
     const w = WM.isWBottom(shown);
     const m = WM.isMTop(shown);
     const tri = TRI.detectTriangle(shown);
 
+    // 型態文字（可留也可刪）
+    const parts = [];
+    if (w) parts.push(`W底(頸線 ${w.neck.toFixed(2)})`);
+    if (m) parts.push(`M頭(頸線 ${m.neck.toFixed(2)})`);
+    if (tri) parts.push(tri.type);
+    U.el("kPattern").innerText = parts.length ? `即時型態偵測：${parts.join(" / ")}` : "即時型態偵測：尚無明顯型態";
+
+    // 多空訊號（用 full index currentIndex）
     if (signalVisible) {
       const sigArr = allSignals[currentIndex] || [];
-      U.el("signalBox").innerText =
-        sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") || "無";
+      const txt = sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、");
+      U.el("signalBox").innerText = "多空訊號：" + (txt || "無");
     } else {
       U.el("signalBox").innerText = "多空訊號：OFF";
     }
 
-    // 更新 K 線（含 40 根視窗）
+    // 更新 K 線（⭐ 用 shown 畫圖；用 offset 對齊 full indicators）
     Chart.update(shown, indicators, {
-      fullData: data,
-      visibleBars: 40,
+      offset: viewStart,               // ⭐ 關鍵：shown[0] 在 full data 的起點
+      visibleBars: WINDOW,
       showMA: maVisible,
       showBB: indType === "bb",
       indicatorType: indType,
@@ -134,12 +154,15 @@
   // 2️⃣ 資產統計（含已實現 / 未實現）
   // ----------------------------------------------------------
   function updateStats() {
+    if (!data.length) return;
+
     const price = data[currentIndex].close;
     const holdingValue = position * price;
-    const unreal = calcUnrealTotal(price);
-    const realized = realizedList.reduce((s, r) => s + r.realized, 0);
-    const total = cash + holdingValue;
 
+    const unreal = calcUnrealTotal(price);
+    const realized = realizedList.reduce((s, r) => s + (r.realized || 0), 0);
+
+    const total = cash + holdingValue;
     const roi = (((total / INITIAL_CASH) - 1) * 100).toFixed(2);
 
     U.el("cash").innerText = U.formatNumber(cash);
@@ -153,7 +176,7 @@
   }
 
   // ----------------------------------------------------------
-  // 交易紀錄
+  // 交易紀錄（永遠顯示當日 date）
   // ----------------------------------------------------------
   function updateTradeLog() {
     const ul = U.el("tradeLog");
@@ -163,7 +186,7 @@
       ul.innerHTML += `<li>${t.date} ${
         t.type === "buy" ? "買" :
         t.type === "sell" ? "賣" : "不動作"
-      } ${t.qty || ""} ${t.price ? "@ " + t.price : ""}</li>`;
+      } ${t.qty || ""} ${t.price != null ? "@ " + t.price : ""}</li>`;
     });
 
     ul.scrollTop = ul.scrollHeight;
@@ -187,6 +210,8 @@
       const u = (price - l.price) * l.qty;
       ul.innerHTML += `<li>${l.date} ${l.qty} 股 @ ${l.price} → 未實現 ${U.formatNumber(u)} 元</li>`;
     });
+
+    ul.scrollTop = ul.scrollHeight;
   }
 
   // ----------------------------------------------------------
@@ -202,22 +227,37 @@
   }
 
   function doBuy() {
+    if (!data.length) return;
+
     const qty = +U.el("shareInput").value;
-    const price = data[currentIndex].close;
+    if (!qty || qty <= 0) return;
 
-    lots.push({ qty, price, date: data[currentIndex].time });
+    const day = data[currentIndex];           // ⭐ 當日 K 棒
+    const price = day.close;
+    const cost = qty * price;
 
-    cash -= qty * price;
+    if (cost > cash) return alert("現金不足");
+
+    // 記錄當日
+    lots.push({ qty, price, date: day.time });
+    cash -= cost;
     position += qty;
+    trades.push({ type: "buy", qty, price, date: day.time });
 
-    trades.push({ type:"buy", qty, price, date:data[currentIndex].time });
-
+    // 跳隔天
     finishToday();
   }
 
   function doSell() {
+    if (!data.length) return;
+
     const qty = +U.el("shareInput").value;
-    const price = data[currentIndex].close;
+    if (!qty || qty <= 0) return;
+
+    if (qty > position) return alert("持股不足");
+
+    const day = data[currentIndex];          // ⭐ 當日 K 棒
+    const price = day.close;
 
     let remain = qty;
     let realized = 0;
@@ -225,24 +265,29 @@
     while (remain > 0 && lots.length) {
       const lot = lots[0];
       const use = Math.min(lot.qty, remain);
+
       realized += (price - lot.price) * use;
       lot.qty -= use;
       remain -= use;
+
       if (lot.qty === 0) lots.shift();
     }
 
     cash += qty * price;
     position -= qty;
 
-    realizedList.push({ qty, realized, date:data[currentIndex].time });
-
-    trades.push({ type:"sell", qty, price, date:data[currentIndex].time });
+    realizedList.push({ qty, realized, date: day.time });
+    trades.push({ type: "sell", qty, price, date: day.time });
 
     finishToday();
   }
 
   function doHold() {
-    trades.push({ type:"hold", date:data[currentIndex].time });
+    if (!data.length) return;
+
+    const day = data[currentIndex]; // ⭐ 當日 K 棒
+    trades.push({ type: "hold", date: day.time });
+
     finishToday();
   }
 
@@ -252,24 +297,22 @@
   function gameEnd() {
     if (!data.length) return;
 
+    // 先停在最後一天顯示
     currentIndex = data.length - 1;
     updateDisplays();
 
-    const finalPrice   = data[data.length - 1].close;
+    const finalPrice = data[data.length - 1].close;
     const holdingValue = position * finalPrice;
-    const totalValue   = cash + holdingValue;
-    const roi          = ((totalValue / INITIAL_CASH - 1) * 100).toFixed(2);
+    const totalValue = cash + holdingValue;
+    const roi = ((totalValue / INITIAL_CASH - 1) * 100).toFixed(2);
 
-    const realizedTotal = realizedList.reduce(
-      (sum, r) => sum + (r.realized || 0),
-      0
-    );
+    const realizedTotal = realizedList.reduce((sum, r) => sum + (r.realized || 0), 0);
     const unrealTotal = calcUnrealTotal(finalPrice);
 
     const stock = global.__currentStock;
 
-    const good    = [];
-    const bad     = [];
+    const good = [];
+    const bad = [];
     const suggest = [];
 
     if (roi >= 12)
@@ -316,6 +359,8 @@
       `【專業改善建議】\n${suggest.join("；")}`;
 
     U.el("feedback").innerText = summary;
+
+    // ⭐ 結束才公布股票號碼
     if (U.el("stockName")) {
       U.el("stockName").innerText = `模擬結束，本次個股：${stock}`;
     }
@@ -331,8 +376,10 @@
     U.el("sell").onclick = doSell;
     U.el("hold").onclick = doHold;
 
+    // 手動切換天數：只移動 currentIndex，不改交易紀錄
     U.el("nextDay").onclick = () => {
       if (currentIndex < data.length - 1) currentIndex++;
+      else return gameEnd();
       updateDisplays();
     };
     U.el("prevDay").onclick = () => {
@@ -343,13 +390,13 @@
     U.el("toggleMA").onclick = () => {
       maVisible = !maVisible;
       U.el("toggleMA").innerText = maVisible ? "均線：ON" : "均線：OFF";
+      U.el("maLegend").style.display = maVisible ? "block" : "none";
       updateDisplays();
     };
 
     U.el("toggleSignal").onclick = () => {
       signalVisible = !signalVisible;
-      U.el("toggleSignal").innerText =
-        signalVisible ? "多空訊號：ON" : "多空訊號：OFF";
+      U.el("toggleSignal").innerText = signalVisible ? "多空訊號：ON" : "多空訊號：OFF";
       updateDisplays();
     };
 
@@ -357,5 +404,4 @@
   }
 
   loadCSV();
-
 })(window);
