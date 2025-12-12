@@ -175,8 +175,11 @@
     const ul = U.el("holdings");
     ul.innerHTML = "";
 
+    let unrealTotal = 0;
+
     if (!lots.length) {
       ul.innerHTML = "<li>無持倉</li>";
+      U.el("unrealSummary").innerText = "";
       return;
     }
 
@@ -184,8 +187,13 @@
 
     lots.forEach(l => {
       const u = (price - l.price) * l.qty;
+      unrealTotal += u;
       ul.innerHTML += `<li>${l.date} ${l.qty} 股 @ ${l.price} → 未實現 ${U.formatNumber(u)} 元</li>`;
     });
+
+    // ⭐ 關鍵補齊這一行
+    U.el("unrealSummary").innerText =
+      `未實現總損益：${U.formatNumber(unrealTotal)} 元`;
   }
 
   // ----------------------------------------------------------
