@@ -11,11 +11,10 @@
   let ma5, ma10, ma20;
   let bbU, bbM, bbL;
 
-  // ✅ 這些是你目前 update() 內「有用到」但原本沒宣告/沒初始化的 series
-  let resLine, supLine;         // 支撐壓力
-  let trendUp, trendDn;         // 趨勢線
-  let triUp, triLow;            // 三角收斂
-  let wLine1, wLine2, wNeck;    // W 底
+  let resLine, supLine;
+  let trendUp, trendDn;
+  let triUp, triLow;
+  let wLine1, wLine2, wNeck;
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -36,11 +35,12 @@
   }
 
   function init() {
+    // ===== 主圖 =====
     chart = fixedChart(document.getElementById("chart"), 420);
 
     candle = chart.addCandlestickSeries({
-      upColor: "#ff0000",        // 上漲紅
-      downColor: "#00aa00",      // 下跌綠
+      upColor: "#ff0000",
+      downColor: "#00aa00",
       borderUpColor: "#ff0000",
       borderDownColor: "#00aa00",
       wickUpColor: "#ff0000",
@@ -55,7 +55,6 @@
     bbM = chart.addLineSeries({ color: "#0066cc" });
     bbL = chart.addLineSeries({ color: "#008800" });
 
-    // ✅ 補上：支撐/壓力、趨勢線、三角、W底（避免 resLine / trendUp / triUp / wLine1 未定義）
     resLine = chart.addLineSeries({ color: "#dd4444", lineWidth: 1 });
     supLine = chart.addLineSeries({ color: "#44aa44", lineWidth: 1 });
 
@@ -76,31 +75,26 @@
       priceFormat: { type: "volume" }
     });
 
-    // ===== 技術指標（關鍵：固定比例避免 ON/OFF 跳動）=====
+    // ===== 指標區 =====
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
 
-    // 🔒 固定 MACD / 指標比例：保證 macd ON/OFF 尺度不跳
-    const fixedScale = () => ({
-      priceRange: {
-        minValue: -5,
-        maxValue: 5
-      }
+    // ❗ MACD 專用固定 scale
+    const macdScale = () => ({
+      priceRange: { minValue: -5, maxValue: 5 }
     });
 
-    indL1 = indChart.addLineSeries({
-      lineWidth: 2,
-      autoscaleInfoProvider: fixedScale
-    });
+    indL1 = indChart.addLineSeries({ lineWidth: 2 });
+    indL2 = indChart.addLineSeries({ lineWidth: 2 });
+    indHist = indChart.addHistogramSeries();
 
-    indL2 = indChart.addLineSeries({
-      lineWidth: 2,
-      autoscaleInfoProvider: fixedScale
-    });
+    // 預設不鎖 scale（給 KD / RSI 用）
+    indL1.applyOptions({ autoscaleInfoProvider: null });
+    indL2.applyOptions({ autoscaleInfoProvider: null });
+    indHist.applyOptions({ autoscaleInfoProvider: null });
 
-    indHist = indChart.addHistogramSeries({
-      autoscaleInfoProvider: fixedScale
-    });
+    // 存給 update 用
+    indChart.__macdScale = macdScale;
   }
 
   function update(shown, indicators, opt) {
@@ -108,61 +102,61 @@
 
     const visibleBars = opt.visibleBars || 40;
 
-    // 1️⃣ K 線 / 成交量：只畫已發生資料
+    // ===== K 線 / 成交量 =====
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // 2️⃣ 均線（與 shown 對齊）
+    // ===== 均線 =====
     if (opt.showMA) {
       const closes = shown.map(c => c.close);
-
-      const s5  = U.sma(closes, 5);
-      const s10 = U.sma(closes, 10);
-      const s20 = U.sma(closes, 20);
-
-      ma5.setData(
-        s5.map((v, i) => (v != null ? { time: shown[i].time, value: v } : null)).filter(Boolean)
-      );
-      ma10.setData(
-        s10.map((v, i) => (v != null ? { time: shown[i].time, value: v } : null)).filter(Boolean)
-      );
-      ma20.setData(
-        s20.map((v, i) => (v != null ? { time: shown[i].time, value: v } : null)).filter(Boolean)
-      );
+      ma5.setData(U.sma(closes,5).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
+      ma10.setData(U.sma(closes,10).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
+      ma20.setData(U.sma(closes,20).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
     } else {
       ma5.setData([]); ma10.setData([]); ma20.setData([]);
     }
 
-    // 3️⃣ 布林通道
+    // ===== 布林通道（比例正常，不動）=====
     if (opt.showBB) {
-      // ⚠️ indicators.BB.* 如果是「全資料長度」的陣列，且 shown 是 slice(0..currentIndex)
-      // 這裡 i 對得上；若 shown 不是從 0 開始 slice，需 main.js 先對齊 index
-      bbU.setData(shown.map((c, i) => ({ time: c.time, value: indicators.BB.upper[i] })));
-      bbM.setData(shown.map((c, i) => ({ time: c.time, value: indicators.BB.mid[i] })));
-      bbL.setData(shown.map((c, i) => ({ time: c.time, value: indicators.BB.lower[i] })));
+      bbU.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.upper[i]})));
+      bbM.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.mid[i]})));
+      bbL.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.lower[i]})));
     } else {
       bbU.setData([]); bbM.setData([]); bbL.setData([]);
     }
 
-    // 4️⃣ 技術指標（KD / RSI / MACD，比例不再跳）
+    // ===== 指標清空 =====
     indL1.setData([]); indL2.setData([]); indHist.setData([]);
 
-    if (opt.indicatorType === "kd") {
-      indL1.setData(shown.map((c, i) => ({ time: c.time, value: indicators.K[i] })));
-      indL2.setData(shown.map((c, i) => ({ time: c.time, value: indicators.D[i] })));
-    } else if (opt.indicatorType === "rsi") {
-      indL1.setData(shown.map((c, i) => ({ time: c.time, value: indicators.RSI[i] })));
-    } else if (opt.indicatorType === "macd") {
-      indL1.setData(shown.map((c, i) => ({ time: c.time, value: indicators.MACD[i] })));
-      indL2.setData(shown.map((c, i) => ({ time: c.time, value: indicators.MACDSignal[i] })));
-      indHist.setData(
-        shown.map((c, i) => ({
-          time: c.time,
-          value: indicators.MACDHist[i],
-          color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
-        }))
-      );
+    // 🔑 根據指標切換 scale
+    if (opt.indicatorType === "macd") {
+      indL1.applyOptions({ autoscaleInfoProvider: indChart.__macdScale });
+      indL2.applyOptions({ autoscaleInfoProvider: indChart.__macdScale });
+      indHist.applyOptions({ autoscaleInfoProvider: indChart.__macdScale });
+    } else {
+      indL1.applyOptions({ autoscaleInfoProvider: null });
+      indL2.applyOptions({ autoscaleInfoProvider: null });
+      indHist.applyOptions({ autoscaleInfoProvider: null });
     }
+
+    // ===== KD / RSI / MACD =====
+    if (opt.indicatorType === "kd") {
+      indL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
+      indL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
+    }
+    else if (opt.indicatorType === "rsi") {
+      indL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
+    }
+    else if (opt.indicatorType === "macd") {
+      indL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
+      indL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
+      indHist.setData(shown.map((c,i)=>({
+        time: c.time,
+        value: indicators.MACDHist[i],
+        color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
+      })));
+    }
+
 
     // 5️⃣ 支撐壓力（如果你的 supportResistance.js 有載入）
     //    沒有就不畫，避免再噴錯
@@ -254,7 +248,7 @@
     // 7️⃣ 固定視窗 40 根，右對齊當日 K 棒（不會影響你 main.js 的起始日邏輯）
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
-    const to = shown[shown.length - 1].time;
+    const to   = shown[shown.length - 1].time;
 
     chart.timeScale().setVisibleRange({ from, to });
     volChart.timeScale().setVisibleRange({ from, to });
