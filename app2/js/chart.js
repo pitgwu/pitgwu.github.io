@@ -12,9 +12,9 @@
   let ma5, ma10, ma20;
   let bbU, bbM, bbL;
 
-  // Indicator：分兩組（關鍵）
-  let indAutoL1, indAutoL2;     // KD / RSI
-  let macdL1, macdL2, macdHist; // MACD（固定比例）
+  // 指標（分組，避免比例污染）
+  let indAutoL1, indAutoL2;       // KD / RSI
+  let macdL1, macdL2, macdHist;   // MACD（固定比例）
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -35,7 +35,7 @@
   }
 
   function init() {
-    /* ================= 主圖 ================= */
+    /* ===== 主圖 ===== */
     chart = fixedChart(document.getElementById("chart"), 420);
 
     candle = chart.addCandlestickSeries({
@@ -55,22 +55,22 @@
     bbM = chart.addLineSeries({ color: "#0066cc" });
     bbL = chart.addLineSeries({ color: "#008800" });
 
-    /* ================= 成交量 ================= */
+    /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
     volChart.timeScale().applyOptions({ visible: false });
     volSeries = volChart.addHistogramSeries({
       priceFormat: { type: "volume" }
     });
 
-    /* ================= 指標區 ================= */
+    /* ===== 指標區 ===== */
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
 
-    // 🔹 KD / RSI（自動比例）
+    // KD / RSI（自動比例）
     indAutoL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
     indAutoL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
 
-    // 🔹 MACD（固定比例）
+    // MACD（固定比例）
     const macdScale = () => ({
       priceRange: { minValue: -5, maxValue: 5 }
     });
@@ -123,7 +123,7 @@
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
 
-    /* ===== 指標切換（核心） ===== */
+    /* ===== 指標切換 ===== */
     if (opt.indicatorType === "kd") {
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
       indAutoL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
@@ -141,94 +141,7 @@
       })));
     }
 
-    // 5️⃣ 支撐壓力（如果你的 supportResistance.js 有載入）
-    //    沒有就不畫，避免再噴錯
-    if (global.SupportResistance && typeof global.SupportResistance.findLines === "function") {
-      const SR = global.SupportResistance.findLines(shown, 20);
-      const lastT = shown[shown.length - 1].time;
-      resLine.setData(SR[0] ? [{ time: lastT, value: SR[0].price }] : []);
-      supLine.setData(SR[1] ? [{ time: lastT, value: SR[1].price }] : []);
-    } else {
-      resLine.setData([]);
-      supLine.setData([]);
-    }
-
-    // 6️⃣ 趨勢線 / 三角 / W 底：當 opt.showMA 關掉就清掉（避免殘影）
-    trendUp.setData([]);
-    trendDn.setData([]);
-    triUp.setData([]);
-    triLow.setData([]);
-    wLine1.setData([]);
-    wLine2.setData([]);
-    wNeck.setData([]);
-
-    if (opt.showMA && opt.trendlines) {
-      const { upLines, downLines } = opt.trendlines;
-
-      if (upLines?.length) {
-        const u = upLines[upLines.length - 1];
-        if (shown[u.p1.index] && shown[u.p2.index]) {
-          trendUp.setData([
-            { time: shown[u.p1.index].time, value: u.p1.price },
-            { time: shown[u.p2.index].time, value: u.p2.price },
-          ]);
-        }
-      }
-
-      if (downLines?.length) {
-        const d = downLines[downLines.length - 1];
-        if (shown[d.p1.index] && shown[d.p2.index]) {
-          trendDn.setData([
-            { time: shown[d.p1.index].time, value: d.p1.price },
-            { time: shown[d.p2.index].time, value: d.p2.price },
-          ]);
-        }
-      }
-    }
-
-    if (opt.showMA && opt.triangle) {
-      const T = opt.triangle;
-      if (shown[T.upperLine.p1.index] && shown[T.upperLine.p2.index]) {
-        triUp.setData([
-          { time: shown[T.upperLine.p1.index].time, value: T.upperLine.p1.price },
-          { time: shown[T.upperLine.p2.index].time, value: T.upperLine.p2.price },
-        ]);
-      }
-      if (shown[T.lowerLine.p1.index] && shown[T.lowerLine.p2.index]) {
-        triLow.setData([
-          { time: shown[T.lowerLine.p1.index].time, value: T.lowerLine.p1.price },
-          { time: shown[T.lowerLine.p2.index].time, value: T.lowerLine.p2.price },
-        ]);
-      }
-    }
-
-    if (opt.showMA && opt.wPattern) {
-      const W = opt.wPattern;
-
-      if (shown[W.p1.index] && shown[W.p2.index]) {
-        wLine1.setData([
-          { time: shown[W.p1.index].time, value: W.p1.price },
-          { time: shown[W.p2.index].time, value: W.p2.price },
-        ]);
-      }
-
-      if (shown[W.p3.index] && shown[W.p4.index]) {
-        wLine2.setData([
-          { time: shown[W.p3.index].time, value: W.p3.price },
-          { time: shown[W.p4.index].time, value: W.p4.price },
-        ]);
-      }
-
-      const lastT2 = shown[shown.length - 1].time;
-      if (shown[W.p1.index]) {
-        wNeck.setData([
-          { time: shown[W.p1.index].time, value: W.neck },
-          { time: lastT2, value: W.neck },
-        ]);
-      }
-    }
-
-    // 7️⃣ 固定視窗 40 根，右對齊當日 K 棒（不會影響你 main.js 的起始日邏輯）
+    /* ===== 固定視窗 ===== */
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
