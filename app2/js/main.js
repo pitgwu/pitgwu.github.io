@@ -245,9 +245,17 @@
 
   function doSell() {
     const qty = +U.el("shareInput").value;
+    if (!qty || qty <= 0) return;
+
+    if (position <= 0) {
+      alert("⚠️ 目前無持股，無法賣出（只訓練多方思維）");
+      return;
+    }
+
+    const sellQty = Math.min(qty, position);
     const price = data[currentIndex].close;
 
-    let remain = qty;
+    let remain = sellQty;
     let realized = 0;
 
     while (remain > 0 && lots.length) {
@@ -259,12 +267,21 @@
       if (lot.qty === 0) lots.shift();
     }
 
-    cash += qty * price;
-    position -= qty;
+    cash += sellQty * price;
+    position -= sellQty;
 
-    realizedList.push({ qty, realized, date:data[currentIndex].time });
+    realizedList.push({
+      qty: sellQty,
+      realized,
+      date: data[currentIndex].time
+    });
 
-    trades.push({ type:"sell", qty, price, date:data[currentIndex].time });
+    trades.push({
+      type: "sell",
+      qty: sellQty,
+      price,
+      date: data[currentIndex].time
+    });
 
     finishToday();
   }
@@ -378,7 +395,12 @@
       signalVisible = !signalVisible;
       U.el("toggleSignal").innerText =
         signalVisible ? "多空訊號：ON" : "多空訊號：OFF";
-      updateDisplays();
+
+      // 只更新訊號顯示，不更新圖表
+      const sigArr = allSignals[currentIndex] || [];
+      U.el("signalBox").innerText = signalVisible
+        ? (sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") || "無")
+        : "多空訊號：OFF";
     };
 
     U.el("indicatorSelect").onchange = updateDisplays;

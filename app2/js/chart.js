@@ -41,6 +41,8 @@
   }
 
   function init() {
+	const noScale = () => ({ priceRange: null });
+	
     /* ===== 主圖 ===== */
     chart = fixedChart(document.getElementById("chart"), 420);
 
@@ -57,9 +59,9 @@
     ma10 = chart.addLineSeries({ color: "#0a0", lineWidth: 1 });
     ma20 = chart.addLineSeries({ color: "#00f", lineWidth: 1 });
 
-    bbU = chart.addLineSeries({ color: "#ffa500" });
-    bbM = chart.addLineSeries({ color: "#0066cc" });
-    bbL = chart.addLineSeries({ color: "#008800" });
+    bbU = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider: noScale });
+    bbM = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider: noScale });
+    bbL = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider: noScale });
 
     // 型態線 series（一次宣告，後面只 setData）
     resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
