@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>股價型態教學（動態版 + 切線 + 等幅）</title>
+
+<!-- Lightweight Charts -->
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+body {
+    margin: 0;
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto;
+}
+header {
+    padding: 10px 18px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    font-size: 18px;
+    font-weight: 600;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+}
+header span.sub {
+    font-size:13px;
+    color:#8b949e;
+}
+.container {
+    display: flex;
+    height: calc(100vh - 52px);
+}
+.sidebar {
+    width: 260px;
+    background: #161b22;
+    border-right: 1px solid #30363d;
+    overflow-y: auto;
+    padding: 10px;
+}
+.sidebar h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+}
+.pattern-btn {
+    width: 100%;
+    padding: 6px 8px;
+    margin-bottom: 5px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #21262d;
+    color: #e6edf3;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.3;
+}
+.pattern-btn:hover {
+    background: #30363d;
+}
+.pattern-btn.active {
+    background: #238636;
+}
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+}
+.top-row {
+    display:flex;
+    gap:10px;
+    margin-bottom:10px;
+}
+.chart-wrap {
+    flex: 3;
+    display:flex;
+    flex-direction:column;
+}
+.chart-area {
+    flex: 1;
+    min-height: 350px; /* ★ 最重要：確保 chart 高度存在 */
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+}
+.chart-overlay-label {
+    position:absolute;
+    left:8px;
+    top:6px;
+    font-size:12px;
+    color:#8b949e;
+    background:rgba(22,27,34,.7);
+    padding:3px 6px;
+    border-radius:4px;
+    pointer-events:none;
+}
+.arrow-tip {
+    position:absolute;
+    right:10px;
+    top:10px;
+    font-size:22px;
+    opacity:0;
+    transition:opacity .6s ease-out, transform .6s ease-out;
+}
+.arrow-tip.show-up {
+    opacity:1;
+    transform:translate(-5px,-10px);
+    color:#22c55e;
+}
+.arrow-tip.show-down {
+    opacity:1;
+    transform:translate(-5px,10px);
+    color:#f97373;
+}
+.ctrl-bar {
+    margin-top:6px;
+}
+.ctrl-btn {
+    padding: 4px 10px;
+    margin-right: 6px;
+    border-radius: 999px;
+    border:none;
+    cursor:pointer;
+    background:#238636;
+    color:#fff;
+    font-size:12px;
+}
+.ctrl-btn:hover {
+    background:#2ea043;
+}
+.info-box {
+    flex: 2;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.info-box h2 {
+    margin:0 0 6px;
+    font-size:15px;
+}
+.info-box pre {
+    margin:0;
+    white-space:pre-wrap;
+    font-family:inherit;
+}
+.badge {
+    display:inline-block;
+    font-size:11px;
+    padding:2px 6px;
+    border-radius:999px;
+    margin-right:4px;
+}
+.badge-bull { background:#14532d; color:#bbf7d0; }
+.badge-bear { background:#7f1d1d; color:#fecaca; }
+.badge-cont { background:#1e3a8a; color:#bfdbfe; }
+@media (max-width: 900px) {
+    .container { flex-direction:column; }
+    .sidebar { width:100%; height:auto; border-right:none; border-bottom:1px solid #30363d; }
+}
+</style>
+</head>
+
+<body>
+<header>
+  <div>股價型態教學：動態走勢 + 切線 + 等幅</div>
+  <span class="sub">K 線：綠漲紅跌・純示意用</span>
+</header>
+
+<div class="container">
+  <div class="sidebar" id="sidebar">
+    <h3>型態清單</h3>
+    <small style="color:#8b949e;">點選型態播放動畫</small>
+    <div id="patternList"></div>
+  </div>
+
+  <div class="main">
+    <div class="top-row">
+      <div class="chart-wrap">
+
+        <div id="chart" class="chart-area">
+          <div class="chart-overlay-label" id="chartLabel">請從左側選擇型態</div>
+          <div class="arrow-tip" id="arrowTip">↑</div>
+        </div>
+
+        <div class="ctrl-bar">
+          <button class="ctrl-btn" onclick="play()">▶ 播放</button>
+          <button class="ctrl-btn" onclick="pause()">⏸ 暫停</button>
+          <button class="ctrl-btn" onclick="restart()">⟲ 重播</button>
+        </div>
+
+      </div>
+
+      <div class="info-box">
+        <h2 id="infoTitle">型態說明</h2>
+        <div id="infoBadges"></div>
+        <pre id="infoContent">請選擇左側型態開始。</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// -----------------------------
+//   初始化 Chart
+// -----------------------------
+const chartElement = document.getElementById('chart');
+
+let chart = LightweightCharts.createChart(chartElement, {
+  layout: { background: { color: '#0d1117' }, textColor: '#e6edf3' },
+  grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+  rightPriceScale: { borderColor: '#30363d' },
+  timeScale: { borderColor: '#30363d' },
+  width: chartElement.clientWidth,
+  height: chartElement.clientHeight || 350 /* ★ fallback */
+});
+
+let candleSeries = chart.addCandlestickSeries({
+  upColor: '#16a34a',
+  downColor: '#dc2626',
+  borderUpColor: '#16a34a',
+  borderDownColor: '#dc2626',
+  wickUpColor: '#16a34a',
+  wickDownColor: '#dc2626'
+});
+
+let supportSeries   = chart.addLineSeries({ color:'#e5e7eb', lineWidth:1 });
+let resistanceSeries= chart.addLineSeries({ color:'#e5e7eb', lineWidth:1 });
+let measureSeries   = chart.addLineSeries({ color:'#facc15', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed });
+
+// ★ 視窗調整大小 → 自動調整 chart
+new ResizeObserver(() => {
+  chart.applyOptions({
+    width: chartElement.clientWidth,
+    height: chartElement.clientHeight || 350
+  });
+}).observe(chartElement);
+
+// -----------------------------
+//   播放控制
+// -----------------------------
+let timer = null;
+let pointer = 0;
+let currentBars = [];
+let currentConfig = null;
+
+function play() {
+  if (!currentBars.length || timer) return;
+  timer = setInterval(() => {
+    if (pointer < currentBars.length) {
+      candleSeries.update(currentBars[pointer]);
+      pointer++;
+
+      // 動態階段性出線
+      if (pointer === Math.floor(currentBars.length * 0.55)) {
+        drawOverlays(currentConfig, currentBars);
+      }
+      if (pointer === Math.floor(currentBars.length * 0.75)) {
+        showArrow(currentConfig);
+      }
+
+    } else {
+      clearInterval(timer);
+      timer = null;
+    }
+  }, 230);
+}
+
+function pause() {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+function restart() {
+  pause();
+  candleSeries.setData([]);
+  supportSeries.setData([]);
+  resistanceSeries.setData([]);
+  measureSeries.setData([]);
+  document.getElementById('arrowTip').className = 'arrow-tip';
+  pointer = 0;
+  play();
+}
+
+// -----------------------------
+//   型態設定
+// -----------------------------
+const patternConfigs = [
+  { id:'upWedge', name:'上升楔型', tags:['偏空','反轉'], type:'bearish', direction:'down', shape:'upWedge' },
+  { id:'vTop', name:'倒V字型', tags:['偏空','急跌'], type:'bearish', direction:'down', shape:'vTop' },
+  { id:'preDiamond', name:'前漲菱型', tags:['反轉','高檔整理'], type:'bearish', direction:'down', shape:'topDiamond' },
+  { id:'upRectTop', name:'上升直角三角頂', tags:['偏空','反轉'], type:'bearish', direction:'down', shape:'upTriangleTop' },
+  { id:'boxRange', name:'箱型整理', tags:['盤整','突破'], type:'cont', direction:'up', shape:'boxRange' },
+  { id:'fastDropBullFlag', name:'快跌上升飄旗', tags:['續跌','中繼'], type:'bearish', direction:'down', shape:'downFlagUp' },
+  { id:'fastDropBearFlag', name:'快跌下降三角飄旗', tags:['續跌','中繼'], type:'bearish', direction:'down', shape:'downTriangleCont' },
+  { id:'downRightTri', name:'下跌直角三角形', tags:['偏空','續跌'], type:'bearish', direction:'down', shape:'downRightTri' },
+  { id:'fastUpBullFlag', name:'快漲上升飄旗', tags:['偏多','中繼'], type:'bullish', direction:'up', shape:'upFlagUp' },
+  { id:'fastUpBearFlag', name:'快漲下降三角飄旗', tags:['偏多','中繼'], type:'bullish', direction:'up', shape:'upTriangleCont' },
+  { id:'preTriangle', name:'前漲三角型', tags:['高檔整理'], type:'cont', direction:'up', shape:'upTriangleCont' },
+  { id:'downWedge', name:'下降楔型', tags:['偏多','反轉'], type:'bullish', direction:'up', shape:'downWedge' },
+  { id:'panBottom', name:'煎鍋底', tags:['底部','緩步築底'], type:'bullish', direction:'up', shape:'saucer' },
+  { id:'radialBroad', name:'放射擴張喇叭底', tags:['底部','波動放大'], type:'bullish', direction:'up', shape:'broadBottom' },
+  { id:'downBroad', name:'向下擴張喇叭底', tags:['底部','破底翻'], type:'bullish', direction:'up', shape:'broadBottom' },
+  { id:'roundBottom', name:'圓弧底', tags:['底部','反轉'], type:'bullish', direction:'up', shape:'roundBottom' },
+  { id:'nBottom', name:'N字底', tags:['底部','突破頸線'], type:'bullish', direction:'up', shape:'nBottom' },
+  { id:'doubleBottom', name:'雙椿底 / W底', tags:['底部','W反轉'], type:'bullish', direction:'up', shape:'wBottom' },
+  { id:'complexHSB', name:'複式頭肩底', tags:['底部','頭肩底'], type:'bullish', direction:'up', shape:'hsBottom' },
+  { id:'spikeBottom', name:'頭尖底', tags:['急跌急彈','V底'], type:'bullish', direction:'up', shape:'vBottom' }
+];
+
+const patternText = {
+  '上升楔型': `
+【型態特性】
+上升但漲勢逐步疲弱，高低點收斂，常為偏空反轉型態。
+
+【操作】
+・不在楔型內追多
+・跌破下緣進空
+・回測不過可續空
+
+【停損】
+・突破上緣
+
+【停利】
+・等幅下跌
+  `,
+  '倒V字型': `
+【型態特性】
+急漲後急跌形成尖頂。
+
+【操作】
+・跌破頸線再偏空
+・不摸頭
+
+【停損】
+・站回頸線
+
+【停利】
+・等幅下跌
+  `,
+  '前漲菱型': `
+【特性】
+高檔波動放大後再收斂，常出現在末升段。
+
+【操作】
+・向上突破＝續漲
+・向下跌破＝反轉
+
+【停損】
+・假突破
+  `,
+  '上升直角三角頂': `
+【特性】
+高點遇固定壓力，低點墊高，最後常下跌。
+
+【操作】
+・跌破下緣＝偏空
+  `,
+  '箱型整理': `
+【特性】
+區間盤整。
+
+【操作】
+・箱底低接
+・箱頂減碼
+・突破上緣追多
+・跌破箱底偏空
+  `,
+  '快跌上升飄旗': `
+【特性】
+急跌後的小幅反彈，偏空中繼。
+
+【操作】
+・跌破旗底空
+  `,
+  '快跌下降三角飄旗': `
+【特性】
+急跌後下降三角整理，偏空續跌。
+
+【操作】
+・跌破水平線續空
+  `,
+  '下跌直角三角形': `
+【特性】
+水平支撐反覆測試，高點逐降。
+
+【操作】
+・跌破支撐空
+  `,
+  '快漲上升飄旗': `
+【特性】
+急漲後小幅整理，偏多中繼。
+
+【操作】
+・突破旗面多
+  `,
+  '快漲下降三角飄旗': `
+【特性】
+急漲後下降三角整理。
+
+【操作】
+・突破下降壓力線多
+  `,
+  '前漲三角型': `
+【特性】
+大漲後三角整理。
+
+【操作】
+・突破向上多
+  `,
+  '下降楔型': `
+【特性】
+跌勢減弱，收斂，偏多反轉。
+
+【操作】
+・突破上緣多
+  `,
+  '煎鍋底': `
+【特性】
+長期緩跌後築底。
+
+【操作】
+・突破頸線多
+  `,
+  '放射擴張喇叭底': `
+【特性】
+波動放大，底部強勢。
+
+【操作】
+・突破上緣多
+  `,
+  '向下擴張喇叭底': `
+【特性】
+破底翻結構。
+
+【操作】
+・突破下降線多
+  `,
+  '圓弧底': `
+【特性】
+長線緩步反轉。
+
+【操作】
+・突破頸線多
+  `,
+  'N字底': `
+【特性】
+反彈不破低後再突破前高。
+
+【操作】
+・突破頸線多
+  `,
+  '雙椿底 / W底': `
+【特性】
+二次打底。
+
+【操作】
+・突破頸線多
+  `,
+  '複式頭肩底': `
+【特性】
+不規則頭肩底。
+
+【操作】
+・突破頸線多
+  `,
+  '頭尖底': `
+【特性】
+急跌急彈的 V 型底。
+
+【操作】
+・突破右側壓力多
+  `
+};
+
+// -----------------------------
+//   生成簡化走勢（假資料）
+// -----------------------------
+function makeBarsFromClose(closeSeq, start=1700000000, step=3600) {
+  const bars = [];
+  let prev = closeSeq[0];
+  for (let i = 0; i < closeSeq.length; i++) {
+    const c = closeSeq[i];
+    const o = prev + (Math.random()-0.5)*0.5;
+    const h = Math.max(o,c)+Math.random()*0.6;
+    const l = Math.min(o,c)-Math.random()*0.6;
+    bars.push({ time:start+i*step, open:o, high:h, low:l, close:c });
+    prev = c;
+  }
+  return bars;
+}
+
+function shape_upWedge(){return makeBarsFromClose([100,102,104,106,107.5,108.5,109,109.5,109.8,109.6,109.4,109.2,108.8,108.2,107.5]);}
+function shape_downWedge(){return makeBarsFromClose([100,98,96,95,94.2,93.8,93.5,93.6,93.9,94.2,94.8,95.3,96,97,98]);}
+function shape_vTop(){return makeBarsFromClose([100,102,106,110,115,120,123,125,126,124,120,116,112,108,104,100]);}
+function shape_vBottom(){return makeBarsFromClose([100,95,90,85,82,80,82,86,90,94,98,101]);}
+function shape_topDiamond(){return makeBarsFromClose([100,103,106,109,112,114,115,114,113,112,110,108,106,104,102]);}
+function shape_upTriangleTop(){return makeBarsFromClose([100,104,107,109,110.5,110,110.3,110.1,109.5,108,105,102,99]);}
+function shape_boxRange(){return makeBarsFromClose([100,102,101,103,99,102,101,103,100,102,101,103,100]);}
+function shape_upFlagUp(){return makeBarsFromClose([100,104,108,113,118,122,121,120,119,120,121,122,123]);}
+function shape_downFlagUp(){return makeBarsFromClose([120,115,110,105,100,96,97,98,99,98,97,96,95]);}
+function shape_upTriangleCont(){return makeBarsFromClose([100,104,108,112,116,117,116,117.5,116.5,118]);}
+function shape_downTriangleCont(){return makeBarsFromClose([120,115,110,106,105,104,103.5,103,102.8]);}
+function shape_downRightTri(){return makeBarsFromClose([120,118,116,115,113,112,110.5,109.8,109.3,108.9,105,101]);}
+function shape_saucer(){return makeBarsFromClose([100,98,96,95,94.5,94.3,94.5,95,96,97.5,99,101,103]);}
+function shape_broadBottom(){return makeBarsFromClose([100,95,102,93,104,92,106,94,108,96,110]);}
+function shape_roundBottom(){return makeBarsFromClose([100,98,96,95,94.8,95,95.5,96.5,98,100,103]);}
+function shape_nBottom(){return makeBarsFromClose([100,96,92,94,96,95,97,100,103]);}
+function shape_wBottom(){return makeBarsFromClose([100,95,98,94,97,95.5,98.5,101,104]);}
+function shape_hsBottom(){return makeBarsFromClose([100,96,99,94,98,95,97,96,99,102]);}
+
+function generateBarsByShape(shape){
+  switch(shape){
+    case 'upWedge':return shape_upWedge();
+    case 'downWedge':return shape_downWedge();
+    case 'vTop':return shape_vTop();
+    case 'vBottom':return shape_vBottom();
+    case 'topDiamond':return shape_topDiamond();
+    case 'upTriangleTop':return shape_upTriangleTop();
+    case 'boxRange':return shape_boxRange();
+    case 'upFlagUp':return shape_upFlagUp();
+    case 'downFlagUp':return shape_downFlagUp();
+    case 'upTriangleCont':return shape_upTriangleCont();
+    case 'downTriangleCont':return shape_downTriangleCont();
+    case 'downRightTri':return shape_downRightTri();
+    case 'saucer':return shape_saucer();
+    case 'broadBottom':return shape_broadBottom();
+    case 'roundBottom':return shape_roundBottom();
+    case 'nBottom':return shape_nBottom();
+    case 'wBottom':return shape_wBottom();
+    case 'hsBottom':return shape_hsBottom();
+  }
+  return shape_boxRange();
+}
+
+// -----------------------------
+//   切線 / 等幅 / 箭頭
+// -----------------------------
+function drawOverlays(cfg, bars){
+  if(!cfg || !bars || bars.length<5)return;
+
+  const n = bars.length;
+  const first = bars[0];
+  const mid   = bars[Math.floor(n*0.4)];
+  const late  = bars[Math.floor(n*0.75)];
+  const last  = bars[n-1];
+
+  // 支撐線
+  let supStart = (first.low+mid.low)/2;
+  let supEnd   = (mid.low+late.low)/2;
+  supportSeries.setData([
+    { time:first.time, value:supStart },
+    { time:late.time,  value:supEnd }
+  ]);
+
+  // 壓力線
+  let resStart = (first.high+mid.high)/2;
+  let resEnd   = (mid.high+late.high)/2;
+  resistanceSeries.setData([
+    { time:first.time, value:resStart },
+    { time:late.time,  value:resEnd }
+  ]);
+
+  // 等幅測量
+  let height = Math.abs(resStart - supStart);
+  let start = last.close;
+  let end   = cfg.direction==='up' ? start + height : start - height;
+
+  measureSeries.setData([
+    { time:last.time, value:start },
+    { time:last.time + 6*3600, value:end }
+  ]);
+
+  // K 線上的箭頭 Marker
+  candleSeries.setMarkers([{
+    time:last.time,
+    position: cfg.direction==='up'?'belowBar':'aboveBar',
+    color: cfg.direction==='up'?'#22c55e':'#f97373',
+    shape: cfg.direction==='up'?'arrowUp':'arrowDown',
+    text:'突破'
+  }]);
+}
+
+function showArrow(cfg){
+  const el = document.getElementById('arrowTip');
+  el.textContent = cfg.direction==='up'?'↑':'↓';
+  el.className = 'arrow-tip ' + (cfg.direction==='up'?'show-up':'show-down');
+}
+
+// -----------------------------
+//   UI：型態清單
+// -----------------------------
+const patternList = document.getElementById('patternList');
+patternConfigs.forEach(cfg=>{
+  const btn = document.createElement('button');
+  btn.id='btn-'+cfg.id;
+  btn.className='pattern-btn';
+  btn.textContent=cfg.name;
+  btn.onclick=()=>selectPattern(cfg.id);
+  patternList.appendChild(btn);
+});
+
+// -----------------------------
+//   載入型態
+// -----------------------------
+function selectPattern(id){
+  const cfg = patternConfigs.find(p=>p.id===id);
+  if(!cfg)return;
+  currentConfig=cfg;
+
+  patternConfigs.forEach(p=>{
+    document.getElementById('btn-'+p.id).classList.toggle('active',p.id===id);
+  });
+
+  document.getElementById('infoTitle').textContent = cfg.name;
+  const badgeBox = document.getElementById('infoBadges');
+  badgeBox.innerHTML = '';
+  cfg.tags.forEach(t=>{
+    const span=document.createElement('span');
+    span.className='badge '+
+      (cfg.type==='bullish'?'badge-bull':(cfg.type==='bearish'?'badge-bear':'badge-cont'));
+    span.textContent=t;
+    badgeBox.appendChild(span);
+  });
+  document.getElementById('infoContent').textContent =
+    patternText[cfg.name] || "尚無說明";
+
+  pause();
+  candleSeries.setData([]);
+  supportSeries.setData([]);
+  resistanceSeries.setData([]);
+  measureSeries.setData([]);
+  document.getElementById('arrowTip').className='arrow-tip';
+
+  currentBars = generateBarsByShape(cfg.shape);
+  pointer=0;
+  document.getElementById('chartLabel').textContent = cfg.name+'（示意走勢）';
+
+  chart.timeScale().fitContent();
+  play();
+}
+
+// -----------------------------
+//   預設載入第一個型態
+// -----------------------------
+selectPattern(patternConfigs[0].id);
+
+</script>
+</body>
+</html>
