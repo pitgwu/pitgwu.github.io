@@ -55,9 +55,9 @@
       wickDownColor: "#00aa00",
     });
 
-    ma5  = chart.addLineSeries({ color: "#f00", lineWidth: 1 });
-    ma10 = chart.addLineSeries({ color: "#0a0", lineWidth: 1 });
-    ma20 = chart.addLineSeries({ color: "#00f", lineWidth: 1 });
+    ma5  = chart.addLineSeries({ color: "#f00", lineWidth: 1, visible:false });
+    ma10 = chart.addLineSeries({ color: "#0a0", lineWidth: 1, visible:false });
+    ma20 = chart.addLineSeries({ color: "#00f", lineWidth: 1, visible:false });
 
     bbU = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider: noScale });
     bbM = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider: noScale });
@@ -94,7 +94,7 @@
 
     // MACD（放大比例）
     const macdScale = () => ({
-      priceRange: { minValue: -15, maxValue: 15 }
+      priceRange: { minValue: -3, maxValue: 3 }
     });
 
     macdL1 = indChart.addLineSeries({
@@ -125,11 +125,31 @@
     /* ===== 均線 ===== */
     if (opt.showMA) {
       const closes = shown.map(c => c.close);
-      ma5.setData(U.sma(closes,5).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
-      ma10.setData(U.sma(closes,10).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
-      ma20.setData(U.sma(closes,20).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
+
+      ma5.setData(
+        U.sma(closes,5)
+          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
+          .filter(Boolean)
+      );
+      ma10.setData(
+        U.sma(closes,10)
+          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
+          .filter(Boolean)
+      );
+      ma20.setData(
+        U.sma(closes,20)
+          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
+          .filter(Boolean)
+      );
+
+      ma5.applyOptions({ visible:true });
+      ma10.applyOptions({ visible:true });
+      ma20.applyOptions({ visible:true });
+
     } else {
-      ma5.setData([]); ma10.setData([]); ma20.setData([]);
+      ma5.applyOptions({ visible:false });
+      ma10.applyOptions({ visible:false });
+      ma20.applyOptions({ visible:false });
     }
 
     /* ===== 布林通道 ===== */
