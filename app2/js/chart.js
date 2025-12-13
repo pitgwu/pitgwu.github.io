@@ -189,11 +189,24 @@
       bbU.setData([]); bbM.setData([]); bbL.setData([]);
     }
 
+    // ===== Overlay no-scale（共用）=====
+    const noScale = () => ({ priceRange: null });
+
     /* ===== 型態線（全部先清） ===== */
     resLine.setData([]); supLine.setData([]);
     trendUp.setData([]); trendDn.setData([]);
     triUp.setData([]); triLow.setData([]);
     wLine1.setData([]); wLine2.setData([]); wNeck.setData([]);
+	
+	resLine.applyOptions({ visible: false });
+	supLine.applyOptions({ visible: false });
+	trendUp.applyOptions({ visible: false });
+	trendDn.applyOptions({ visible: false });
+	triUp.applyOptions({ visible: false });
+	triLow.applyOptions({ visible: false });
+	wLine1.applyOptions({ visible: false });
+	wLine2.applyOptions({ visible: false });
+	wNeck.applyOptions({ visible: false });
 
     if (opt.showMA) {
       // 支撐壓力
@@ -202,6 +215,8 @@
         const t = shown[shown.length - 1].time;
         if (SR[0]) resLine.setData([{ time:t, value:SR[0].price }]);
         if (SR[1]) supLine.setData([{ time:t, value:SR[1].price }]);
+		resLine.applyOptions({ visible: true });
+		supLine.applyOptions({ visible: true });
       }
 
       // 趨勢線
@@ -221,6 +236,8 @@
             { time: shown[d.p2.index].time, value: d.p2.price },
           ]);
         }
+		trendUp.applyOptions({ visible: true });
+	    trendDn.applyOptions({ visible: true });
       }
 
       // 三角
@@ -233,6 +250,8 @@
           { time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price },
           { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price },
         ]);
+		triUp.applyOptions({ visible: true });
+	    triLow.applyOptions({ visible: true });
       }
 
       // W 底
@@ -250,6 +269,9 @@
           { time: shown[W.p1.index].time, value: W.neck },
           { time: shown[shown.length - 1].time, value: W.neck },
         ]);
+	    wLine1.applyOptions({ visible: true });
+	    wLine2.applyOptions({ visible: true });
+	    wNeck.applyOptions({ visible: true });
       }
     }
 
