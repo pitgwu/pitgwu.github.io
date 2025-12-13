@@ -212,10 +212,17 @@
    * 🎯 交易行為 → 盤感評分
    * ========================= */
   function scoreAfterBuy(price) {
-    const rsi = indicators.RSI[currentIndex];
-    if (rsi >= 70) timingScore -= 2;      // 追高
-    if (rsi <= 35) timingScore += 1;      // 拉回買
-    if (lots.length > 3) riskScore -= 1;  // 加碼過多
+    // 🔒 防呆：RSI 尚未生成
+    if (!indicators || !indicators.RSI) return;
+
+    const rsiVal = indicators.RSI[currentIndex];
+    if (typeof rsiVal !== "number") return;
+
+   // 🎯 盤感評分規則
+    if (rsiVal >= 70) timingScore -= 2;      // 追高
+    else if (rsiVal <= 35) timingScore += 1; // 拉回買
+
+    if (lots.length >= 3) riskScore -= 1;    // 加碼過多
   }
 
   function scoreAfterSell(realized) {
