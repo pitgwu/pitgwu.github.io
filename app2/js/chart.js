@@ -55,13 +55,41 @@
       wickDownColor: "#00aa00",
     });
 
-    ma5  = chart.addLineSeries({ color: "#f00", lineWidth: 1, visible:false });
-    ma10 = chart.addLineSeries({ color: "#0a0", lineWidth: 1, visible:false });
-    ma20 = chart.addLineSeries({ color: "#00f", lineWidth: 1, visible:false });
+    ma5 = chart.addLineSeries({
+      color:"#f00",
+      lineWidth:1,
+      visible:false,
+      autoscaleInfoProvider: noScale
+    });
 
-    bbU = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider: noScale });
-    bbM = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider: noScale });
-    bbL = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider: noScale });
+    ma10 = chart.addLineSeries({
+      color:"#0a0",
+      lineWidth:1,
+      visible:false,
+      autoscaleInfoProvider: noScale
+    });
+
+    ma20 = chart.addLineSeries({
+      color:"#00f",
+      lineWidth:1,
+      visible:false,
+      autoscaleInfoProvider: noScale
+    });
+
+    bbU = chart.addLineSeries({
+      color:"#ffa500",
+      autoscaleInfoProvider: noScale
+    });
+	
+    bbM = chart.addLineSeries({
+      color:"#0066cc",
+      autoscaleInfoProvider: noScale
+    });
+	
+    bbL = chart.addLineSeries({
+      color:"#008800",
+      autoscaleInfoProvider: noScale
+    });
 
     // 型態線 series（一次宣告，後面只 setData）
     resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
