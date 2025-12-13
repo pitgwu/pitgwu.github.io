@@ -52,6 +52,11 @@
             sig.push({ side: "bear", name: "MA 空頭排列(5<10<20)" });
           }
         }
+		
+	    // 均線糾結（即將選方向）
+	    if (isMACompression(i, data, ma5, ma10, ma20)) {
+		   sig.push({ name: "均線糾結：即將選方向" });
+        }
       }
 
       // MACD 金叉 / 死叉
@@ -120,6 +125,15 @@
           }
         }
       }
+	  
+	  // RSI / MACD 背離 轉折提示（高階盤感）
+	  if (isRSIBearDiv(i,data,rsi)) {
+		 sig.push({ side: "bear", name: "高檔轉折風險升高" });
+      }
+ 	  if (isRSIBullDiv(i,data,rsi)) {
+		 sig.push({ side: "bull", name: "低檔反彈機會" });
+      }
+
     }
 
     return out;
@@ -131,7 +145,23 @@
     for (let i = arr.length - period; i < arr.length; i++) sum += arr[i];
     return sum / period;
   }
+  
+  function isMACompression(i, data, ma5, ma10, ma20) {
+    if (!ma5[i] || !ma10[i] || !ma20[i]) return false;
+    const price = data[i].close;
+    const max = Math.max(ma5[i], ma10[i], ma20[i]);
+    const min = Math.min(ma5[i], ma10[i], ma20[i]);
+    return (max - min) / price < 0.01;
+  }
 
+  function isRSIBearDiv(i, data, rsi) {
+    return data[i].high > data[i-5]?.high && rsi[i] < rsi[i-5];
+  }
+
+  function isRSIBullDiv(i, data, rsi) {
+    return data[i].low < data[i-5]?.low && rsi[i] > rsi[i-5];
+  }
+  
   global.SignalEngine = SignalEngine;
 
 })(window);

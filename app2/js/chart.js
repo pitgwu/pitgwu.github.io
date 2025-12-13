@@ -115,6 +115,23 @@
     /* ===== 指標區 ===== */
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
+	
+	// === 指標過熱 / 過冷底色 ===
+    let indBgHigh, indBgLow;
+
+    indBgHigh = indChart.addLineSeries({
+  		color: "rgba(255, 0, 0, 0.08)",
+  		lineWidth: 1000,
+  		autoscaleInfoProvider: () => ({ priceRange: null }),
+  		visible: false
+	});
+
+	indBgLow = indChart.addLineSeries({
+  		color: "rgba(0, 120, 255, 0.08)",
+  		lineWidth: 1000,
+  		autoscaleInfoProvider: () => ({ priceRange: null }),
+  		visible: false
+	});
 
     // KD / RSI（自動比例）
     indAutoL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
@@ -278,6 +295,11 @@
     /* ===== 指標 ===== */
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
+	
+	indBgHigh.setData([]);
+	indBgLow.setData([]);
+	indBgHigh.applyOptions({ visible: false });
+	indBgLow.applyOptions({ visible: false });
 
     if (opt.indicatorType === "kd") {
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
@@ -295,6 +317,20 @@
         color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
+	
+	if (opt.indicatorType === "rsi") {
+  	  indBgHigh.setData(shown.map(c => ({ time: c.time, value: 70 })));
+  	  indBgLow.setData(shown.map(c => ({ time: c.time, value: 30 })));
+  	  indBgHigh.applyOptions({ visible: true });
+  	  indBgLow.applyOptions({ visible: true });
+	}
+
+	if (opt.indicatorType === "kd") {
+  	  indBgHigh.setData(shown.map(c => ({ time: c.time, value: 80 })));
+	  indBgLow.setData(shown.map(c => ({ time: c.time, value: 20 })));
+	  indBgHigh.applyOptions({ visible: true });
+	  indBgLow.applyOptions({ visible: true });
+	}
 
     /* ===== 視窗 ===== */
     const start = Math.max(0, shown.length - visibleBars);

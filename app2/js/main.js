@@ -27,6 +27,15 @@
   let signalVisible = false;
   let maVisible = false;
 
+  /* =========================
+   * 🧠 盤感評分用狀態
+   * ========================= */
+  let timingScore = 5;     // 節奏
+  let riskScore = 5;       // 風險
+  let maxDrawdown = 0;     // 最大浮虧
+  let holdingDays = 0;     // 持倉天數
+  let peakEquity = INITIAL_CASH;
+
   // ----------------------------------------------------------
   // 1️⃣ 計算「總未實現損益」
   // ----------------------------------------------------------
@@ -199,6 +208,22 @@
       `未實現總損益：${U.formatNumber(unrealTotal)} 元`;
   }
 
+  /* =========================
+   * 🎯 交易行為 → 盤感評分
+   * ========================= */
+  function scoreAfterBuy(price) {
+    const rsi = indicators.RSI[currentIndex];
+    if (rsi >= 70) timingScore -= 2;      // 追高
+    if (rsi <= 35) timingScore += 1;      // 拉回買
+    if (lots.length > 3) riskScore -= 1;  // 加碼過多
+  }
+
+  function scoreAfterSell(realized) {
+    if (realized > 0) timingScore += 1;
+    else timingScore -= 1;
+    riskScore += 1;
+  }
+  
   // ----------------------------------------------------------
   // 當天交易 → 隔天跳下一根 K
   // ----------------------------------------------------------
@@ -240,6 +265,7 @@
       date: data[currentIndex].time
     });
 
+    scoreAfterBuy(price);
     finishToday();
   }
 
@@ -283,6 +309,7 @@
       date: data[currentIndex].time
     });
 
+    scoreAfterSell(realized);
     finishToday();
   }
 
@@ -312,6 +339,27 @@
     const unrealTotal = calcUnrealTotal(finalPrice);
 
     const stock = global.__currentStock;
+
+    const dangerIndex =
+      (maxDrawdown / INITIAL_CASH) * (holdingDays / 10);
+
+    let comment = "🧠 新手階段";
+    if (timingScore >= 7 && riskScore >= 7 && dangerIndex < 0.1)
+      comment = "🔥 成熟交易者";
+    else if (dangerIndex > 0.2)
+      comment = "🚨 凹單體質明顯";
+
+    U.el("feedback").innerText = `
+📊【盤感教練總評】
+節奏分：${timingScore}/10
+風險分：${riskScore}/10
+凹單指數：${dangerIndex.toFixed(2)}
+
+教練評語：
+${comment}
+    `;
+    U.el("stockName").innerText =
+      `模擬結束｜個股：${global.__currentStock}`;
 
     const good    = [];
     const bad     = [];
