@@ -127,10 +127,10 @@
       }
 	  
 	  // RSI / MACD 背離 轉折提示（高階盤感）
-	  if (isRSIBearDiv(i,data,rsi)) {
+	  if (isRSIBearDiv(i,data,RSI)) {
 		 sig.push({ side: "bear", name: "高檔轉折風險升高" });
       }
- 	  if (isRSIBullDiv(i,data,rsi)) {
+ 	  if (isRSIBullDiv(i,data,RSI)) {
 		 sig.push({ side: "bull", name: "低檔反彈機會" });
       }
 
@@ -154,12 +154,14 @@
     return (max - min) / price < 0.01;
   }
 
-  function isRSIBearDiv(i, data, rsi) {
-    return data[i].high > data[i-5]?.high && rsi[i] < rsi[i-5];
+  function isRSIBearDiv(i, data, rsiArr) {
+    if (!rsiArr || i < 5) return false;
+    return data[i].high > data[i-5].high && rsiArr[i] < rsiArr[i-5];
   }
 
-  function isRSIBullDiv(i, data, rsi) {
-    return data[i].low < data[i-5]?.low && rsi[i] > rsi[i-5];
+  function isRSIBullDiv(i, data, rsiArr) {
+    if (!rsiArr || i < 5) return false;
+    return data[i].low < data[i-5].low && rsiArr[i] > rsiArr[i-5];
   }
   
   global.SignalEngine = SignalEngine;
