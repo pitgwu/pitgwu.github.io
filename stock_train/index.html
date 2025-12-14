@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>雪寶301沙盒 盤感生成器</title>
+
+  <!-- Lightweight Charts v4.2.0 -->
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial;
+      margin: 12px;
+      background: #ccefff;
+      overflow-x: hidden;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    .header { margin-bottom: 12px; }
+    h1 { font-size: 18px; margin: 0; }
+    h2 { margin: 0 0 4px 0; }
+
+    .main { display: flex; gap: 12px; }
+    .left { flex: 2; }
+    .right { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: 0 2px 10px rgba(20, 30, 40, 0.06);
+    }
+
+    #chart { width: 100%; height: 420px; }
+    #volume { width: 100%; height: 100px; margin-top: 8px; }
+    #indicator { width: 100%; height: 150px; margin-top: 8px; }
+
+    .controls {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .controls input[type="number"] {
+      width: 120px;
+      padding: 6px;
+    }
+    button {
+      margin: 2px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+
+    .stats {
+      margin-top: 10px;
+      padding: 8px;
+      background: #f0f6ff;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    #kPattern { margin-top: 6px; font-size: 14px; }
+
+    #signalBox {
+      margin-top: 6px;
+      font-size: 13px;
+      white-space: pre-line;
+      padding: 6px;
+      background: #f5fbff;
+      border-radius: 6px;
+      border: 1px dashed #8bbbe8;
+    }
+
+    #feedback {
+      margin-top: 8px;
+      font-weight: bold;
+      color: #cc0000;
+      white-space: pre-wrap;
+      font-size: 13px;
+    }
+
+    #maLegend {
+      margin-top: 4px;
+      font-size: 13px;
+    }
+    #maLegend span {
+      margin-right: 8px;
+      font-weight: bold;
+    }
+
+    /* 右側捲軸清單 */
+    #tradeLog,
+    #holdings {
+      list-style: none;
+      padding-left: 16px;
+      margin: 4px 0;
+      max-height: 220px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+
+    #unrealSummary,
+    #realSummary {
+      font-size: 13px;
+      font-weight: bold;
+      margin-top: 4px;
+    }
+
+    /* 雪寶 */
+    #olaf {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      width: 120px;
+      z-index: 1000;
+    }
+
+    .snowflake {
+      position: fixed;
+      top: -50px;
+      background: white;
+      border-radius: 50%;
+      opacity: 0.8;
+      z-index: 900;
+      pointer-events: none;
+    }
+
+    @media (max-width: 900px) {
+      .main { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h2>雪寶302沙盒 盤感生成器</h2>
+      <h1>把技術磨進神經，把反應變成本能。</h1>
+    </div>
+
+    <div class="main">
+      <!-- 左側：K 線 & 操作 -->
+      <div class="left card">
+	  
+	    <div id="stockName" style="font-weight:bold;margin-bottom:6px;font-size:15px; display:none;">
+        </div>
+  
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap;">
+          <select id="indicatorSelect">
+            <option value="kd">KD</option>
+            <option value="rsi">RSI</option>
+            <option value="macd">MACD</option>
+            <option value="bb">布林通道 (BB)</option>
+          </select>
+
+          <button id="toggleMA">均線：OFF</button>
+          <button id="toggleSignal">多空訊號：OFF</button>
+        </div>
+
+        <div id="maLegend" style="display:none;">
+          <span style="color:#ff0000;">● 5MA</span>
+          <span style="color:#00aa00;">● 10MA</span>
+          <span style="color:#0000ff;">● 20MA</span>
+        </div>
+
+        <div id="chart"></div>
+        <div id="volume"></div>
+        <div id="indicator"></div>
+
+        <div class="controls">
+          <button id="prevDay">前一日</button>
+          <button id="nextDay">下一日</button>
+
+          <label for="shareInput">輸入股數：</label>
+          <input id="shareInput" type="number" min="0" step="1000" value="1000" />
+
+          <button id="buy">買進</button>
+          <button id="sell">賣出</button>
+          <button id="hold">不動作</button>
+        </div>
+
+        <div class="stats" id="assetStats">
+          <div>初始資金: <span id="initialCash">5,000,000</span> 元</div>
+          <div>現金: <span id="cash">5,000,000</span> 元</div>
+          <div>持股: <span id="position">0</span> 股</div>
+          <div>持股市值: <span id="holdingValue">0</span> 元</div>
+          <div>總資產: <span id="totalAsset">5,000,000</span> 元</div>
+          <div>報酬率: <span id="roi">0.00</span> %</div>
+        </div>
+
+        <div id="kPattern">即時型態偵測：</div>
+        <div id="signalBox">多空訊號：載入中...</div>
+        <div id="feedback"></div>
+      </div>
+
+      <!-- 右側：交易 / 持倉 -->
+      <div class="right">
+        <div class="card">
+          <h3 style="margin:0 0 4px 0;font-size:15px;">交易紀錄</h3>
+          <ul id="tradeLog"></ul>
+        </div>
+
+        <div class="card">
+          <h3 style="margin:0 0 4px 0;font-size:15px;">持倉明細（分批）</h3>
+          <ul id="holdings"></ul>
+          <div id="unrealSummary"></div>
+        </div>
+		
+		<div class="card">
+          <h3>已實現總損益</h3>
+          <div id="realizedTotalBox" style="font-size:14px;font-weight:bold;">0 元</div>
+		  <div style="margin-top:8px;">
+            <strong>未實現總損益：</strong>
+            <span id="unrealizedTotalBox">0 元</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- <img id="olaf" src="wp5615876.jpg" alt="Olaf">  -->
+
+  <script>
+    // 強制每次重新抓 CSV
+    const oldFetch = window.fetch;
+    window.fetch = function(url, opt) {
+      if (url.includes(".csv")) {
+        url += "?v=" + Date.now();
+      }
+      return oldFetch(url, opt);
+    }
+  </script>
+
+  <!-- 雪花效果 -->
+  <script>
+    function createSnowflake() {
+      const snow = document.createElement('div');
+      snow.className = 'snowflake';
+      snow.style.left = Math.random() * window.innerWidth + 'px';
+      const size = Math.random() * 8 + 4;
+      snow.style.width = size + 'px';
+      snow.style.height = size + 'px';
+      snow.style.opacity = Math.random();
+      document.body.appendChild(snow);
+
+      const fallDuration = Math.random() * 5000 + 5000;
+      const startLeft = parseFloat(snow.style.left);
+      let startTime = null;
+
+      function animate(timestamp) {
+        if (!startTime) startTime = timestamp;
+        const progress = timestamp - startTime;
+        const fraction = progress / fallDuration;
+        snow.style.top = fraction * window.innerHeight + 'px';
+        snow.style.left = startLeft + Math.sin(fraction * Math.PI * 2) * 50 + 'px';
+        if (fraction < 1) requestAnimationFrame(animate);
+        else snow.remove();
+      }
+      requestAnimationFrame(animate);
+    }
+    setInterval(createSnowflake, 200);
+  </script>
+
+  <!-- JS 模組（順序很重要） -->
+  <script src="js/util.js"></script>
+  <script src="js/indicators.js"></script>
+  <script src="js/supportResistance.js"></script>
+  <script src="js/trendlines.js"></script>
+  <script src="js/patternWM.js"></script>
+  <script src="js/patternTriangle.js"></script>
+  <script src="js/kpattern.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/signals.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
