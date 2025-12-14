@@ -129,6 +129,9 @@
       ma10.applyOptions({ visible:true });
       ma20.applyOptions({ visible:true });
     } else {
+	  ma5.setData([]);
+      ma10.setData([]);
+      ma20.setData([]);
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
@@ -244,20 +247,6 @@
         color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
-
-	if (opt.indicatorType === "rsi") {
-  	  indBgHigh.setData(shown.map(c => ({ time: c.time, value: 70 })));
-  	  indBgLow.setData(shown.map(c => ({ time: c.time, value: 30 })));
-  	  indBgHigh.applyOptions({ visible: true });
-  	  indBgLow.applyOptions({ visible: true });
-	}
-
-	if (opt.indicatorType === "kd") {
-  	  indBgHigh.setData(shown.map(c => ({ time: c.time, value: 80 })));
-	  indBgLow.setData(shown.map(c => ({ time: c.time, value: 20 })));
-	  indBgHigh.applyOptions({ visible: true });
-	  indBgLow.applyOptions({ visible: true });
-	}
 
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;

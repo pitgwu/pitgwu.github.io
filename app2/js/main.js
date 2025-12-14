@@ -432,14 +432,8 @@ ${comment}
 
     U.el("toggleSignal").onclick = () => {
       signalVisible = !signalVisible;
-      U.el("toggleSignal").innerText =
-        signalVisible ? "多空訊號：ON" : "多空訊號：OFF";
-
-      // 只更新訊號顯示，不更新圖表
-      const sigArr = allSignals[currentIndex] || [];
-      U.el("signalBox").innerText = signalVisible
-        ? (sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") || "無")
-        : "多空訊號：OFF";
+      U.el("toggleSignal").innerText = signalVisible ? "多空訊號：ON" : "多空訊號：OFF";
+      updateDisplays();   // ✅ 必須
     };
 
     U.el("indicatorSelect").onchange = updateDisplays;

@@ -54,9 +54,9 @@
         }
 		
 	    // 均線糾結（即將選方向）
-	    if (isMACompression(i, data, ma5, ma10, ma20)) {
-		   sig.push({ name: "均線糾結：即將選方向" });
-        }
+	    if (isMACompressionVal(day.close, ma5, ma10, ma20)) {
+	      sig.push({ name: "均線糾結：即將選方向" });
+	    }
       }
 
       // MACD 金叉 / 死叉
@@ -146,11 +146,10 @@
     return sum / period;
   }
   
-  function isMACompression(i, data, ma5, ma10, ma20) {
-    if (!ma5[i] || !ma10[i] || !ma20[i]) return false;
-    const price = data[i].close;
-    const max = Math.max(ma5[i], ma10[i], ma20[i]);
-    const min = Math.min(ma5[i], ma10[i], ma20[i]);
+  function isMACompressionVal(price, ma5, ma10, ma20) {
+    if (!ma5 || !ma10 || !ma20) return false;
+    const max = Math.max(ma5, ma10, ma20);
+    const min = Math.min(ma5, ma10, ma20);
     return (max - min) / price < 0.01;
   }
 
