@@ -12,7 +12,7 @@
   let ma5, ma10, ma20;
   let bbU, bbM, bbL;
 
-  // ===== 型態線 =====
+  // 型態線
   let resLine, supLine;
   let trendUp, trendDn;
   let triUp, triLow;
@@ -21,9 +21,6 @@
   // ===== 指標 =====
   let indAutoL1, indAutoL2;       // KD / RSI
   let macdL1, macdL2, macdHist;   // MACD（固定比例）
-
-  // ✅【關鍵修正】過熱 / 過冷底色：必須是 module scope
-  let indBgHigh, indBgLow;
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -44,8 +41,8 @@
   }
 
   function init() {
-    const noScale = () => ({ priceRange: null });
-
+	const noScale = () => ({ priceRange: null });
+	
     /* ===== 主圖 ===== */
     chart = fixedChart(document.getElementById("chart"), 420);
 
@@ -58,20 +55,52 @@
       wickDownColor: "#00aa00",
     });
 
-    ma5  = chart.addLineSeries({ color:"#f00", lineWidth:1, visible:false, autoscaleInfoProvider:noScale });
-    ma10 = chart.addLineSeries({ color:"#0a0", lineWidth:1, visible:false, autoscaleInfoProvider:noScale });
-    ma20 = chart.addLineSeries({ color:"#00f", lineWidth:1, visible:false, autoscaleInfoProvider:noScale });
+    ma5 = chart.addLineSeries({
+      color:"#f00",
+      lineWidth:1,
+      visible:false,
+      autoscaleInfoProvider: noScale
+    });
 
-    bbU = chart.addLineSeries({ color:"#ffa500", autoscaleInfoProvider:noScale });
-    bbM = chart.addLineSeries({ color:"#0066cc", autoscaleInfoProvider:noScale });
-    bbL = chart.addLineSeries({ color:"#008800", autoscaleInfoProvider:noScale });
+    ma10 = chart.addLineSeries({
+      color:"#0a0",
+      lineWidth:1,
+      visible:false,
+      autoscaleInfoProvider: noScale
+    });
 
+    ma20 = chart.addLineSeries({
+      color:"#00f",
+      lineWidth:1,
+      visible:false,
+      autoscaleInfoProvider: noScale
+    });
+
+    bbU = chart.addLineSeries({
+      color:"#ffa500",
+      autoscaleInfoProvider: noScale
+    });
+	
+    bbM = chart.addLineSeries({
+      color:"#0066cc",
+      autoscaleInfoProvider: noScale
+    });
+	
+    bbL = chart.addLineSeries({
+      color:"#008800",
+      autoscaleInfoProvider: noScale
+    });
+
+    // 型態線 series（一次宣告，後面只 setData）
     resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
     supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1 });
+
     trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2 });
     trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2 });
+
     triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1 });
     triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1 });
+
     wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
     wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
     wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
@@ -79,66 +108,79 @@
     /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
     volChart.timeScale().applyOptions({ visible: false });
-    volSeries = volChart.addHistogramSeries({ priceFormat:{ type:"volume" } });
+    volSeries = volChart.addHistogramSeries({
+      priceFormat: { type: "volume" }
+    });
 
     /* ===== 指標區 ===== */
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
-	const indFixedScale = () => ({ priceRange: { minValue: 0, maxValue: 100 } });
 
-    // ✅ 過熱 / 過冷底色（一定要在這裡初始化）
-    indBgHigh = indChart.addLineSeries({
-      color: "rgba(255,0,0,0.08)",
-      lineWidth: 0,
-      autoscaleInfoProvider: indFixedScale,
-      visible: false
+    // KD / RSI（自動比例）
+    indAutoL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
+    indAutoL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
+
+    // MACD（放大比例）
+    const macdScale = () => ({
+      priceRange: { minValue: -3, maxValue: 3 }
     });
 
-    indBgLow = indChart.addLineSeries({
-      color: "rgba(0,120,255,0.08)",
-      lineWidth: 0,
-      autoscaleInfoProvider: indFixedScale,
-      visible: false
+    macdL1 = indChart.addLineSeries({
+      lineWidth: 2,
+      color: "#1f77b4",
+      autoscaleInfoProvider: macdScale
     });
 
-    // KD / RSI
-    indAutoL1 = indChart.addLineSeries({ lineWidth:2, color:"#1f77b4" });
-    indAutoL2 = indChart.addLineSeries({ lineWidth:2, color:"#aa00aa" });
+    macdL2 = indChart.addLineSeries({
+      lineWidth: 2,
+      color: "#aa00aa",
+      autoscaleInfoProvider: macdScale
+    });
 
-    // MACD（固定比例，避免縮放影響其他指標）
-    const macdScale = () => ({ priceRange:{ minValue:-3, maxValue:3 } });
-
-    macdL1 = indChart.addLineSeries({ lineWidth:2, autoscaleInfoProvider:macdScale });
-    macdL2 = indChart.addLineSeries({ lineWidth:2, autoscaleInfoProvider:macdScale });
-    macdHist = indChart.addHistogramSeries({ autoscaleInfoProvider:macdScale });
+    macdHist = indChart.addHistogramSeries({
+      autoscaleInfoProvider: macdScale
+    });
   }
 
   function update(shown, indicators, opt) {
     if (!shown || !shown.length) return;
     const visibleBars = opt.visibleBars || 40;
 
+    /* ===== K 線 / 成交量 ===== */
     candle.setData(shown);
-    volSeries.setData(shown.map(c => ({ time:c.time, value:c.volume })));
+    volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // ===== MA =====
+    /* ===== 均線 ===== */
     if (opt.showMA) {
-      const c = shown.map(d => d.close);
-      ma5.setData(U.sma(c,5).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
-      ma10.setData(U.sma(c,10).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
-      ma20.setData(U.sma(c,20).map((v,i)=>v?{time:shown[i].time,value:v}:null).filter(Boolean));
+      const closes = shown.map(c => c.close);
+
+      ma5.setData(
+        U.sma(closes,5)
+          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
+          .filter(Boolean)
+      );
+      ma10.setData(
+        U.sma(closes,10)
+          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
+          .filter(Boolean)
+      );
+      ma20.setData(
+        U.sma(closes,20)
+          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
+          .filter(Boolean)
+      );
+
       ma5.applyOptions({ visible:true });
       ma10.applyOptions({ visible:true });
       ma20.applyOptions({ visible:true });
+
     } else {
-	  ma5.setData([]);
-      ma10.setData([]);
-      ma20.setData([]);
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
     }
 
-    // ===== BB =====
+    /* ===== 布林通道 ===== */
     if (opt.showBB) {
       bbU.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.upper[i]})));
       bbM.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.mid[i]})));
@@ -147,12 +189,24 @@
       bbU.setData([]); bbM.setData([]); bbL.setData([]);
     }
 
-    // ===== 清空指標 =====
-    indAutoL1.setData([]); indAutoL2.setData([]);
-    macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
-    indBgHigh.setData([]); indBgLow.setData([]);
-    indBgHigh.applyOptions({ visible:false });
-    indBgLow.applyOptions({ visible:false });
+    // ===== Overlay no-scale（共用）=====
+    const noScale = () => ({ priceRange: null });
+
+    /* ===== 型態線（全部先清） ===== */
+    resLine.setData([]); supLine.setData([]);
+    trendUp.setData([]); trendDn.setData([]);
+    triUp.setData([]); triLow.setData([]);
+    wLine1.setData([]); wLine2.setData([]); wNeck.setData([]);
+	
+	resLine.applyOptions({ visible: false });
+	supLine.applyOptions({ visible: false });
+	trendUp.applyOptions({ visible: false });
+	trendDn.applyOptions({ visible: false });
+	triUp.applyOptions({ visible: false });
+	triLow.applyOptions({ visible: false });
+	wLine1.applyOptions({ visible: false });
+	wLine2.applyOptions({ visible: false });
+	wNeck.applyOptions({ visible: false });
 
     if (opt.showMA) {
       // 支撐壓力
@@ -219,66 +273,30 @@
 	    wLine2.applyOptions({ visible: true });
 	    wNeck.applyOptions({ visible: true });
       }
-	} else {
-  	  // 支撐 / 壓力
-	  resLine.setData([]);
-	  supLine.setData([]);
-
-	  // 趨勢線
-	  trendUp.setData([]);
-  	  trendDn.setData([]);
-
-      // 三角
-      triUp.setData([]);
-      triLow.setData([]);
-
-      // W 底
-      wLine1.setData([]);
-      wLine2.setData([]);
-      wNeck.setData([]);
-
-      resLine.applyOptions({ visible:false });
-      supLine.applyOptions({ visible:false });
-      trendUp.applyOptions({ visible:false });
-      trendDn.applyOptions({ visible:false });
-      triUp.applyOptions({ visible:false });
-      triLow.applyOptions({ visible:false });
-      wLine1.applyOptions({ visible:false });
-      wLine2.applyOptions({ visible:false });
-      wNeck.applyOptions({ visible:false });
     }
 
-    // ===== KD/RSI/MACD 指標切換 =====
-    // 一開始一定先清
-    indBgHigh.setData([]);
-    indBgLow.setData([]);
-    indBgHigh.applyOptions({ visible:false });
-    indBgLow.applyOptions({ visible:false });
-
-    if (opt.indicatorType === "rsi") {
-      indBgHigh.setData(shown.map(c => ({ time:c.time, value:70 })));
-      indBgLow.setData(shown.map(c => ({ time:c.time, value:30 })));
-      indBgHigh.applyOptions({ visible:true });
-      indBgLow.applyOptions({ visible:true });
-    }
+    /* ===== 指標 ===== */
+    indAutoL1.setData([]); indAutoL2.setData([]);
+    macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
 
     if (opt.indicatorType === "kd") {
-      indBgHigh.setData(shown.map(c => ({ time:c.time, value:80 })));
-      indBgLow.setData(shown.map(c => ({ time:c.time, value:20 })));
-      indBgHigh.applyOptions({ visible:true });
-      indBgLow.applyOptions({ visible:true });
+      indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
+      indAutoL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
     }
-
-    if (opt.indicatorType === "macd") {
+    else if (opt.indicatorType === "rsi") {
+      indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
+    }
+    else if (opt.indicatorType === "macd") {
       macdL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
       macdL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
       macdHist.setData(shown.map((c,i)=>({
-        time:c.time,
-        value:indicators.MACDHist[i],
+        time: c.time,
+        value: indicators.MACDHist[i],
         color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
 
+    /* ===== 視窗 ===== */
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
