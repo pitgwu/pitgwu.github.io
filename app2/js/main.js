@@ -226,23 +226,23 @@
       if (rsi >= 70) timingScore -= 2;
       else if (rsi <= 35) timingScore += 1;
     }
-
     if (k !== null && d !== null && k >= 80 && d >= 80) {
       riskScore -= 1;
     }
-
     if (macdHist !== null && macdHist < 0) {
       riskScore -= 1;
     }
-
     if (lots.length >= 3) riskScore -= 1;
+
+	updateCoachPanel();
   }
 
   function scoreAfterSell(realized) {
     timingScore += realized > 0 ? 1 : -1;
     riskScore += 1;
+	updateCoachPanel();
   }
-
+  
   /* =========================
    * 交易行為
    * ========================= */
@@ -306,7 +306,32 @@
 
   function doHold() {
     trades.push({ type: "hold", date: data[currentIndex].time });
+	updateCoachPanel();
     finishToday();
+  }
+
+  function updateCoachPanel() {
+    const dangerIndex =
+      (maxDrawdown / INITIAL_CASH) * (holdingDays / 10);
+
+    let comment = "🧠 新手階段";
+    if (timingScore >= 7 && riskScore >= 7 && dangerIndex < 0.1)
+      comment = "🔥 成熟交易者";
+    else if (dangerIndex > 0.2)
+      comment = "🚨 凹單體質明顯";
+  
+    const msg = `
+🧠【盤感教練即時回饋】
+節奏：${timingScore}/10
+風險：${riskScore}/10
+持倉天數：${holdingDays}
+凹單指數：${dangerIndex.toFixed(2)}
+教練評語：${comment}
+
+${timingScore <= 3 ? "⚠️ 進場節奏偏急" : ""}
+${riskScore <= 3 ? "⚠️ 風險控管不足" : ""}
+  `;
+    U.el("feedback").innerText = msg;
   }
 
   // ----------------------------------------------------------
@@ -331,24 +356,6 @@
 
     const stock = global.__currentStock;
 
-    const dangerIndex =
-      (maxDrawdown / INITIAL_CASH) * (holdingDays / 10);
-
-    let comment = "🧠 新手階段";
-    if (timingScore >= 7 && riskScore >= 7 && dangerIndex < 0.1)
-      comment = "🔥 成熟交易者";
-    else if (dangerIndex > 0.2)
-      comment = "🚨 凹單體質明顯";
-
-    U.el("feedback").innerText = `
-📊【盤感教練總評】
-節奏分：${timingScore}/10
-風險分：${riskScore}/10
-凹單指數：${dangerIndex.toFixed(2)}
-
-教練評語：
-${comment}
-    `;
     U.el("stockName").innerText =
       `模擬結束｜個股：${global.__currentStock}`;
 

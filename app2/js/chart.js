@@ -84,19 +84,20 @@
     /* ===== 指標區 ===== */
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
+	const indFixedScale = () => ({ priceRange: { minValue: 0, maxValue: 100 } });
 
     // ✅ 過熱 / 過冷底色（一定要在這裡初始化）
     indBgHigh = indChart.addLineSeries({
       color: "rgba(255,0,0,0.08)",
-      lineWidth: 1000,
-      autoscaleInfoProvider: noScale,
+      lineWidth: 0,
+      autoscaleInfoProvider: indFixedScale,
       visible: false
     });
 
     indBgLow = indChart.addLineSeries({
       color: "rgba(0,120,255,0.08)",
-      lineWidth: 1000,
-      autoscaleInfoProvider: noScale,
+      lineWidth: 0,
+      autoscaleInfoProvider: indFixedScale,
       visible: false
     });
 
@@ -218,22 +219,52 @@
 	    wLine2.applyOptions({ visible: true });
 	    wNeck.applyOptions({ visible: true });
       }
+	} else {
+  	  // 支撐 / 壓力
+	  resLine.setData([]);
+	  supLine.setData([]);
+
+	  // 趨勢線
+	  trendUp.setData([]);
+  	  trendDn.setData([]);
+
+      // 三角
+      triUp.setData([]);
+      triLow.setData([]);
+
+      // W 底
+      wLine1.setData([]);
+      wLine2.setData([]);
+      wNeck.setData([]);
+
+      resLine.applyOptions({ visible:false });
+      supLine.applyOptions({ visible:false });
+      trendUp.applyOptions({ visible:false });
+      trendDn.applyOptions({ visible:false });
+      triUp.applyOptions({ visible:false });
+      triLow.applyOptions({ visible:false });
+      wLine1.applyOptions({ visible:false });
+      wLine2.applyOptions({ visible:false });
+      wNeck.applyOptions({ visible:false });
     }
 
-    // ===== 指標切換 =====
-    if (opt.indicatorType === "kd") {
-      indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
-      indAutoL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
-      indBgHigh.setData(shown.map(c=>({time:c.time,value:80})));
-      indBgLow.setData(shown.map(c=>({time:c.time,value:20})));
+    // ===== KD/RSI/MACD 指標切換 =====
+    // 一開始一定先清
+    indBgHigh.setData([]);
+    indBgLow.setData([]);
+    indBgHigh.applyOptions({ visible:false });
+    indBgLow.applyOptions({ visible:false });
+
+    if (opt.indicatorType === "rsi") {
+      indBgHigh.setData(shown.map(c => ({ time:c.time, value:70 })));
+      indBgLow.setData(shown.map(c => ({ time:c.time, value:30 })));
       indBgHigh.applyOptions({ visible:true });
       indBgLow.applyOptions({ visible:true });
     }
 
-    if (opt.indicatorType === "rsi") {
-      indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
-      indBgHigh.setData(shown.map(c=>({time:c.time,value:70})));
-      indBgLow.setData(shown.map(c=>({time:c.time,value:30})));
+    if (opt.indicatorType === "kd") {
+      indBgHigh.setData(shown.map(c => ({ time:c.time, value:80 })));
+      indBgLow.setData(shown.map(c => ({ time:c.time, value:20 })));
       indBgHigh.applyOptions({ visible:true });
       indBgLow.applyOptions({ visible:true });
     }
