@@ -1,658 +1,857 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>股價型態教學（動態版 + 切線 + 等幅）</title>
-
-<!-- Lightweight Charts -->
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>股價型態靜態圖解教材（買點 / 比例 / 目標價）</title>
 <style>
-body {
-    margin: 0;
-    background: #0d1117;
-    color: #e6edf3;
-    font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto;
-}
-header {
-    padding: 10px 18px;
-    background: #161b22;
-    border-bottom: 1px solid #30363d;
-    font-size: 18px;
-    font-weight: 600;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-}
-header span.sub {
-    font-size:13px;
-    color:#8b949e;
-}
-.container {
-    display: flex;
-    height: calc(100vh - 52px);
-}
-.sidebar {
-    width: 260px;
-    background: #161b22;
-    border-right: 1px solid #30363d;
-    overflow-y: auto;
-    padding: 10px;
-}
-.sidebar h3 {
-    margin: 0 0 6px;
-    font-size: 15px;
-}
-.pattern-btn {
-    width: 100%;
-    padding: 6px 8px;
-    margin-bottom: 5px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    background: #21262d;
-    color: #e6edf3;
-    text-align: left;
-    font-size: 13px;
-    line-height: 1.3;
-}
-.pattern-btn:hover {
-    background: #30363d;
-}
-.pattern-btn.active {
-    background: #238636;
-}
-.main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 10px;
-}
-.top-row {
-    display:flex;
-    gap:10px;
-    margin-bottom:10px;
-}
-.chart-wrap {
-    flex: 3;
-    display:flex;
-    flex-direction:column;
-}
-.chart-area {
-    flex: 1;
-    min-height: 350px; /* ★ 最重要：確保 chart 高度存在 */
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    position: relative;
-    overflow: hidden;
-}
-.chart-overlay-label {
-    position:absolute;
-    left:8px;
-    top:6px;
-    font-size:12px;
-    color:#8b949e;
-    background:rgba(22,27,34,.7);
-    padding:3px 6px;
-    border-radius:4px;
-    pointer-events:none;
-}
-.arrow-tip {
-    position:absolute;
-    right:10px;
-    top:10px;
-    font-size:22px;
-    opacity:0;
-    transition:opacity .6s ease-out, transform .6s ease-out;
-}
-.arrow-tip.show-up {
-    opacity:1;
-    transform:translate(-5px,-10px);
-    color:#22c55e;
-}
-.arrow-tip.show-down {
-    opacity:1;
-    transform:translate(-5px,10px);
-    color:#f97373;
-}
-.ctrl-bar {
-    margin-top:6px;
-}
-.ctrl-btn {
-    padding: 4px 10px;
-    margin-right: 6px;
-    border-radius: 999px;
-    border:none;
-    cursor:pointer;
-    background:#238636;
-    color:#fff;
-    font-size:12px;
-}
-.ctrl-btn:hover {
-    background:#2ea043;
-}
-.info-box {
-    flex: 2;
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 8px;
-    padding: 10px;
-    font-size: 13px;
-    line-height: 1.5;
-}
-.info-box h2 {
-    margin:0 0 6px;
-    font-size:15px;
-}
-.info-box pre {
-    margin:0;
-    white-space:pre-wrap;
-    font-family:inherit;
-}
-.badge {
-    display:inline-block;
-    font-size:11px;
-    padding:2px 6px;
-    border-radius:999px;
-    margin-right:4px;
-}
-.badge-bull { background:#14532d; color:#bbf7d0; }
-.badge-bear { background:#7f1d1d; color:#fecaca; }
-.badge-cont { background:#1e3a8a; color:#bfdbfe; }
-@media (max-width: 900px) {
-    .container { flex-direction:column; }
-    .sidebar { width:100%; height:auto; border-right:none; border-bottom:1px solid #30363d; }
-}
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --muted:#8b949e; --text:#e6edf3;
+    --good:#22c55e; --bad:#ef4444; --warn:#facc15; --target:#60a5fa; --stop:#fb7185;
+    --chip:#21262d; --shadow:rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto}
+  header{
+    position:sticky;top:0;z-index:10;
+    display:flex;gap:10px;align-items:center;justify-content:space-between;
+    padding:10px 14px;background:rgba(22,27,34,.95);backdrop-filter: blur(8px);
+    border-bottom:1px solid var(--border);
+  }
+  header .title{font-weight:700}
+  header .sub{color:var(--muted);font-size:12px}
+  .wrap{display:grid;grid-template-columns: 320px 1fr;min-height:calc(100vh - 54px)}
+  .side{
+    border-right:1px solid var(--border);
+    background:linear-gradient(180deg, rgba(22,27,34,.95), rgba(22,27,34,.88));
+    padding:12px;
+  }
+  .main{padding:12px;max-width:1200px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .btn{
+    border:1px solid var(--border);background:var(--chip);color:var(--text);
+    padding:6px 10px;border-radius:999px;cursor:pointer;font-size:12px;
+  }
+  .btn.active{background:#238636;border-color:#238636}
+  .btn:hover{filter:brightness(1.08)}
+  .inp{
+    width:100%;padding:10px 10px;border-radius:10px;
+    border:1px solid var(--border);background:#0b1220;color:var(--text);
+    outline:none;
+  }
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .tag{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;padding:5px 10px;border-radius:999px;background:var(--chip);border:1px solid var(--border);
+    cursor:pointer; user-select:none;
+  }
+  .tag.on{border-color:#238636;box-shadow:0 0 0 2px rgba(35,134,54,.25) inset}
+  .count{color:var(--muted);font-size:12px;margin:8px 0 0}
+  .list{
+    display:flex;flex-direction:column;gap:8px;margin-top:10px;
+    max-height:calc(100vh - 220px);overflow:auto;padding-right:4px;
+  }
+  .item{
+    border:1px solid var(--border);background:rgba(13,17,23,.55);
+    border-radius:12px;padding:8px;cursor:pointer;
+  }
+  .item:hover{border-color:#3b434f}
+  .item.active{border-color:#238636; box-shadow: 0 0 0 2px rgba(35,134,54,.25) inset}
+  .item .name{font-weight:650;font-size:13px}
+  .item .meta{color:var(--muted);font-size:12px;margin-top:2px}
+  .cards{display:grid;grid-template-columns: repeat(2, minmax(0,1fr));gap:12px}
+  @media (max-width: 980px){ .wrap{grid-template-columns:1fr} .side{border-right:none;border-bottom:1px solid var(--border)} .cards{grid-template-columns:1fr} }
+  .card{
+    border:1px solid var(--border);background:var(--panel);border-radius:14px;
+    overflow:hidden;box-shadow:0 10px 30px var(--shadow);
+  }
+  .card .head{
+    padding:10px 12px;border-bottom:1px solid var(--border);
+    display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+  }
+  .card h2{margin:0;font-size:15px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{
+    font-size:11px;padding:3px 8px;border-radius:999px;background:var(--chip);border:1px solid var(--border);color:var(--text);
+  }
+  .chip.bull{border-color:rgba(34,197,94,.45)}
+  .chip.bear{border-color:rgba(239,68,68,.45)}
+  .chip.range{border-color:rgba(96,165,250,.45)}
+  .viz{
+    padding:10px 12px;border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, rgba(11,18,32,.8), rgba(13,17,23,.2));
+  }
+  .viz .caption{color:var(--muted);font-size:12px;margin-top:6px}
+  .body{padding:10px 12px;display:grid;gap:10px}
+  .sec h3{margin:0 0 6px;font-size:13px}
+  .sec ul{margin:0;padding-left:18px}
+  .sec li{margin:4px 0;color:#dbe3ef}
+  .kpi{
+    display:grid;grid-template-columns:1fr 1fr;gap:8px;
+    background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:10px;
+  }
+  .kpi .box{border:1px dashed rgba(48,54,61,.9);border-radius:10px;padding:8px}
+  .kpi .lbl{color:var(--muted);font-size:11px}
+  .kpi .val{font-size:12px;margin-top:3px}
+  .note{color:var(--muted);font-size:12px}
+  .advanced-only{display:block}
+  body[data-mode="basic"] .advanced-only{display:none}
+  .svgwrap{width:100%;aspect-ratio: 16 / 9;border-radius:12px;overflow:hidden;border:1px solid rgba(48,54,61,.8)}
+  /* SVG 共用：厚線 + 陰影 */
+  svg{width:100%;height:100%;display:block}
+  .s-price{stroke:#e5e7eb;stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round;
+           filter: drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .s-sup{stroke: var(--good);stroke-width:3.6;fill:none;stroke-linecap:round;filter: drop-shadow(0 3px 6px rgba(34,197,94,.25));}
+  .s-res{stroke: var(--bad);stroke-width:3.6;fill:none;stroke-linecap:round;filter: drop-shadow(0 3px 6px rgba(239,68,68,.25));}
+  .s-neck{stroke: #cbd5e1;stroke-width:3.0;fill:none;stroke-dasharray:8 6;opacity:.9}
+  .s-meas{stroke: var(--target);stroke-width:3.0;fill:none;stroke-dasharray:8 6;opacity:.95}
+  .s-stop{stroke: var(--stop);stroke-width:3.0;fill:none;stroke-dasharray:6 6;opacity:.95}
+  .dot{fill: var(--warn);filter: drop-shadow(0 4px 8px rgba(250,204,21,.22));}
+  .lbl{fill:#cbd5e1;font-size:12px;font-weight:650}
+  .tiny{fill:#94a3b8;font-size:11px}
 </style>
 </head>
+<body data-mode="basic">
 
-<body>
 <header>
-  <div>股價型態教學：動態走勢 + 切線 + 等幅</div>
-  <span class="sub">K 線：綠漲紅跌・純示意用</span>
+  <div>
+    <div class="title">股價型態靜態圖解教材（厚線＋陰影版）</div>
+    <div class="sub">清楚列出：買點 / 停損 / 比例 / 目標價（新手 / 進階可切換）・純教學示意</div>
+  </div>
+  <div class="controls">
+    <button class="btn active" id="btnBasic" onclick="setMode('basic')">新手模式</button>
+    <button class="btn" id="btnAdv" onclick="setMode('advanced')">進階模式</button>
+  </div>
 </header>
 
-<div class="container">
-  <div class="sidebar" id="sidebar">
-    <h3>型態清單</h3>
-    <small style="color:#8b949e;">點選型態播放動畫</small>
-    <div id="patternList"></div>
-  </div>
-
-  <div class="main">
-    <div class="top-row">
-      <div class="chart-wrap">
-
-        <div id="chart" class="chart-area">
-          <div class="chart-overlay-label" id="chartLabel">請從左側選擇型態</div>
-          <div class="arrow-tip" id="arrowTip">↑</div>
-        </div>
-
-        <div class="ctrl-bar">
-          <button class="ctrl-btn" onclick="play()">▶ 播放</button>
-          <button class="ctrl-btn" onclick="pause()">⏸ 暫停</button>
-          <button class="ctrl-btn" onclick="restart()">⟲ 重播</button>
-        </div>
-
-      </div>
-
-      <div class="info-box">
-        <h2 id="infoTitle">型態說明</h2>
-        <div id="infoBadges"></div>
-        <pre id="infoContent">請選擇左側型態開始。</pre>
-      </div>
+<div class="wrap">
+  <aside class="side">
+    <input class="inp" id="q" placeholder="搜尋：例如 楔形 / 飄旗 / 頭肩 / 喇叭 / 箱型 ..." oninput="renderList()" />
+    <div class="filters">
+      <div class="tag on" id="f_all" onclick="toggleFilter('all')">全部</div>
+      <div class="tag" id="f_bull" onclick="toggleFilter('bull')">偏多</div>
+      <div class="tag" id="f_bear" onclick="toggleFilter('bear')">偏空</div>
+      <div class="tag" id="f_range" onclick="toggleFilter('range')">整理/中繼</div>
+      <div class="tag" id="f_bottom" onclick="toggleFilter('bottom')">底部/反轉</div>
     </div>
-  </div>
+    <div class="count" id="count"></div>
+    <div class="list" id="list"></div>
+  </aside>
+
+  <main class="main">
+    <div class="cards" id="cards"></div>
+    <p class="note">※ 目標價以「突破點 B」為基準：用公式描述，讓你套到任何股價都能計算。你要我也可再加「示例數字（假設 B=100）」的快速算表。</p>
+  </main>
 </div>
 
 <script>
-// -----------------------------
-//   初始化 Chart
-// -----------------------------
-const chartElement = document.getElementById('chart');
+/* -----------------------------
+  教學資料：20 型態（你列的完整清單）
+  每個型態都包含：SVG模板、Entry/SL/MeasuredMove/Targets、常見錯誤
+--------------------------------*/
 
-let chart = LightweightCharts.createChart(chartElement, {
-  layout: { background: { color: '#0d1117' }, textColor: '#e6edf3' },
-  grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
-  rightPriceScale: { borderColor: '#30363d' },
-  timeScale: { borderColor: '#30363d' },
-  width: chartElement.clientWidth,
-  height: chartElement.clientHeight || 350 /* ★ fallback */
-});
+// 公式記法統一：
+// H = 型態高度（量測距離）
+// B = 突破點（Breakout / Breakdown 價位）
+// 目標價：
+//  - 向上：T1 = B + H×1.0, T2 = B + H×1.3 (保守/進階)
+//  - 向下：T1 = B - H×1.0, T2 = B - H×1.3
 
-let candleSeries = chart.addCandlestickSeries({
-  upColor: '#16a34a',
-  downColor: '#dc2626',
-  borderUpColor: '#16a34a',
-  borderDownColor: '#dc2626',
-  wickUpColor: '#16a34a',
-  wickDownColor: '#dc2626'
-});
+const PATTERNS = [
+  // 1 上升楔型
+  p("上升楔型", "bear bottom", ["偏空","反轉"], "wedge_up_breakdown", {
+    entry: [
+      "條件 1：收盤價有效跌破『下緣支撐線』（避免盤中假跌破）",
+      "條件 2：跌破後回測下緣不站回，可二次進場（更穩）"
+    ],
+    sl: [
+      "停損：價格重新站回楔形內，或有效突破上緣壓力線（型態失效）"
+    ],
+    mm: [
+      "量測高度 H：取楔形『最寬處』的高點 − 低點",
+      "目標價：T1 = B − H×1.0；T2 = B − H×1.3"
+    ],
+    targets: [
+      "保守：T1（1.0 等幅）",
+      "進階：T2（1.3 等幅）或前低支撐區"
+    ],
+    mistakes: [
+      "在楔形內猜高點摸頂（勝率通常更差）",
+      "沒等收盤確認就進場（最常被假突破洗）"
+    ]
+  }),
 
-let supportSeries   = chart.addLineSeries({ color:'#e5e7eb', lineWidth:1 });
-let resistanceSeries= chart.addLineSeries({ color:'#e5e7eb', lineWidth:1 });
-let measureSeries   = chart.addLineSeries({ color:'#facc15', lineWidth:1, lineStyle: LightweightCharts.LineStyle.Dashed });
+  // 2 倒V字型
+  p("倒V字型", "bear bottom", ["偏空","急跌反轉"], "v_top", {
+    entry: [
+      "條件：右側跌破『頸線/關鍵支撐』後再偏空（不要左側摸頭）",
+      "加碼：反彈回測頸線不過，可二次進場"
+    ],
+    sl: ["停損：站回頸線之上（反轉失效）"],
+    mm: [
+      "量測高度 H：頂部到頸線的距離",
+      "目標價：T1 = B − H×1.0；T2 = B − H×1.3"
+    ],
+    targets: ["T1 等幅為主；或前低支撐區分批出"],
+    mistakes: ["左側摸頭硬猜轉折", "頸線未破就提早做空"]
+  }),
 
-// ★ 視窗調整大小 → 自動調整 chart
-new ResizeObserver(() => {
-  chart.applyOptions({
-    width: chartElement.clientWidth,
-    height: chartElement.clientHeight || 350
-  });
-}).observe(chartElement);
+  // 3 前漲菱型
+  p("前漲菱型", "bear range", ["高檔整理","可能反轉"], "diamond_top", {
+    entry: [
+      "偏空：跌破菱形下緣（或跌破頸線）才進場",
+      "偏多：若反向突破上緣，視為續漲"
+    ],
+    sl: [
+      "停損：跌破後又回到菱形內（假跌破）",
+      "若做多：突破後跌回菱形內即停損"
+    ],
+    mm: [
+      "量測高度 H：菱形最大高度（最高點 − 最低點）",
+      "目標價：下破 T1 = B − H×1.0；上破 T1 = B + H×1.0"
+    ],
+    targets: ["以 T1 為主；進階可看 T2 = ×1.3"],
+    mistakes: ["菱形內追價（波動大、容易被掃）", "沒分辨『上破/下破』方向就硬做"]
+  }),
 
-// -----------------------------
-//   播放控制
-// -----------------------------
-let timer = null;
-let pointer = 0;
-let currentBars = [];
-let currentConfig = null;
+  // 4 上升直角三角頂
+  p("上升直角三角頂", "bear range", ["偏空","反轉"], "right_triangle_top", {
+    entry: [
+      "偏空：跌破上升支撐線（或水平支撐）收盤確認後進場",
+      "加碼：回測不站回支撐線"
+    ],
+    sl: ["停損：站回三角形內，或突破水平壓力區"],
+    mm: [
+      "量測高度 H：水平壓力到三角底部（最寬處）",
+      "目標價：T1 = B − H×1.0；T2 = B − H×1.3"
+    ],
+    targets: ["優先 T1；再看前低支撐區"],
+    mistakes: ["在壓力線附近追多", "未等跌破確認就做空"]
+  }),
 
-function play() {
-  if (!currentBars.length || timer) return;
-  timer = setInterval(() => {
-    if (pointer < currentBars.length) {
-      candleSeries.update(currentBars[pointer]);
-      pointer++;
+  // 5 箱型整理
+  p("箱型整理", "range", ["盤整","突破/跌破"], "box", {
+    entry: [
+      "突破策略：收盤有效突破箱頂 → 追隨突破",
+      "區間策略：箱底附近低接（需搭配停損），箱頂附近減碼/反手"
+    ],
+    sl: [
+      "突破做多停損：跌回箱內",
+      "區間低接停損：跌破箱底"
+    ],
+    mm: [
+      "量測高度 H：箱頂 − 箱底",
+      "上破：T1 = B + H×1.0；下破：T1 = B − H×1.0"
+    ],
+    targets: ["箱高等幅 T1；進階 T2 = ×1.3"],
+    mistakes: ["箱內追價（被來回洗）", "突破沒等收盤，容易假突破"]
+  }),
 
-      // 動態階段性出線
-      if (pointer === Math.floor(currentBars.length * 0.55)) {
-        drawOverlays(currentConfig, currentBars);
-      }
-      if (pointer === Math.floor(currentBars.length * 0.75)) {
-        showArrow(currentConfig);
-      }
+  // 6 快跌上升飄旗
+  p("快跌上升飄旗", "bear range", ["空頭中繼","續跌"], "flag_down_up", {
+    entry: [
+      "偏空：跌破旗面下緣（下邊界）收盤確認",
+      "加碼：回測旗面下緣不站回"
+    ],
+    sl: ["停損：有效突破旗面上緣（旗型失效）"],
+    mm: [
+      "量測高度 H：旗桿高度（急跌段起點到整理段起點）",
+      "目標價：T1 = B − H×1.0；T2 = B − H×1.3"
+    ],
+    targets: ["以旗桿等幅 T1 為主"],
+    mistakes: ["把旗面反彈誤當反轉", "旗面內就急著放空"]
+  }),
 
-    } else {
-      clearInterval(timer);
-      timer = null;
-    }
-  }, 230);
-}
+  // 7 快跌下降三角飄旗
+  p("快跌下降三角飄旗", "bear range", ["空頭中繼","續跌"], "tri_down_cont", {
+    entry: [
+      "偏空：跌破水平支撐（底邊）收盤確認",
+      "加碼：回測底邊不站回"
+    ],
+    sl: ["停損：跌破後拉回站回三角形內"],
+    mm: [
+      "量測高度 H：三角形最寬處高度",
+      "目標價：T1 = B − H×1.0；T2 = B − H×1.3"
+    ],
+    targets: ["T1 等幅；再看前低"],
+    mistakes: ["三角內追空（容易震出）", "把整理當底部"]
+  }),
 
-function pause() {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-}
+  // 8 下跌直角三角形
+  p("下跌直角三角形", "bear range", ["偏空","續跌"], "right_triangle_down", {
+    entry: [
+      "偏空：跌破水平支撐收盤確認",
+      "加碼：回測支撐不站回"
+    ],
+    sl: ["停損：有效站回支撐上方（假跌破）"],
+    mm: [
+      "量測高度 H：三角形最寬處高度",
+      "目標價：T1 = B − H×1.0；T2 = B − H×1.3"
+    ],
+    targets: ["T1 等幅 + 重要支撐區"],
+    mistakes: ["支撐沒破就急著做空", "跌破後不設停損硬扛"]
+  }),
 
-function restart() {
-  pause();
-  candleSeries.setData([]);
-  supportSeries.setData([]);
-  resistanceSeries.setData([]);
-  measureSeries.setData([]);
-  document.getElementById('arrowTip').className = 'arrow-tip';
-  pointer = 0;
-  play();
-}
+  // 9 快漲上升飄旗
+  p("快漲上升飄旗", "bull range", ["多頭中繼","續漲"], "flag_up_down", {
+    entry: [
+      "偏多：突破旗面上緣收盤確認",
+      "加碼：回測旗面上緣不破"
+    ],
+    sl: ["停損：跌破旗面下緣（旗型失效）"],
+    mm: [
+      "量測高度 H：旗桿高度（急漲段）",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["旗桿等幅 T1 為主"],
+    mistakes: ["旗面內追多（容易回撤洗掉）", "突破沒確認就追"]
+  }),
 
-// -----------------------------
-//   型態設定
-// -----------------------------
-const patternConfigs = [
-  { id:'upWedge', name:'上升楔型', tags:['偏空','反轉'], type:'bearish', direction:'down', shape:'upWedge' },
-  { id:'vTop', name:'倒V字型', tags:['偏空','急跌'], type:'bearish', direction:'down', shape:'vTop' },
-  { id:'preDiamond', name:'前漲菱型', tags:['反轉','高檔整理'], type:'bearish', direction:'down', shape:'topDiamond' },
-  { id:'upRectTop', name:'上升直角三角頂', tags:['偏空','反轉'], type:'bearish', direction:'down', shape:'upTriangleTop' },
-  { id:'boxRange', name:'箱型整理', tags:['盤整','突破'], type:'cont', direction:'up', shape:'boxRange' },
-  { id:'fastDropBullFlag', name:'快跌上升飄旗', tags:['續跌','中繼'], type:'bearish', direction:'down', shape:'downFlagUp' },
-  { id:'fastDropBearFlag', name:'快跌下降三角飄旗', tags:['續跌','中繼'], type:'bearish', direction:'down', shape:'downTriangleCont' },
-  { id:'downRightTri', name:'下跌直角三角形', tags:['偏空','續跌'], type:'bearish', direction:'down', shape:'downRightTri' },
-  { id:'fastUpBullFlag', name:'快漲上升飄旗', tags:['偏多','中繼'], type:'bullish', direction:'up', shape:'upFlagUp' },
-  { id:'fastUpBearFlag', name:'快漲下降三角飄旗', tags:['偏多','中繼'], type:'bullish', direction:'up', shape:'upTriangleCont' },
-  { id:'preTriangle', name:'前漲三角型', tags:['高檔整理'], type:'cont', direction:'up', shape:'upTriangleCont' },
-  { id:'downWedge', name:'下降楔型', tags:['偏多','反轉'], type:'bullish', direction:'up', shape:'downWedge' },
-  { id:'panBottom', name:'煎鍋底', tags:['底部','緩步築底'], type:'bullish', direction:'up', shape:'saucer' },
-  { id:'radialBroad', name:'放射擴張喇叭底', tags:['底部','波動放大'], type:'bullish', direction:'up', shape:'broadBottom' },
-  { id:'downBroad', name:'向下擴張喇叭底', tags:['底部','破底翻'], type:'bullish', direction:'up', shape:'broadBottom' },
-  { id:'roundBottom', name:'圓弧底', tags:['底部','反轉'], type:'bullish', direction:'up', shape:'roundBottom' },
-  { id:'nBottom', name:'N字底', tags:['底部','突破頸線'], type:'bullish', direction:'up', shape:'nBottom' },
-  { id:'doubleBottom', name:'雙椿底 / W底', tags:['底部','W反轉'], type:'bullish', direction:'up', shape:'wBottom' },
-  { id:'complexHSB', name:'複式頭肩底', tags:['底部','頭肩底'], type:'bullish', direction:'up', shape:'hsBottom' },
-  { id:'spikeBottom', name:'頭尖底', tags:['急跌急彈','V底'], type:'bullish', direction:'up', shape:'vBottom' }
+  // 10 快漲下降三角飄旗
+  p("快漲下降三角飄旗", "bull range", ["多頭中繼","續漲機率高"], "tri_up_cont", {
+    entry: [
+      "偏多：突破下降壓力線收盤確認",
+      "加碼：回測壓力線轉支撐不破"
+    ],
+    sl: ["停損：突破後跌回三角形內（假突破）"],
+    mm: [
+      "量測高度 H：三角形最寬處高度",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅；進階看前高壓力"],
+    mistakes: ["三角內追多追空兩邊打臉", "忽略量能確認"]
+  }),
+
+  // 11 前漲三角型
+  p("前漲三角型", "range", ["上漲後整理","突破延續"], "tri_generic", {
+    entry: [
+      "偏多：突破上緣收盤確認",
+      "保守：突破後回測不破再進"
+    ],
+    sl: ["停損：突破後跌回三角形內"],
+    mm: [
+      "量測高度 H：三角形最寬處高度",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅為主"],
+    mistakes: ["把整理當反轉提早出場", "沒設停損遇假突破"]
+  }),
+
+  // 12 下降楔型
+  p("下降楔型", "bull bottom", ["偏多","反轉"], "wedge_down_breakout", {
+    entry: [
+      "偏多：突破上緣壓力線收盤確認",
+      "加碼：回測上緣轉支撐不破"
+    ],
+    sl: ["停損：跌回楔形內，或再破新低（型態失效）"],
+    mm: [
+      "量測高度 H：楔形最寬處高點 − 低點",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅 + 前高壓力區分批出"],
+    mistakes: ["楔形內就硬抄底", "突破沒確認就追"]
+  }),
+
+  // 13 煎鍋底
+  p("煎鍋底", "bull bottom", ["底部","緩步築底"], "saucer", {
+    entry: [
+      "偏多：右側突破頸線/平台壓力收盤確認",
+      "保守：突破後回測頸線守穩再進"
+    ],
+    sl: ["停損：跌回頸線下方"],
+    mm: [
+      "量測高度 H：底部最低點到頸線距離",
+      "目標價：T1 = B + H×1.0；進階 T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅；或前高壓力區"],
+    mistakes: ["底部尚未完成就提早重倉", "沒等突破就預設反轉"]
+  }),
+
+  // 14 放射擴張喇叭底
+  p("放射擴張喇叭底", "bull bottom", ["底部","波動擴張"], "broadening_bottom", {
+    entry: [
+      "偏多：突破上緣（最後一個關鍵高點）收盤確認",
+      "保守：突破後回測上緣守穩"
+    ],
+    sl: ["停損：突破後跌回喇叭形內，或再創新低"],
+    mm: [
+      "量測高度 H：喇叭形最大高度（最高點 − 最低點）",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅為主（波動大，宜分批）"],
+    mistakes: ["在喇叭內追價（最容易被掃）", "不做風控就硬扛波動"]
+  }),
+
+  // 15 向下擴張喇叭底
+  p("向下擴張喇叭底", "bull bottom", ["破底翻","波動擴張"], "broadening_down_bottom", {
+    entry: [
+      "偏多：突破下降上緣/轉折壓力收盤確認",
+      "加碼：回測不破壓力轉支撐"
+    ],
+    sl: ["停損：突破後再創新低（破底翻失敗）"],
+    mm: [
+      "量測高度 H：最大擴張高度（最高點 − 最低點）",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["以 T1 為主；波動大分批出"],
+    mistakes: ["把擴張當整理（其實是高風險結構）", "沒有停損會很慘"]
+  }),
+
+  // 16 圓弧底
+  p("圓弧底", "bull bottom", ["底部","趨勢轉強"], "rounding_bottom", {
+    entry: [
+      "偏多：突破頸線/平台壓力收盤確認",
+      "保守：回測頸線守穩"
+    ],
+    sl: ["停損：跌回頸線下方"],
+    mm: [
+      "量測高度 H：圓弧底最低點到頸線距離",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅 + 前高壓力"],
+    mistakes: ["只因形狀像就買（要等突破）", "突破沒確認易假突破"]
+  }),
+
+  // 17 N字底
+  p("N字底", "bull bottom", ["底部","突破頸線"], "n_bottom", {
+    entry: [
+      "偏多：突破第二段高點（頸線）收盤確認",
+      "加碼：回測頸線守穩"
+    ],
+    sl: ["停損：跌破回測低點（右腳）"],
+    mm: [
+      "量測高度 H：右腳低點到頸線距離",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅優先"],
+    mistakes: ["第二段尚未突破就急著進", "停損設太遠不敢砍"]
+  }),
+
+  // 18 雙椿底 / W底
+  p("雙椿底或W底", "bull bottom", ["底部","W反轉"], "w_bottom", {
+    entry: [
+      "偏多：突破頸線（兩底之間的高點）收盤確認",
+      "加碼：回測頸線守穩"
+    ],
+    sl: ["停損：跌破第二個底（右腳）"],
+    mm: [
+      "量測高度 H：底部最低點到頸線距離",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅 + 前高壓力"],
+    mistakes: ["W 還沒成形就硬抄（只是一個底）", "不等頸線突破"]
+  }),
+
+  // 19 複式頭肩底
+  p("複式頭肩底", "bull bottom", ["底部","頭肩底"], "complex_ihs", {
+    entry: [
+      "偏多：突破頸線收盤確認",
+      "保守：回測頸線守穩再進"
+    ],
+    sl: ["停損：跌破右肩低點"],
+    mm: [
+      "量測高度 H：頭部最低點到頸線距離",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅為主；再看前高"],
+    mistakes: ["只看形狀不看頸線突破", "右肩未完成就重倉"]
+  }),
+
+  // 20 頭尖底
+  p("頭尖底（V底）", "bull bottom", ["急跌急彈","反轉"], "v_bottom", {
+    entry: [
+      "偏多：右側突破關鍵壓力/頸線收盤確認（不要左側猜底）",
+      "保守：回測不破再進"
+    ],
+    sl: ["停損：跌破右側回測低點（反轉失敗）"],
+    mm: [
+      "量測高度 H：V 底最低點到頸線距離",
+      "目標價：T1 = B + H×1.0；T2 = B + H×1.3"
+    ],
+    targets: ["T1 等幅；或前高壓力分批出"],
+    mistakes: ["左側摸底（最常接刀）", "反彈當反轉（未破關鍵壓力）"]
+  }),
 ];
 
-const patternText = {
-  '上升楔型': `
-【型態特性】
-上升但漲勢逐步疲弱，高低點收斂，常為偏空反轉型態。
+// helper
+function p(name, group, tags, svgKey, info){ return { id: name, name, group, tags, svgKey, ...info }; }
 
-【操作】
-・不在楔型內追多
-・跌破下緣進空
-・回測不過可續空
+/* -----------------------------
+  SVG：厚線+陰影 靜態結構圖模板
+  每張圖固定 16:9，坐標系 0..100 (x) / 0..56 (y)
+--------------------------------*/
+function svgTemplate(key){
+  const bg = `<rect x="0" y="0" width="100" height="56" fill="#0b1220"/>`;
+  const grid = `
+    <g opacity=".35">
+      ${Array.from({length:9},(_,i)=>`<line x1="${10+i*10}" y1="0" x2="${10+i*10}" y2="56" stroke="#1f2937" stroke-width="0.6"/>`).join("")}
+      ${Array.from({length:5},(_,i)=>`<line x1="0" y1="${8+i*10}" x2="100" y2="${8+i*10}" stroke="#1f2937" stroke-width="0.6"/>`).join("")}
+    </g>`;
+  const base = `<svg viewBox="0 0 100 56" xmlns="http://www.w3.org/2000/svg">${bg}${grid}`;
 
-【停損】
-・突破上緣
+  // 方便用：點(Breakout), 停損線, 等幅線
+  const legend = `
+    <g>
+      <text x="6" y="52" class="tiny">B=突破點</text>
+      <circle cx="24" cy="48.2" r="2" class="dot"></circle>
+      <text x="29" y="52" class="tiny">等幅目標（藍虛線）</text>
+    </g>`;
 
-【停利】
-・等幅下跌
-  `,
-  '倒V字型': `
-【型態特性】
-急漲後急跌形成尖頂。
-
-【操作】
-・跌破頸線再偏空
-・不摸頭
-
-【停損】
-・站回頸線
-
-【停利】
-・等幅下跌
-  `,
-  '前漲菱型': `
-【特性】
-高檔波動放大後再收斂，常出現在末升段。
-
-【操作】
-・向上突破＝續漲
-・向下跌破＝反轉
-
-【停損】
-・假突破
-  `,
-  '上升直角三角頂': `
-【特性】
-高點遇固定壓力，低點墊高，最後常下跌。
-
-【操作】
-・跌破下緣＝偏空
-  `,
-  '箱型整理': `
-【特性】
-區間盤整。
-
-【操作】
-・箱底低接
-・箱頂減碼
-・突破上緣追多
-・跌破箱底偏空
-  `,
-  '快跌上升飄旗': `
-【特性】
-急跌後的小幅反彈，偏空中繼。
-
-【操作】
-・跌破旗底空
-  `,
-  '快跌下降三角飄旗': `
-【特性】
-急跌後下降三角整理，偏空續跌。
-
-【操作】
-・跌破水平線續空
-  `,
-  '下跌直角三角形': `
-【特性】
-水平支撐反覆測試，高點逐降。
-
-【操作】
-・跌破支撐空
-  `,
-  '快漲上升飄旗': `
-【特性】
-急漲後小幅整理，偏多中繼。
-
-【操作】
-・突破旗面多
-  `,
-  '快漲下降三角飄旗': `
-【特性】
-急漲後下降三角整理。
-
-【操作】
-・突破下降壓力線多
-  `,
-  '前漲三角型': `
-【特性】
-大漲後三角整理。
-
-【操作】
-・突破向上多
-  `,
-  '下降楔型': `
-【特性】
-跌勢減弱，收斂，偏多反轉。
-
-【操作】
-・突破上緣多
-  `,
-  '煎鍋底': `
-【特性】
-長期緩跌後築底。
-
-【操作】
-・突破頸線多
-  `,
-  '放射擴張喇叭底': `
-【特性】
-波動放大，底部強勢。
-
-【操作】
-・突破上緣多
-  `,
-  '向下擴張喇叭底': `
-【特性】
-破底翻結構。
-
-【操作】
-・突破下降線多
-  `,
-  '圓弧底': `
-【特性】
-長線緩步反轉。
-
-【操作】
-・突破頸線多
-  `,
-  'N字底': `
-【特性】
-反彈不破低後再突破前高。
-
-【操作】
-・突破頸線多
-  `,
-  '雙椿底 / W底': `
-【特性】
-二次打底。
-
-【操作】
-・突破頸線多
-  `,
-  '複式頭肩底': `
-【特性】
-不規則頭肩底。
-
-【操作】
-・突破頸線多
-  `,
-  '頭尖底': `
-【特性】
-急跌急彈的 V 型底。
-
-【操作】
-・突破右側壓力多
-  `
-};
-
-// -----------------------------
-//   生成簡化走勢（假資料）
-// -----------------------------
-function makeBarsFromClose(closeSeq, start=1700000000, step=3600) {
-  const bars = [];
-  let prev = closeSeq[0];
-  for (let i = 0; i < closeSeq.length; i++) {
-    const c = closeSeq[i];
-    const o = prev + (Math.random()-0.5)*0.5;
-    const h = Math.max(o,c)+Math.random()*0.6;
-    const l = Math.min(o,c)-Math.random()*0.6;
-    bars.push({ time:start+i*step, open:o, high:h, low:l, close:c });
-    prev = c;
+  // 各形狀：只做結構示意（非K線）
+  switch(key){
+    case "wedge_up_breakdown":
+      return base + `
+        <path class="s-price" d="M8,44 L16,40 L24,37 L32,33 L40,31 L48,29 L56,28 L64,27 L72,26 L80,26 L88,27"/>
+        <path class="s-res" d="M10,38 L90,24"/>
+        <path class="s-sup" d="M10,48 L90,30"/>
+        <circle cx="74" cy="31" r="2.6" class="dot"/>
+        <text x="77" y="31" class="lbl">B</text>
+        <path class="s-meas" d="M74,31 L92,44"/>
+        <path class="s-stop" d="M10,20 L90,20"/>
+        <text x="10" y="18" class="tiny">停損區（站回型態上方/上緣）</text>
+        ${legend}</svg>`;
+    case "wedge_down_breakout":
+      return base + `
+        <path class="s-price" d="M8,16 L16,20 L24,24 L32,28 L40,31 L48,34 L56,36 L64,37 L72,38 L80,39 L88,38"/>
+        <path class="s-res" d="M10,22 L90,40"/>
+        <path class="s-sup" d="M10,12 L90,34"/>
+        <circle cx="74" cy="30" r="2.6" class="dot"/>
+        <text x="77" y="30" class="lbl">B</text>
+        <path class="s-meas" d="M74,30 L92,16"/>
+        <path class="s-stop" d="M10,44 L90,44"/>
+        <text x="10" y="54" class="tiny">停損：跌回楔形內/破新低</text>
+        ${legend}</svg>`;
+    case "v_top":
+      return base + `
+        <path class="s-price" d="M8,44 L26,32 L44,18 L60,10 L70,14 L78,22 L86,34 L92,44"/>
+        <path class="s-neck" d="M14,36 L92,36"/>
+        <circle cx="80" cy="36" r="2.6" class="dot"/>
+        <text x="83" y="36" class="lbl">B</text>
+        <path class="s-meas" d="M80,36 L94,48"/>
+        <path class="s-stop" d="M14,30 L92,30"/>
+        <text x="14" y="28" class="tiny">停損：站回頸線</text>
+        ${legend}</svg>`;
+    case "v_bottom":
+      return base + `
+        <path class="s-price" d="M8,14 L26,26 L44,40 L56,46 L64,40 L72,30 L82,18 L92,14"/>
+        <path class="s-neck" d="M14,22 L92,22"/>
+        <circle cx="78" cy="22" r="2.6" class="dot"/>
+        <text x="81" y="22" class="lbl">B</text>
+        <path class="s-meas" d="M78,22 L94,10"/>
+        <path class="s-stop" d="M14,48 L92,48"/>
+        <text x="14" y="54" class="tiny">停損：跌破右側回測低</text>
+        ${legend}</svg>`;
+    case "diamond_top":
+      return base + `
+        <path class="s-price" d="M10,42 L22,34 L34,26 L46,18 L58,12 L70,18 L80,26 L88,34 L94,40"/>
+        <path class="s-res" d="M18,32 L86,14"/>
+        <path class="s-sup" d="M18,44 L86,26"/>
+        <circle cx="80" cy="30" r="2.6" class="dot"/><text x="83" y="30" class="lbl">B</text>
+        <path class="s-meas" d="M80,30 L94,42"/>
+        ${legend}</svg>`;
+    case "right_triangle_top":
+      return base + `
+        <path class="s-price" d="M10,44 L20,38 L30,34 L40,30 L50,28 L60,26 L70,24 L80,22 L90,20"/>
+        <path class="s-res" d="M12,20 L92,20"/>
+        <path class="s-sup" d="M12,46 L92,26"/>
+        <circle cx="76" cy="30" r="2.6" class="dot"/><text x="79" y="30" class="lbl">B</text>
+        <path class="s-meas" d="M76,30 L92,44"/>
+        ${legend}</svg>`;
+    case "right_triangle_down":
+      return base + `
+        <path class="s-price" d="M10,14 L20,18 L30,22 L40,26 L50,30 L60,34 L70,38 L80,42 L90,46"/>
+        <path class="s-sup" d="M12,46 L92,46"/>
+        <path class="s-res" d="M12,12 L92,32"/>
+        <circle cx="76" cy="46" r="2.6" class="dot"/><text x="79" y="46" class="lbl">B</text>
+        <path class="s-meas" d="M76,46 L92,56"/>
+        ${legend}</svg>`;
+    case "box":
+      return base + `
+        <path class="s-price" d="M10,34 L22,28 L34,34 L46,28 L58,34 L70,28 L82,34 L92,30"/>
+        <path class="s-res" d="M12,22 L92,22"/>
+        <path class="s-sup" d="M12,42 L92,42"/>
+        <circle cx="86" cy="22" r="2.6" class="dot"/><text x="89" y="22" class="lbl">B</text>
+        <path class="s-meas" d="M86,22 L96,10"/>
+        ${legend}</svg>`;
+    case "flag_down_up":
+      return base + `
+        <path class="s-price" d="M12,10 L24,18 L36,28 L44,36 L50,42"/>
+        <path class="s-res" d="M54,30 L92,18"/>
+        <path class="s-sup" d="M54,44 L92,32"/>
+        <circle cx="78" cy="32" r="2.6" class="dot"/><text x="81" y="32" class="lbl">B</text>
+        <path class="s-meas" d="M78,32 L94,50"/>
+        ${legend}</svg>`;
+    case "flag_up_down":
+      return base + `
+        <path class="s-price" d="M12,46 L24,38 L36,28 L44,20 L50,14"/>
+        <path class="s-res" d="M54,22 L92,30"/>
+        <path class="s-sup" d="M54,10 L92,18"/>
+        <circle cx="78" cy="18" r="2.6" class="dot"/><text x="81" y="18" class="lbl">B</text>
+        <path class="s-meas" d="M78,18 L94,6"/>
+        ${legend}</svg>`;
+    case "tri_down_cont":
+      return base + `
+        <path class="s-price" d="M12,14 L24,20 L36,26 L48,30 L60,34 L72,36 L84,38"/>
+        <path class="s-res" d="M12,14 L92,36"/>
+        <path class="s-sup" d="M12,40 L92,40"/>
+        <circle cx="78" cy="40" r="2.6" class="dot"/><text x="81" y="40" class="lbl">B</text>
+        <path class="s-meas" d="M78,40 L94,54"/>
+        ${legend}</svg>`;
+    case "tri_up_cont":
+      return base + `
+        <path class="s-price" d="M12,42 L24,36 L36,30 L48,26 L60,22 L72,20 L84,18"/>
+        <path class="s-res" d="M12,22 L92,10"/>
+        <path class="s-sup" d="M12,40 L92,40"/>
+        <circle cx="78" cy="16" r="2.6" class="dot"/><text x="81" y="16" class="lbl">B</text>
+        <path class="s-meas" d="M78,16 L94,4"/>
+        ${legend}</svg>`;
+    case "tri_generic":
+      return base + `
+        <path class="s-price" d="M12,40 L26,34 L40,30 L54,26 L68,24 L82,22 L92,20"/>
+        <path class="s-res" d="M12,22 L92,12"/>
+        <path class="s-sup" d="M12,44 L92,28"/>
+        <circle cx="82" cy="18" r="2.6" class="dot"/><text x="85" y="18" class="lbl">B</text>
+        <path class="s-meas" d="M82,18 L96,8"/>
+        ${legend}</svg>`;
+    case "saucer":
+      return base + `
+        <path class="s-price" d="M10,18 C24,30 38,40 50,40 C62,40 76,30 92,18"/>
+        <path class="s-neck" d="M12,22 L92,22"/>
+        <circle cx="78" cy="22" r="2.6" class="dot"/><text x="81" y="22" class="lbl">B</text>
+        <path class="s-meas" d="M78,22 L94,10"/>
+        ${legend}</svg>`;
+    case "broadening_bottom":
+      return base + `
+        <path class="s-price" d="M12,30 L26,20 L40,36 L54,16 L68,40 L82,22 L92,30"/>
+        <path class="s-res" d="M14,24 L92,10"/>
+        <path class="s-sup" d="M14,40 L92,54"/>
+        <circle cx="78" cy="18" r="2.6" class="dot"/><text x="81" y="18" class="lbl">B</text>
+        <path class="s-meas" d="M78,18 L94,6"/>
+        ${legend}</svg>`;
+    case "broadening_down_bottom":
+      return base + `
+        <path class="s-price" d="M12,22 L26,30 L40,16 L54,38 L68,12 L82,44 L92,26"/>
+        <path class="s-res" d="M14,34 L92,18"/>
+        <path class="s-sup" d="M14,10 L92,54"/>
+        <circle cx="78" cy="18" r="2.6" class="dot"/><text x="81" y="18" class="lbl">B</text>
+        <path class="s-meas" d="M78,18 L94,6"/>
+        ${legend}</svg>`;
+    case "rounding_bottom":
+      return base + `
+        <path class="s-price" d="M10,18 C22,26 30,38 50,40 C70,38 80,26 92,18"/>
+        <path class="s-neck" d="M12,22 L92,22"/>
+        <circle cx="78" cy="22" r="2.6" class="dot"/><text x="81" y="22" class="lbl">B</text>
+        <path class="s-meas" d="M78,22 L94,10"/>
+        ${legend}</svg>`;
+    case "n_bottom":
+      return base + `
+        <path class="s-price" d="M10,18 L26,40 L40,24 L56,34 L70,26 L92,18"/>
+        <path class="s-neck" d="M18,24 L92,24"/>
+        <circle cx="78" cy="24" r="2.6" class="dot"/><text x="81" y="24" class="lbl">B</text>
+        <path class="s-meas" d="M78,24 L94,12"/>
+        ${legend}</svg>`;
+    case "w_bottom":
+      return base + `
+        <path class="s-price" d="M10,18 L26,40 L40,26 L54,42 L70,26 L92,18"/>
+        <path class="s-neck" d="M18,26 L92,26"/>
+        <circle cx="78" cy="26" r="2.6" class="dot"/><text x="81" y="26" class="lbl">B</text>
+        <path class="s-meas" d="M78,26 L94,14"/>
+        ${legend}</svg>`;
+    case "complex_ihs":
+      return base + `
+        <path class="s-price" d="M10,18 L22,34 L34,22 L46,42 L58,24 L70,34 L82,20 L92,18"/>
+        <path class="s-neck" d="M16,24 L92,24"/>
+        <circle cx="78" cy="24" r="2.6" class="dot"/><text x="81" y="24" class="lbl">B</text>
+        <path class="s-meas" d="M78,24 L94,12"/>
+        ${legend}</svg>`;
+    default:
+      return `<svg viewBox="0 0 100 56" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="56" fill="#0b1220"/><text x="8" y="28" class="lbl">SVG 模板缺失</text></svg>`;
   }
-  return bars;
 }
 
-function shape_upWedge(){return makeBarsFromClose([100,102,104,106,107.5,108.5,109,109.5,109.8,109.6,109.4,109.2,108.8,108.2,107.5]);}
-function shape_downWedge(){return makeBarsFromClose([100,98,96,95,94.2,93.8,93.5,93.6,93.9,94.2,94.8,95.3,96,97,98]);}
-function shape_vTop(){return makeBarsFromClose([100,102,106,110,115,120,123,125,126,124,120,116,112,108,104,100]);}
-function shape_vBottom(){return makeBarsFromClose([100,95,90,85,82,80,82,86,90,94,98,101]);}
-function shape_topDiamond(){return makeBarsFromClose([100,103,106,109,112,114,115,114,113,112,110,108,106,104,102]);}
-function shape_upTriangleTop(){return makeBarsFromClose([100,104,107,109,110.5,110,110.3,110.1,109.5,108,105,102,99]);}
-function shape_boxRange(){return makeBarsFromClose([100,102,101,103,99,102,101,103,100,102,101,103,100]);}
-function shape_upFlagUp(){return makeBarsFromClose([100,104,108,113,118,122,121,120,119,120,121,122,123]);}
-function shape_downFlagUp(){return makeBarsFromClose([120,115,110,105,100,96,97,98,99,98,97,96,95]);}
-function shape_upTriangleCont(){return makeBarsFromClose([100,104,108,112,116,117,116,117.5,116.5,118]);}
-function shape_downTriangleCont(){return makeBarsFromClose([120,115,110,106,105,104,103.5,103,102.8]);}
-function shape_downRightTri(){return makeBarsFromClose([120,118,116,115,113,112,110.5,109.8,109.3,108.9,105,101]);}
-function shape_saucer(){return makeBarsFromClose([100,98,96,95,94.5,94.3,94.5,95,96,97.5,99,101,103]);}
-function shape_broadBottom(){return makeBarsFromClose([100,95,102,93,104,92,106,94,108,96,110]);}
-function shape_roundBottom(){return makeBarsFromClose([100,98,96,95,94.8,95,95.5,96.5,98,100,103]);}
-function shape_nBottom(){return makeBarsFromClose([100,96,92,94,96,95,97,100,103]);}
-function shape_wBottom(){return makeBarsFromClose([100,95,98,94,97,95.5,98.5,101,104]);}
-function shape_hsBottom(){return makeBarsFromClose([100,96,99,94,98,95,97,96,99,102]);}
+/* -----------------------------
+  UI：新手/進階切換
+--------------------------------*/
+function setMode(mode){
+  document.body.dataset.mode = mode;
+  document.getElementById("btnBasic").classList.toggle("active", mode==="basic");
+  document.getElementById("btnAdv").classList.toggle("active", mode==="advanced");
+}
 
-function generateBarsByShape(shape){
-  switch(shape){
-    case 'upWedge':return shape_upWedge();
-    case 'downWedge':return shape_downWedge();
-    case 'vTop':return shape_vTop();
-    case 'vBottom':return shape_vBottom();
-    case 'topDiamond':return shape_topDiamond();
-    case 'upTriangleTop':return shape_upTriangleTop();
-    case 'boxRange':return shape_boxRange();
-    case 'upFlagUp':return shape_upFlagUp();
-    case 'downFlagUp':return shape_downFlagUp();
-    case 'upTriangleCont':return shape_upTriangleCont();
-    case 'downTriangleCont':return shape_downTriangleCont();
-    case 'downRightTri':return shape_downRightTri();
-    case 'saucer':return shape_saucer();
-    case 'broadBottom':return shape_broadBottom();
-    case 'roundBottom':return shape_roundBottom();
-    case 'nBottom':return shape_nBottom();
-    case 'wBottom':return shape_wBottom();
-    case 'hsBottom':return shape_hsBottom();
+/* -----------------------------
+  UI：左側篩選
+--------------------------------*/
+let FILTER = new Set(["all"]);
+function toggleFilter(key){
+  const all = document.getElementById("f_all");
+  const ids = ["bull","bear","range","bottom"];
+
+  if(key==="all"){
+    FILTER = new Set(["all"]);
+    ids.forEach(k=>document.getElementById("f_"+k).classList.remove("on"));
+    all.classList.add("on");
+    renderList();
+    return;
   }
-  return shape_boxRange();
+
+  all.classList.remove("on");
+  FILTER.delete("all");
+  const el = document.getElementById("f_"+key);
+  if(FILTER.has(key)){ FILTER.delete(key); el.classList.remove("on"); }
+  else { FILTER.add(key); el.classList.add("on"); }
+
+  if(FILTER.size===0){
+    FILTER = new Set(["all"]);
+    all.classList.add("on");
+  }
+  renderList();
 }
 
-// -----------------------------
-//   切線 / 等幅 / 箭頭
-// -----------------------------
-function drawOverlays(cfg, bars){
-  if(!cfg || !bars || bars.length<5)return;
-
-  const n = bars.length;
-  const first = bars[0];
-  const mid   = bars[Math.floor(n*0.4)];
-  const late  = bars[Math.floor(n*0.75)];
-  const last  = bars[n-1];
-
-  // 支撐線
-  let supStart = (first.low+mid.low)/2;
-  let supEnd   = (mid.low+late.low)/2;
-  supportSeries.setData([
-    { time:first.time, value:supStart },
-    { time:late.time,  value:supEnd }
-  ]);
-
-  // 壓力線
-  let resStart = (first.high+mid.high)/2;
-  let resEnd   = (mid.high+late.high)/2;
-  resistanceSeries.setData([
-    { time:first.time, value:resStart },
-    { time:late.time,  value:resEnd }
-  ]);
-
-  // 等幅測量
-  let height = Math.abs(resStart - supStart);
-  let start = last.close;
-  let end   = cfg.direction==='up' ? start + height : start - height;
-
-  measureSeries.setData([
-    { time:last.time, value:start },
-    { time:last.time + 6*3600, value:end }
-  ]);
-
-  // K 線上的箭頭 Marker
-  candleSeries.setMarkers([{
-    time:last.time,
-    position: cfg.direction==='up'?'belowBar':'aboveBar',
-    color: cfg.direction==='up'?'#22c55e':'#f97373',
-    shape: cfg.direction==='up'?'arrowUp':'arrowDown',
-    text:'突破'
-  }]);
+function matchFilter(p){
+  if(FILTER.has("all")) return true;
+  // group 可包含多標籤（字串內含 bull/bear/range/bottom）
+  for(const f of FILTER){
+    if(p.group.includes(f)) return true;
+  }
+  return false;
 }
 
-function showArrow(cfg){
-  const el = document.getElementById('arrowTip');
-  el.textContent = cfg.direction==='up'?'↑':'↓';
-  el.className = 'arrow-tip ' + (cfg.direction==='up'?'show-up':'show-down');
-}
+/* -----------------------------
+  主渲染
+--------------------------------*/
+let ACTIVE_ID = null;
 
-// -----------------------------
-//   UI：型態清單
-// -----------------------------
-const patternList = document.getElementById('patternList');
-patternConfigs.forEach(cfg=>{
-  const btn = document.createElement('button');
-  btn.id='btn-'+cfg.id;
-  btn.className='pattern-btn';
-  btn.textContent=cfg.name;
-  btn.onclick=()=>selectPattern(cfg.id);
-  patternList.appendChild(btn);
-});
+function renderList(){
+  const q = (document.getElementById("q").value||"").trim().toLowerCase();
+  const list = document.getElementById("list");
+  list.innerHTML = "";
 
-// -----------------------------
-//   載入型態
-// -----------------------------
-function selectPattern(id){
-  const cfg = patternConfigs.find(p=>p.id===id);
-  if(!cfg)return;
-  currentConfig=cfg;
-
-  patternConfigs.forEach(p=>{
-    document.getElementById('btn-'+p.id).classList.toggle('active',p.id===id);
+  const hits = PATTERNS.filter(p=>{
+    if(!matchFilter(p)) return false;
+    if(!q) return true;
+    const hay = (p.name + " " + p.tags.join(" ") + " " + p.group).toLowerCase();
+    return hay.includes(q);
   });
 
-  document.getElementById('infoTitle').textContent = cfg.name;
-  const badgeBox = document.getElementById('infoBadges');
-  badgeBox.innerHTML = '';
-  cfg.tags.forEach(t=>{
-    const span=document.createElement('span');
-    span.className='badge '+
-      (cfg.type==='bullish'?'badge-bull':(cfg.type==='bearish'?'badge-bear':'badge-cont'));
-    span.textContent=t;
-    badgeBox.appendChild(span);
+  document.getElementById("count").textContent = `共 ${hits.length} / ${PATTERNS.length} 個型態`;
+
+  hits.forEach(p=>{
+    const div = document.createElement("div");
+    div.className = "item" + (p.id===ACTIVE_ID ? " active":"");
+    div.onclick = ()=>{ ACTIVE_ID = p.id; renderAll(); };
+    div.innerHTML = `
+      <div class="name">${p.name}</div>
+      <div class="meta">${p.tags.join("・")}</div>
+    `;
+    list.appendChild(div);
   });
-  document.getElementById('infoContent').textContent =
-    patternText[cfg.name] || "尚無說明";
 
-  pause();
-  candleSeries.setData([]);
-  supportSeries.setData([]);
-  resistanceSeries.setData([]);
-  measureSeries.setData([]);
-  document.getElementById('arrowTip').className='arrow-tip';
+  // 若沒有 active，就預設第一個
+  if(!ACTIVE_ID && hits.length) ACTIVE_ID = hits[0].id;
 
-  currentBars = generateBarsByShape(cfg.shape);
-  pointer=0;
-  document.getElementById('chartLabel').textContent = cfg.name+'（示意走勢）';
-
-  chart.timeScale().fitContent();
-  play();
+  renderCards(hits);
 }
 
-// -----------------------------
-//   預設載入第一個型態
-// -----------------------------
-selectPattern(patternConfigs[0].id);
+function chipClass(p){
+  if(p.group.includes("bull")) return "bull";
+  if(p.group.includes("bear")) return "bear";
+  return "range";
+}
 
+function renderCards(hits){
+  const cards = document.getElementById("cards");
+  cards.innerHTML = "";
+
+  // 只顯示 active 的 1 張「主卡」+ 旁邊顯示 1 張「相近類型」
+  const active = hits.find(x=>x.id===ACTIVE_ID) || hits[0];
+  const sibling = hits.find(x=>x.id!==active.id && x.group===active.group) || hits.find(x=>x.id!==active.id) || null;
+
+  const show = sibling ? [active, sibling] : [active];
+
+  show.forEach(p=>{
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="head">
+        <div>
+          <h2>${p.name}</h2>
+          <div class="chips">
+            ${p.tags.map(t=>`<span class="chip ${chipClass(p)}">${t}</span>`).join("")}
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="note">公式：H=高度、B=突破點</div>
+          <div class="note advanced-only">T1=1.0 等幅、T2=1.3 等幅</div>
+        </div>
+      </div>
+
+      <div class="viz">
+        <div class="svgwrap">${svgTemplate(p.svgKey)}</div>
+        <div class="caption">靜態結構圖（厚線＋陰影）：支撐綠、壓力紅、突破點 B（黃）、等幅目標（藍虛線）、停損（粉虛線）</div>
+      </div>
+
+      <div class="body">
+        <div class="kpi">
+          <div class="box">
+            <div class="lbl">買點（Entry）一句話</div>
+            <div class="val">${oneLineEntry(p)}</div>
+          </div>
+          <div class="box">
+            <div class="lbl">目標價（Targets）一句話</div>
+            <div class="val">${oneLineTarget(p)}</div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <h3>進場（Entry）</h3>
+          <ul>${p.entry.map(x=>`<li>${x}</li>`).join("")}</ul>
+        </div>
+
+        <div class="sec">
+          <h3>停損（Stop Loss）</h3>
+          <ul>${p.sl.map(x=>`<li>${x}</li>`).join("")}</ul>
+        </div>
+
+        <div class="sec advanced-only">
+          <h3>比例與目標價（Measured Move / Targets）</h3>
+          <ul>${p.mm.map(x=>`<li>${x}</li>`).join("")}</ul>
+          <ul>${p.targets.map(x=>`<li>${x}</li>`).join("")}</ul>
+        </div>
+
+        <div class="sec advanced-only">
+          <h3>常見錯誤（最容易被洗的點）</h3>
+          <ul>${p.mistakes.map(x=>`<li>${x}</li>`).join("")}</ul>
+        </div>
+      </div>
+    `;
+    cards.appendChild(card);
+  });
+
+  // 更新左側 active 樣式
+  [...document.querySelectorAll(".item")].forEach(el=>{
+    const name = el.querySelector(".name")?.textContent;
+    el.classList.toggle("active", name===ACTIVE_ID);
+  });
+}
+
+function oneLineEntry(p){
+  if(p.group.includes("bear")) return "收盤有效跌破關鍵支撐/下緣 → 進空；回測不站回可加碼";
+  if(p.group.includes("bull")) return "收盤有效突破關鍵壓力/上緣 → 進多；回測守穩可加碼";
+  return "突破箱頂/上緣 → 多；跌破箱底/下緣 → 空（均需收盤確認）";
+}
+function oneLineTarget(p){
+  if(p.group.includes("bear")) return "T1 = B − H×1.0（保守）／T2 = B − H×1.3（進階）";
+  return "T1 = B + H×1.0（保守）／T2 = B + H×1.3（進階）";
+}
+
+function renderAll(){
+  // 重新 list 會丟失 active 的 DOM reference，所以先只刷新 cards
+  renderList();
+}
+
+// 初始：預設全選
+document.getElementById("f_all").classList.add("on");
+renderList();
 </script>
 </body>
 </html>
