@@ -7,7 +7,6 @@
   let chart, candle;
   let volChart, volSeries;
   let indChart;
-  let lastBarCount = 0;
 
   // ===== 主圖 =====
   let ma5, ma10, ma20;
@@ -21,7 +20,7 @@
 
   // ===== 指標 =====
   let indAutoL1, indAutoL2;       // KD / RSI
-  let macdL1, macdL2, macdHist;   // MACD（固定比例）
+  let macdL1, macdL2, macdHist;   // MACD
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -29,15 +28,9 @@
       height,
       layout: { background: { color: "#fff" }, textColor: "#222" },
 
-      rightPriceScale: {
-        autoScale: true,
-        visible: true
-      },
-
-      leftPriceScale: {
-        visible: false,
-        autoScale: false
-      },
+      // ✅ 正確控制價格刻度：不要用 chart.applyOptions({priceScale...})
+      rightPriceScale: { autoScale: true, visible: true },
+      leftPriceScale:  { visible: false },
 
       timeScale: {
         timeVisible: true,
@@ -51,224 +44,133 @@
       handleScale: false,
     });
   }
-  
-  function macdAutoScale(data) {
-    if (!data.length) return null;
-    let max = 0;
-    data.forEach(v => {
-      if (v != null) max = Math.max(max, Math.abs(v));
-    });
-    if (max === 0) max = 1;
-    const pad = max * 0.2;
-    return { minValue: -max - pad, maxValue: max + pad };
-  }
 
   function init() {
-    /* ===== 主圖 ===== */
     chart = fixedChart(document.getElementById("chart"), 420);
 
-	candle = chart.addCandlestickSeries({
-	  upColor: "#ff0000",
-	  downColor: "#00aa00",
-	  borderUpColor: "#ff0000",
-	  borderDownColor: "#00aa00",
-	  wickUpColor: "#ff0000",
-	  wickDownColor: "#00aa00",
-	  priceScaleId: "right"   // ✅ 明確指定主圖 scale
-	});
-
-    ma5 = chart.addLineSeries({
-      color:"#f00",
-      lineWidth:1,
-      visible:false,
-	  priceScaleId: "left"
+    // ✅ K 線：固定用 right scale
+    candle = chart.addCandlestickSeries({
+      upColor: "#ff0000",
+      downColor: "#00aa00",
+      borderUpColor: "#ff0000",
+      borderDownColor: "#00aa00",
+      wickUpColor: "#ff0000",
+      wickDownColor: "#00aa00",
+      priceScaleId: "right"
     });
 
-    ma10 = chart.addLineSeries({
-      color:"#0a0",
-      lineWidth:1,
-      visible:false,
-	  priceScaleId: "left"
-    });
+    // ✅ 均線：也固定用 right scale（避免跟 K 線不同 scale 對不準）
+    ma5 = chart.addLineSeries({ color:"#f00", lineWidth:1, visible:false, priceScaleId: "right" });
+    ma10 = chart.addLineSeries({ color:"#0a0", lineWidth:1, visible:false, priceScaleId: "right" });
+    ma20 = chart.addLineSeries({ color:"#00f", lineWidth:1, visible:false, priceScaleId: "right" });
 
-    ma20 = chart.addLineSeries({
-      color:"#00f",
-      lineWidth:1,
-      visible:false,
-	  priceScaleId: "left"
-    });
+    // ✅ 布林通道：同樣用 right scale
+    bbU = chart.addLineSeries({ color:"#ffa500", visible:false, priceScaleId: "right" });
+    bbM = chart.addLineSeries({ color:"#0066cc", visible:false, priceScaleId: "right" });
+    bbL = chart.addLineSeries({ color:"#008800", visible:false, priceScaleId: "right" });
 
-    bbU = chart.addLineSeries({
-      color:"#ffa500",
-	  priceScaleId: "left"
-    });
-	
-    bbM = chart.addLineSeries({
-      color:"#0066cc",
-	  priceScaleId: "left"
-    });
-	
-    bbL = chart.addLineSeries({
-      color:"#008800",
-	  priceScaleId: "left"
-    });
+    // 型態線：全部同 right scale，避免干擾/錯位
+    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, visible:false, priceScaleId: "right" });
+    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, visible:false, priceScaleId: "right" });
 
-    // 型態線 series（一次宣告，後面只 setData）
-    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, priceScaleId: "left" });
-    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, priceScaleId: "left" });
+    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, visible:false, priceScaleId: "right" });
+    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, visible:false, priceScaleId: "right" });
 
-    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, priceScaleId: "left" });
-    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, priceScaleId: "left" });
+    triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1, visible:false, priceScaleId: "right" });
+    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1, visible:false, priceScaleId: "right" });
 
-    triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1, priceScaleId: "left" });
-    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1, priceScaleId: "left" });
-
-    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "left" });
-    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "left" });
-    wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "left" });
+    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
+    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
+    wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
 
     /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
     volChart.timeScale().applyOptions({ visible: false });
-    volSeries = volChart.addHistogramSeries({
-      priceFormat: { type: "volume" }
-    });
+    volSeries = volChart.addHistogramSeries({ priceFormat: { type: "volume" } });
 
     /* ===== 指標區 ===== */
     indChart = fixedChart(document.getElementById("indicator"), 150);
     indChart.timeScale().applyOptions({ visible: false });
 
-    // KD / RSI（自動比例）
     indAutoL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
     indAutoL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
 
-    // MACD（放大比例）
-    const macdScale = () => ({
-      priceRange: { minValue: -3, maxValue: 3 }
-    });
+    macdL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
+    macdL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
+    macdHist = indChart.addHistogramSeries({});
+  }
 
-    macdL1 = indChart.addLineSeries({
-      lineWidth: 2,
-      color: "#1f77b4",
-      autoscaleInfoProvider: macdScale
-    });
-
-    macdL2 = indChart.addLineSeries({
-      lineWidth: 2,
-      color: "#aa00aa",
-      autoscaleInfoProvider: macdScale
-    });
-
-    macdHist = indChart.addHistogramSeries({
-      autoscaleInfoProvider: macdScale
-    });
-	
-	chart.priceScale("right").applyOptions({ autoScale: true });
-	chart.applyOptions({priceScale: { visible: false }});
+  function setLineDataSafe(series, points, visible) {
+    series.setData(points);
+    series.applyOptions({ visible: !!visible });
   }
 
   function update(shown, indicators, opt) {
     if (!shown || !shown.length) return;
-    const visibleBars = opt.visibleBars || 40;
-	const indType = opt.indicatorType;
 
-    /* ===== K 線 / 成交量 ===== */
+    const visibleBars = opt.visibleBars || 40;
+    const indType = opt.indicatorType;
+
+    // ===== K線/成交量 =====
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    /* ===== 均線 ===== */
+    // ===== 均線 =====
     if (opt.showMA) {
       const closes = shown.map(c => c.close);
 
-      ma5.setData(
-        U.sma(closes,5)
-          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
-          .filter(Boolean)
-      );
-      ma10.setData(
-        U.sma(closes,10)
-          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
-          .filter(Boolean)
-      );
-      ma20.setData(
-        U.sma(closes,20)
-          .map((v,i)=>v?{time:shown[i].time,value:v}:null)
-          .filter(Boolean)
-      );
+      const ma5Pts = U.sma(closes, 5)
+        .map((v,i)=> (v != null ? { time: shown[i].time, value: v } : null))
+        .filter(Boolean);
 
-      ma5.applyOptions({ visible:true });
-      ma10.applyOptions({ visible:true });
-      ma20.applyOptions({ visible:true });
+      const ma10Pts = U.sma(closes, 10)
+        .map((v,i)=> (v != null ? { time: shown[i].time, value: v } : null))
+        .filter(Boolean);
 
+      const ma20Pts = U.sma(closes, 20)
+        .map((v,i)=> (v != null ? { time: shown[i].time, value: v } : null))
+        .filter(Boolean);
+
+      setLineDataSafe(ma5, ma5Pts, true);
+      setLineDataSafe(ma10, ma10Pts, true);
+      setLineDataSafe(ma20, ma20Pts, true);
     } else {
+      // ✅ OFF 時不要碰 candle / scale，只隱藏均線即可
+      ma5.setData([]); ma10.setData([]); ma20.setData([]);
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
     }
 
-    /* ===== 布林通道 ===== */
+    // ===== 布林通道（避免前段 undefined/NaN 汙染）=====
     if (opt.showBB) {
-      bbU.setData(
-        shown
-          .map((c,i)=>indicators.BB.upper[i] != null
-            ? { time:c.time, value:indicators.BB.upper[i] }
-            : null
-          )
-          .filter(Boolean)
-      );
+      const u = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
+      const m = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
+      const l = shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)).filter(Boolean);
 
-      bbM.setData(
-        shown
-          .map((c,i)=>indicators.BB.mid[i] != null
-            ? { time:c.time, value:indicators.BB.mid[i] }
-            : null
-          )
-          .filter(Boolean)
-      );
-
-      bbL.setData(
-        shown
-          .map((c,i)=>indicators.BB.lower[i] != null
-            ? { time:c.time, value:indicators.BB.lower[i] }
-            : null
-          )
-          .filter(Boolean)
-      );
-
-      bbU.applyOptions({ visible:true });
-      bbM.applyOptions({ visible:true });
-      bbL.applyOptions({ visible:true });
+      setLineDataSafe(bbU, u, true);
+      setLineDataSafe(bbM, m, true);
+      setLineDataSafe(bbL, l, true);
     } else {
+      bbU.setData([]); bbM.setData([]); bbL.setData([]);
       bbU.applyOptions({ visible:false });
       bbM.applyOptions({ visible:false });
       bbL.applyOptions({ visible:false });
     }
 
-    /* ===== 型態線（全部先清） ===== */
-    resLine.setData([]); supLine.setData([]);
-    trendUp.setData([]); trendDn.setData([]);
-    triUp.setData([]); triLow.setData([]);
-    wLine1.setData([]); wLine2.setData([]); wNeck.setData([]);
-	
-	resLine.applyOptions({ visible: false });
-	supLine.applyOptions({ visible: false });
-	trendUp.applyOptions({ visible: false });
-	trendDn.applyOptions({ visible: false });
-	triUp.applyOptions({ visible: false });
-	triLow.applyOptions({ visible: false });
-	wLine1.applyOptions({ visible: false });
-	wLine2.applyOptions({ visible: false });
-	wNeck.applyOptions({ visible: false });
+    // ===== 型態線（先清）=====
+    [resLine,supLine,trendUp,trendDn,triUp,triLow,wLine1,wLine2,wNeck].forEach(s=>{
+      s.setData([]);
+      s.applyOptions({ visible:false });
+    });
 
     if (opt.showMA) {
       // 支撐壓力
       if (global.SupportResistance?.findLines) {
         const SR = global.SupportResistance.findLines(shown, 20);
         const t = shown[shown.length - 1].time;
-        if (SR[0]) resLine.setData([{ time:t, value:SR[0].price }]);
-        if (SR[1]) supLine.setData([{ time:t, value:SR[1].price }]);
-		resLine.applyOptions({ visible: true });
-		supLine.applyOptions({ visible: true });
+        if (SR[0]) { resLine.setData([{ time:t, value:SR[0].price }]); resLine.applyOptions({ visible:true }); }
+        if (SR[1]) { supLine.setData([{ time:t, value:SR[1].price }]); supLine.applyOptions({ visible:true }); }
       }
 
       // 趨勢線
@@ -280,6 +182,7 @@
             { time: shown[u.p1.index].time, value: u.p1.price },
             { time: shown[u.p2.index].time, value: u.p2.price },
           ]);
+          trendUp.applyOptions({ visible:true });
         }
         if (downLines?.length) {
           const d = downLines.at(-1);
@@ -287,9 +190,8 @@
             { time: shown[d.p1.index].time, value: d.p1.price },
             { time: shown[d.p2.index].time, value: d.p2.price },
           ]);
+          trendDn.applyOptions({ visible:true });
         }
-		trendUp.applyOptions({ visible: true });
-	    trendDn.applyOptions({ visible: true });
       }
 
       // 三角
@@ -302,8 +204,8 @@
           { time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price },
           { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price },
         ]);
-		triUp.applyOptions({ visible: true });
-	    triLow.applyOptions({ visible: true });
+        triUp.applyOptions({ visible:true });
+        triLow.applyOptions({ visible:true });
       }
 
       // W 底
@@ -321,52 +223,40 @@
           { time: shown[W.p1.index].time, value: W.neck },
           { time: shown[shown.length - 1].time, value: W.neck },
         ]);
-	    wLine1.applyOptions({ visible: true });
-	    wLine2.applyOptions({ visible: true });
-	    wNeck.applyOptions({ visible: true });
+        wLine1.applyOptions({ visible:true });
+        wLine2.applyOptions({ visible:true });
+        wNeck.applyOptions({ visible:true });
       }
     }
 
-    /* ===== 指標 ===== */
+    // ===== 指標區 =====
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
 
     if (indType === "kd") {
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
       indAutoL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
-    }
-    else if (indType === "rsi") {
+    } else if (indType === "rsi") {
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
-    }
-    else if (indType === "macd") {
-      const hist = shown.map((c,i)=>indicators.MACDHist[i]).filter(v=>v!=null);
-      const scale = macdAutoScale(hist);
-
-      macdL1.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: scale }) });
-      macdL2.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: scale }) });
-      macdHist.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: scale }) });
-
+    } else if (indType === "macd") {
       macdL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
       macdL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
       macdHist.setData(shown.map((c,i)=>({
-        time:c.time,
-        value:indicators.MACDHist[i],
+        time: c.time,
+        value: indicators.MACDHist[i],
         color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
 
-    /* ===== 視窗 ===== */
+    // ✅ 每次 update 都 setVisibleRange（toggle 時 shown.length 不變，但 series/scale 變了）
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
 
-	if (shown.length !== lastBarCount) {
-      chart.timeScale().setVisibleRange({ from, to });
-      volChart.timeScale().setVisibleRange({ from, to });
-      indChart.timeScale().setVisibleRange({ from, to });
-      lastBarCount = shown.length;
-    }
+    chart.timeScale().setVisibleRange({ from, to });
+    volChart.timeScale().setVisibleRange({ from, to });
+    indChart.timeScale().setVisibleRange({ from, to });
   }
-  
+
   global.ChartManager = { init, update };
 })(window);
