@@ -145,6 +145,7 @@
   function update(shown, indicators, opt) {
     if (!shown || !shown.length) return;
     const visibleBars = opt.visibleBars || 40;
+	const indType = opt.indicatorType;
 
     /* ===== K 線 / 成交量 ===== */
     candle.setData(shown);
@@ -279,14 +280,14 @@
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
 
-    if (opt.indicatorType === "kd") {
+    if (indType === "kd") {
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]})));
       indAutoL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]})));
     }
-    else if (opt.indicatorType === "rsi") {
+    else if (indType === "rsi") {
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
     }
-    else if (opt.indicatorType === "macd") {
+    else if (indType === "macd") {
       macdL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
       macdL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
       macdHist.setData(shown.map((c,i)=>({

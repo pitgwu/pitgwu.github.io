@@ -99,7 +99,6 @@
   // ----------------------------------------------------------
   function updateDisplays() {
     const shown = data.slice(0, currentIndex + 1);
-    const indType = U.el("indicatorSelect").value;
 
     // 型態偵測
     const tline = Trend.findTrendlines(shown);
@@ -116,12 +115,12 @@
     }
 
     // 更新 K 線（含 40 根視窗）
+    const sel = U.el("indicatorSelect").value;
+
     Chart.update(shown, indicators, {
-      fullData: data,
-      visibleBars: 40,
       showMA: maVisible,
-      showBB: indType === "bb",
-      indicatorType: indType,
+      showBB: sel === "bb",
+      indicatorType: (sel === "bb") ? null : sel,
       trendlines: maVisible ? tline : null,
       wPattern: maVisible ? w : null,
       triangle: maVisible ? tri : null
