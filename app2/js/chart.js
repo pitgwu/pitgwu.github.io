@@ -28,7 +28,17 @@
       width: el.clientWidth,
       height,
       layout: { background: { color: "#fff" }, textColor: "#222" },
-      rightPriceScale: { autoScale: true },
+
+      rightPriceScale: {
+        autoScale: true,
+        visible: true
+      },
+
+      leftPriceScale: {
+        visible: false,
+        autoScale: false
+      },
+
       timeScale: {
         timeVisible: true,
         barSpacing: 8,
@@ -36,9 +46,21 @@
         scrollEnabled: false,
         zoomEnabled: false,
       },
+
       handleScroll: false,
       handleScale: false,
     });
+  }
+  
+  function macdAutoScale(data) {
+    if (!data.length) return null;
+    let max = 0;
+    data.forEach(v => {
+      if (v != null) max = Math.max(max, Math.abs(v));
+    });
+    if (max === 0) max = 1;
+    const pad = max * 0.2;
+    return { minValue: -max - pad, maxValue: max + pad };
   }
 
   function init() {
@@ -59,51 +81,51 @@
       color:"#f00",
       lineWidth:1,
       visible:false,
-	  priceScaleId: ""
+	  priceScaleId: "left"
     });
 
     ma10 = chart.addLineSeries({
       color:"#0a0",
       lineWidth:1,
       visible:false,
-	  priceScaleId: ""
+	  priceScaleId: "left"
     });
 
     ma20 = chart.addLineSeries({
       color:"#00f",
       lineWidth:1,
       visible:false,
-	  priceScaleId: ""
+	  priceScaleId: "left"
     });
 
     bbU = chart.addLineSeries({
       color:"#ffa500",
-	  priceScaleId: ""
+	  priceScaleId: "left"
     });
 	
     bbM = chart.addLineSeries({
       color:"#0066cc",
-	  priceScaleId: ""
+	  priceScaleId: "left"
     });
 	
     bbL = chart.addLineSeries({
       color:"#008800",
-	  priceScaleId: ""
+	  priceScaleId: "left"
     });
 
     // 型態線 series（一次宣告，後面只 setData）
-    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, priceScaleId: "" });
-    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, priceScaleId: "" });
+    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, priceScaleId: "left" });
+    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, priceScaleId: "left" });
 
-    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, priceScaleId: "" });
-    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, priceScaleId: "" });
+    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, priceScaleId: "left" });
+    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, priceScaleId: "left" });
 
-    triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1, priceScaleId: "" });
-    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1, priceScaleId: "" });
+    triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1, priceScaleId: "left" });
+    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1, priceScaleId: "left" });
 
-    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "" });
-    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "" });
-    wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "" });
+    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "left" });
+    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "left" });
+    wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "left" });
 
     /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
@@ -186,10 +208,34 @@
 
     /* ===== 布林通道 ===== */
     if (opt.showBB) {
-      bbU.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.upper[i]})));
-      bbM.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.mid[i]})));
-      bbL.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.lower[i]})));
-	  bbU.applyOptions({ visible:true });
+      bbU.setData(
+        shown
+          .map((c,i)=>indicators.BB.upper[i] != null
+            ? { time:c.time, value:indicators.BB.upper[i] }
+            : null
+          )
+          .filter(Boolean)
+      );
+
+      bbM.setData(
+        shown
+          .map((c,i)=>indicators.BB.mid[i] != null
+            ? { time:c.time, value:indicators.BB.mid[i] }
+            : null
+          )
+          .filter(Boolean)
+      );
+
+      bbL.setData(
+        shown
+          .map((c,i)=>indicators.BB.lower[i] != null
+            ? { time:c.time, value:indicators.BB.lower[i] }
+            : null
+          )
+          .filter(Boolean)
+      );
+
+      bbU.applyOptions({ visible:true });
       bbM.applyOptions({ visible:true });
       bbL.applyOptions({ visible:true });
     } else {
@@ -293,11 +339,18 @@
       indAutoL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.RSI[i]})));
     }
     else if (indType === "macd") {
+      const hist = shown.map((c,i)=>indicators.MACDHist[i]).filter(v=>v!=null);
+      const scale = macdAutoScale(hist);
+
+      macdL1.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: scale }) });
+      macdL2.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: scale }) });
+      macdHist.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: scale }) });
+
       macdL1.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACD[i]})));
       macdL2.setData(shown.map((c,i)=>({time:c.time,value:indicators.MACDSignal[i]})));
       macdHist.setData(shown.map((c,i)=>({
-        time: c.time,
-        value: indicators.MACDHist[i],
+        time:c.time,
+        value:indicators.MACDHist[i],
         color: indicators.MACDHist[i] >= 0 ? "#26a69a" : "#ff6b6b"
       })));
     }
