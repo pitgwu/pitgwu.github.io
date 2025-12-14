@@ -407,15 +407,44 @@ ${comment}
     alert(`模擬結束（${stock}）\n報酬率：${roi}%`);
   }
 
-  /* =========================
-   * UI
-   * ========================= */
+  // ----------------------------------------------------------
+  // UI 綁定
+  // ----------------------------------------------------------
   function bindEvents() {
     U.el("buy").onclick = doBuy;
     U.el("sell").onclick = doSell;
     U.el("hold").onclick = doHold;
+
+    U.el("nextDay").onclick = () => {
+      if (currentIndex < data.length - 1) currentIndex++;
+      updateDisplays();
+    };
+    U.el("prevDay").onclick = () => {
+      if (currentIndex > 0) currentIndex--;
+      updateDisplays();
+    };
+
+    U.el("toggleMA").onclick = () => {
+      maVisible = !maVisible;
+      U.el("toggleMA").innerText = maVisible ? "均線：ON" : "均線：OFF";
+      updateDisplays();
+    };
+
+    U.el("toggleSignal").onclick = () => {
+      signalVisible = !signalVisible;
+      U.el("toggleSignal").innerText =
+        signalVisible ? "多空訊號：ON" : "多空訊號：OFF";
+
+      // 只更新訊號顯示，不更新圖表
+      const sigArr = allSignals[currentIndex] || [];
+      U.el("signalBox").innerText = signalVisible
+        ? (sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") || "無")
+        : "多空訊號：OFF";
+    };
+
     U.el("indicatorSelect").onchange = updateDisplays;
   }
 
   loadCSV();
+
 })(window);
