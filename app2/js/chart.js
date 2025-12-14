@@ -42,8 +42,6 @@
   }
 
   function init() {
-	const noScale = () => ({ priceRange: null });
-	
     /* ===== 主圖 ===== */
     chart = fixedChart(document.getElementById("chart"), 420);
 
@@ -61,51 +59,51 @@
       color:"#f00",
       lineWidth:1,
       visible:false,
-      autoscaleInfoProvider: noScale
+	  priceScaleId: ""
     });
 
     ma10 = chart.addLineSeries({
       color:"#0a0",
       lineWidth:1,
       visible:false,
-      autoscaleInfoProvider: noScale
+	  priceScaleId: ""
     });
 
     ma20 = chart.addLineSeries({
       color:"#00f",
       lineWidth:1,
       visible:false,
-      autoscaleInfoProvider: noScale
+	  priceScaleId: ""
     });
 
     bbU = chart.addLineSeries({
       color:"#ffa500",
-      autoscaleInfoProvider: noScale
+	  priceScaleId: ""
     });
 	
     bbM = chart.addLineSeries({
       color:"#0066cc",
-      autoscaleInfoProvider: noScale
+	  priceScaleId: ""
     });
 	
     bbL = chart.addLineSeries({
       color:"#008800",
-      autoscaleInfoProvider: noScale
+	  priceScaleId: ""
     });
 
     // 型態線 series（一次宣告，後面只 setData）
-    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1 });
-    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1 });
+    resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, priceScaleId: "" });
+    supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, priceScaleId: "" });
 
-    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2 });
-    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2 });
+    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, priceScaleId: "" });
+    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, priceScaleId: "" });
 
-    triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1 });
-    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1 });
+    triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1, priceScaleId: "" });
+    triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1, priceScaleId: "" });
 
-    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
-    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
-    wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1 });
+    wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "" });
+    wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "" });
+    wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, priceScaleId: "" });
 
     /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
@@ -144,6 +142,7 @@
     });
 	
 	chart.priceScale("right").applyOptions({ autoScale: true });
+	chart.applyOptions({priceScale: { visible: false }});
   }
 
   function update(shown, indicators, opt) {
@@ -180,9 +179,6 @@
       ma20.applyOptions({ visible:true });
 
     } else {
-	  ma5.setData([]);
-      ma10.setData([]);
-      ma20.setData([]);
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
@@ -201,9 +197,6 @@
       bbM.applyOptions({ visible:false });
       bbL.applyOptions({ visible:false });
     }
-
-    // ===== Overlay no-scale（共用）=====
-    const noScale = () => ({ priceRange: null });
 
     /* ===== 型態線（全部先清） ===== */
     resLine.setData([]); supLine.setData([]);
