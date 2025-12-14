@@ -46,14 +46,15 @@
     /* ===== 主圖 ===== */
     chart = fixedChart(document.getElementById("chart"), 420);
 
-    candle = chart.addCandlestickSeries({
-      upColor: "#ff0000",
-      downColor: "#00aa00",
-      borderUpColor: "#ff0000",
-      borderDownColor: "#00aa00",
-      wickUpColor: "#ff0000",
-      wickDownColor: "#00aa00",
-    });
+	candle = chart.addCandlestickSeries({
+	  upColor: "#ff0000",
+	  downColor: "#00aa00",
+	  borderUpColor: "#ff0000",
+	  borderDownColor: "#00aa00",
+	  wickUpColor: "#ff0000",
+	  wickDownColor: "#00aa00",
+	  priceScaleId: "right"   // ✅ 明確指定主圖 scale
+	});
 
     ma5 = chart.addLineSeries({
       color:"#f00",
@@ -306,6 +307,8 @@
     volChart.timeScale().setVisibleRange({ from, to });
     indChart.timeScale().setVisibleRange({ from, to });
   }
-
+  
+  chart.priceScale("right").applyOptions({ autoScale: true });
+ 
   global.ChartManager = { init, update };
 })(window);
