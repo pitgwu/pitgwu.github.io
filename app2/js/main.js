@@ -210,6 +210,12 @@
     }
   }
 
+  function refreshTradeUI() {
+    updateStats();
+    updateTradeLog();
+    updateHoldings();
+  }
+
   function doBuy() {
     const qty = +U.el("shareInput").value;
     if (!qty || qty <= 0) return;
@@ -239,6 +245,7 @@
       date: data[currentIndex].time
     });
 
+    refreshTradeUI();
     finishToday();
   }
 
@@ -282,11 +289,13 @@
       date: data[currentIndex].time
     });
 
+    refreshTradeUI();
     finishToday();
   }
 
   function doHold() {
     trades.push({ type:"hold", date:data[currentIndex].time });
+	refreshTradeUI();
     finishToday();
   }
 
