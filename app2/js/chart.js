@@ -7,6 +7,7 @@
   let chart, candle;
   let volChart, volSeries;
   let indChart;
+  let lastBarCount = 0;
 
   // ===== 主圖 =====
   let ma5, ma10, ma20;
@@ -179,6 +180,9 @@
       ma20.applyOptions({ visible:true });
 
     } else {
+	  ma5.setData([]);
+      ma10.setData([]);
+      ma20.setData([]);
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
@@ -189,8 +193,13 @@
       bbU.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.upper[i]})));
       bbM.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.mid[i]})));
       bbL.setData(shown.map((c,i)=>({time:c.time,value:indicators.BB.lower[i]})));
+	  bbU.applyOptions({ visible:true });
+      bbM.applyOptions({ visible:true });
+      bbL.applyOptions({ visible:true });
     } else {
-      bbU.setData([]); bbM.setData([]); bbL.setData([]);
+      bbU.applyOptions({ visible:false });
+      bbM.applyOptions({ visible:false });
+      bbL.applyOptions({ visible:false });
     }
 
     // ===== Overlay no-scale（共用）=====
@@ -305,9 +314,12 @@
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
 
-    chart.timeScale().setVisibleRange({ from, to });
-    volChart.timeScale().setVisibleRange({ from, to });
-    indChart.timeScale().setVisibleRange({ from, to });
+	if (shown.length !== lastBarCount) {
+      chart.timeScale().setVisibleRange({ from, to });
+      volChart.timeScale().setVisibleRange({ from, to });
+      indChart.timeScale().setVisibleRange({ from, to });
+      lastBarCount = shown.length;
+    }
   }
   
   global.ChartManager = { init, update };
