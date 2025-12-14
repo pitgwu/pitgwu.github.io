@@ -141,6 +141,8 @@
     macdHist = indChart.addHistogramSeries({
       autoscaleInfoProvider: macdScale
     });
+	
+	chart.priceScale("right").applyOptions({ autoScale: true });
   }
 
   function update(shown, indicators, opt) {
@@ -308,7 +310,5 @@
     indChart.timeScale().setVisibleRange({ from, to });
   }
   
-  chart.priceScale("right").applyOptions({ autoScale: true });
- 
   global.ChartManager = { init, update };
 })(window);
