@@ -1,4 +1,5 @@
 // js/chart.js
+
 (function (global) {
   "use strict";
 
@@ -21,6 +22,11 @@
   // ===== 指標 =====
   let indAutoL1, indAutoL2;       // KD / RSI
   let macdL1, macdL2, macdHist;   // MACD
+
+  // ===== Ultra-Smooth cache =====
+  let maCache = { ma5: [], ma10: [], ma20: [] };
+  let bbCache = { u: [], m: [], l: [] };
+  let cacheReady = false;
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -114,6 +120,46 @@
 
     const visibleBars = opt.visibleBars || 40;
     const indType = opt.indicatorType;
+
+    // ===== build cache once =====
+    if (!cacheReady) {
+      const closes = shown.map(c => c.close);
+
+      maCache.ma5  = U.sma(closes, 5)
+        .map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null)
+        .filter(Boolean);
+
+      maCache.ma10 = U.sma(closes,10)
+        .map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null)
+        .filter(Boolean);
+
+      maCache.ma20 = U.sma(closes,20)
+        .map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null)
+        .filter(Boolean);
+
+      bbCache.u = shown.map((c,i)=>(
+        indicators.BB.upper[i]!=null?{time:c.time,value:indicators.BB.upper[i]}:null
+      )).filter(Boolean);
+
+      bbCache.m = shown.map((c,i)=>(
+        indicators.BB.mid[i]!=null?{time:c.time,value:indicators.BB.mid[i]}:null
+      )).filter(Boolean);
+
+      bbCache.l = shown.map((c,i)=>(
+        indicators.BB.lower[i]!=null?{time:c.time,value:indicators.BB.lower[i]}:null
+      )).filter(Boolean);
+
+      // 🔒 永久寫入 series（一次）
+      ma5.setData(maCache.ma5);
+      ma10.setData(maCache.ma10);
+      ma20.setData(maCache.ma20);
+
+      bbU.setData(bbCache.u);
+      bbM.setData(bbCache.m);
+      bbL.setData(bbCache.l);
+
+      cacheReady = true;
+    }
 
     // ===== K線/成交量 =====
     candle.setData(shown);
