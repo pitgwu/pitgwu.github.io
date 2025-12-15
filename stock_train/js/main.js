@@ -74,11 +74,13 @@
         if (!data.length) return alert("CSV 空白");
 
         // ⭐ 起始交易日 = 2025-01-02
-        let startIdx = data.findIndex(d => d.time === "2025-01-02");
-        if (startIdx < 0) {
-          alert("找不到 2025-01-02，請檢查 CSV");
-          startIdx = 0;
-        }
+        //let startIdx = data.findIndex(d => d.time === "2025-01-02");
+        //if (startIdx < 0) {
+        //  alert("找不到 2025-01-02，請檢查 CSV");
+        //  startIdx = 0;
+        //}
+		// ⭐ 起始交易日 = 第23根K棒
+		let startIdx = 23
 
         // ⭐ 交易日就是這一天
         currentIndex = startIdx;
