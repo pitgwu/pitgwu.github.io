@@ -98,6 +98,8 @@
     macdL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
     macdL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
     macdHist = indChart.addHistogramSeries({});
+	
+	chart.priceScale("right").applyOptions({ autoScale: true });
   }
 
   function setLineDataSafe(series, points, visible) {
@@ -136,7 +138,6 @@
       setLineDataSafe(ma20, ma20Pts, true);
     } else {
       // ✅ OFF 時不要碰 candle / scale，只隱藏均線即可
-      ma5.setData([]); ma10.setData([]); ma20.setData([]);
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
@@ -152,7 +153,6 @@
       setLineDataSafe(bbM, m, true);
       setLineDataSafe(bbL, l, true);
     } else {
-      bbU.setData([]); bbM.setData([]); bbL.setData([]);
       bbU.applyOptions({ visible:false });
       bbM.applyOptions({ visible:false });
       bbL.applyOptions({ visible:false });
