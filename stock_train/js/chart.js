@@ -99,6 +99,8 @@
     macdL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
     macdHist = indChart.addHistogramSeries({});
 	
+	// 🔒 強制穩定主價格刻度（避免第一次 MA toggle 清空 scale）
+    chart.timeScale().fitContent();
 	chart.priceScale("right").applyOptions({ autoScale: true });
   }
 
