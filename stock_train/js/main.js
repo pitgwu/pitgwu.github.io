@@ -26,7 +26,6 @@
 
   let signalVisible = false;
   let maVisible = false;
-  let threeHigh = false;
 
   // ----------------------------------------------------------
   // 1️⃣ 計算「總未實現損益」
@@ -126,8 +125,7 @@
       indicatorType: (sel === "bb") ? null : sel,
       trendlines: maVisible ? tline : null,
       wPattern: maVisible ? w : null,
-      triangle: maVisible ? tri : null,
-	  show3HighSignal: threeHigh
+      triangle: maVisible ? tri : null
     });
 
     updateStats();
@@ -413,12 +411,6 @@
       U.el("signalBox").innerText = signalVisible
         ? (sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") || "無")
         : "多空訊號：OFF";
-    };
-
-    U.el("toggle3High").onclick = () => {
-      threeHigh = !threeHigh;
-      U.el("toggle3High").innerText = threeHigh ? "三日高：ON" : "三日高：OFF";
-      updateDisplays();
     };
 
     U.el("indicatorSelect").onchange = updateDisplays;

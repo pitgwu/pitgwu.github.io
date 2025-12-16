@@ -27,10 +27,6 @@
   let maCache = { ma5: [], ma10: [], ma20: [] };
   let bbCache = { u: [], m: [], l: [] };
   let cacheReady = false;
-  
-  // ===== 三日高突破訊號(注意/買進) =====
-  let sigStopLine; // 停損/防守線
-  let sigState = { status: "WAIT", stopLoss: null, noticeIndex: null }; // WAIT | NOTICE | BUY
 
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
@@ -93,15 +89,6 @@
     wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
     wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
 
-    // ===== 三日高突破訊號：停損/防守線 =====
-    // 用同 right scale，不干擾 K 線
-    sigStopLine = chart.addLineSeries({
-      color: "#111",
-      lineWidth: 2,
-      visible: false,
-      priceScaleId: "right"
-    });
-
     /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
     volChart.timeScale().applyOptions({ visible: false });
@@ -127,159 +114,6 @@
     series.setData(points);
     series.applyOptions({ visible: !!visible });
   }
-
-
-
-  // ===== 三日高突破訊號：工具函式 =====
-  function getThreeDayHigh(data, i) {
-    return Math.max(data[i - 1].high, data[i - 2].high, data[i - 3].high);
-  }
-
-  function getAvgVolume(data, i, period) {
-    let sum = 0;
-    const start = Math.max(0, i - period);
-    const n = i - start;
-    if (n <= 0) return 0;
-    for (let j = start; j < i; j++) sum += (data[j].volume || 0);
-    return sum / n;
-  }
-
-  // 依你規則：前三日「大量K棒」的最低點(取最低者)，若無大量K棒 → 回退前三日低點
-  function getDefensePrice(data, i, avgPeriod, volFactor) {
-    const avgVol = getAvgVolume(data, i, avgPeriod);
-    let lows = [];
-
-    for (let j = i - 1; j >= i - 3; j--) {
-      const v = data[j].volume || 0;
-      if (avgVol > 0 && v >= avgVol * volFactor) lows.push(data[j].low);
-    }
-
-    if (lows.length === 0) {
-      return Math.min(data[i - 1].low, data[i - 2].low, data[i - 3].low);
-    }
-    return Math.min(...lows);
-  }
-
-  function resetSignalState() {
-    sigState.status = "WAIT";
-    sigState.stopLoss = null;
-    sigState.noticeIndex = null;
-  }
-
-  // 主判斷：回傳事件（NOTICE/BUY/RESET）或 null
-  function check3HighSignal(data, i, avgPeriod, volFactor) {
-    if (i < 3) return null;
-
-    const today = data[i];
-    const threeHigh = getThreeDayHigh(data, i);
-    const defense = getDefensePrice(data, i, avgPeriod, volFactor);
-
-    // ===== WAIT =====
-    if (sigState.status === "WAIT") {
-      if (today.close > threeHigh) {
-        sigState.status = "NOTICE";
-        sigState.stopLoss = defense;
-        sigState.noticeIndex = i;
-        return { type: "NOTICE", idx: i, time: today.time, price: today.close, stop: sigState.stopLoss };
-      }
-    }
-
-    // ===== NOTICE =====
-    else if (sigState.status === "NOTICE") {
-      // 若注意後股價有跌破目前停損價 → 取消注意回 WAIT
-      if (today.low < sigState.stopLoss) {
-        const prevStop = sigState.stopLoss;
-        resetSignalState();
-        return { type: "RESET", idx: i, time: today.time, stop: prevStop };
-      }
-
-      // 未破停損，且第二次站上三日高 → BUY（i 必須大於第一次 noticeIndex）
-      if (today.close > threeHigh && i > (sigState.noticeIndex ?? -1)) {
-        sigState.status = "BUY";
-        sigState.stopLoss = defense; // 再次更新防守點
-        return { type: "BUY", idx: i, time: today.time, price: today.close, stop: sigState.stopLoss };
-      }
-    }
-
-    // ===== BUY =====
-    // 你原規則沒有寫 BUY 後怎麼處理；我這裡做「維持 stopLoss 不變」，方便你後續擴充追蹤停損
-    // 如要 BUY 後也跌破 stopLoss 回 WAIT，可在此加上：
-    // if (sigState.status === "BUY" && today.low < sigState.stopLoss) reset...
-
-    return null;
-  }
-
-  // 依序跑完整資料，產生 markers + stopLoss 線資料
-  function build3HighSignalArtifacts(shown, opt) {
-    const enabled = !!opt.show3HighSignal;
-    if (!enabled) {
-      sigStopLine.setData([]);
-      sigStopLine.applyOptions({ visible: false });
-      candle.setMarkers([]);
-      return;
-    }
-
-    // 可調參
-    const avgPeriod = opt.signalAvgVolPeriod ?? 20;
-    const volFactor = opt.signalVolFactor ?? 1.5;
-
-    // 每次 update 用 shown 重算（讓回測/切換資料不會殘留狀態）
-    resetSignalState();
-
-    const markers = [];
-    const stopPts = [];
-
-    for (let i = 0; i < shown.length; i++) {
-      if (i < 3) continue;
-
-      const ev = check3HighSignal(shown, i, avgPeriod, volFactor);
-
-      // 每根 bar 若處於 NOTICE/BUY，畫出 stopLoss（做成連續線：每根都塞點）
-      if (sigState.stopLoss != null && (sigState.status === "NOTICE" || sigState.status === "BUY")) {
-        stopPts.push({ time: shown[i].time, value: sigState.stopLoss });
-      }
-
-      if (!ev) continue;
-
-      if (ev.type === "NOTICE") {
-        markers.push({
-          time: ev.time,
-          position: "aboveBar",
-          color: "#f39c12",
-          shape: "circle",
-          text: "注意"
-        });
-      } else if (ev.type === "BUY") {
-        markers.push({
-          time: ev.time,
-          position: "belowBar",
-          color: "#2ecc71",
-          shape: "arrowUp",
-          text: "買進"
-        });
-      } else if (ev.type === "RESET") {
-        markers.push({
-          time: ev.time,
-          position: "aboveBar",
-          color: "#7f8c8d",
-          shape: "square",
-          text: "等待"
-        });
-      }
-    }
-
-    // 更新圖形輸出
-    candle.setMarkers(markers);
-
-    if (stopPts.length) {
-      sigStopLine.setData(stopPts);
-      sigStopLine.applyOptions({ visible: true });
-    } else {
-      sigStopLine.setData([]);
-      sigStopLine.applyOptions({ visible: false });
-    }
-  }
-
 
   function update(shown, indicators, opt) {
     if (!shown || !shown.length) return;
@@ -442,10 +276,6 @@
         wNeck.applyOptions({ visible:true });
       }
     }
-
-    // ===== 三日高突破訊號：產生 marker + stopLoss 線 =====
-    // opt.show3HighSignal = true 才會顯示
-    build3HighSignalArtifacts(shown, opt);
 
     // ===== 指標區 =====
     indAutoL1.setData([]); indAutoL2.setData([]);
