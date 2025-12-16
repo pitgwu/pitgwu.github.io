@@ -26,6 +26,7 @@
 
   let signalVisible = false;
   let maVisible = false;
+  let threeHigh = false;
 
   // ----------------------------------------------------------
   // 1️⃣ 計算「總未實現損益」
@@ -79,8 +80,8 @@
         //  alert("找不到 2025-01-02，請檢查 CSV");
         //  startIdx = 0;
         //}
-		// ⭐ 起始交易日 = 第23根K棒
-		let startIdx = 23
+		// ⭐ 起始交易日 = 第22根K棒
+		let startIdx = 22
 
         // ⭐ 交易日就是這一天
         currentIndex = startIdx;
@@ -125,7 +126,8 @@
       indicatorType: (sel === "bb") ? null : sel,
       trendlines: maVisible ? tline : null,
       wPattern: maVisible ? w : null,
-      triangle: maVisible ? tri : null
+      triangle: maVisible ? tri : null,
+	  show3HighSignal: threeHigh
     });
 
     updateStats();
@@ -411,6 +413,12 @@
       U.el("signalBox").innerText = signalVisible
         ? (sigArr.map(s => `[${s.side === "bull" ? "多" : "空"}] ${s.name}`).join("、") || "無")
         : "多空訊號：OFF";
+    };
+
+    U.el("toggle3High").onclick = () => {
+      threeHigh = !threeHigh;
+      U.el("toggle3High").innerText = threeHigh ? "三日高：ON" : "三日高：OFF";
+      updateDisplays();
     };
 
     U.el("indicatorSelect").onchange = updateDisplays;
