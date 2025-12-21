@@ -1444,7 +1444,7 @@ const patternsDB = {
 
             return {
                 entry: breakPrice, // 系統運算用，但不顯示 Marker
-                target: targetBull,
+                target: targetBear,
                 stop: sup_end,
                 
                 points: chartPoints,
@@ -1567,7 +1567,7 @@ const patternsDB = {
 
             return {
                 entry: breakPrice,
-                target: targetBull,
+                target: targetBear,
                 stop: v.high,
                 
                 points: chartPoints,
@@ -1924,145 +1924,2869 @@ const patternsDB = {
 
     // --- 快跌飄旗系列 (Bear Flags) ---
     bearFlagUp: {
-        name: "6. 快跌上升飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿頂", default: 100 }, { id: "brk", label: "跌破點", default: 80 }],
-        note: "<strong>特徵</strong>：急跌後，旗面向上傾斜。<br><strong>戰略</strong>：跌破下緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.pole-v.brk), stop: v.brk+5, points: [v.pole, v.brk, v.brk+5, v.brk+2, v.brk+7, v.brk+4, v.brk-5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk+4,color:'#27ae60'}] })
+        name: "6. 快跌上升飄旗 (Ascending Bear Flag) - 急跌緩漲",
+        type: "bear", // 中性偏空
+        inputs: [
+            { id: "startHigh", label: "起跌點 (高)", default: 60 },
+            { id: "flagLow", label: "旗桿底 (低)", default: 35 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>先是一段「斷崖式急跌」(旗桿)，隨後進入向右上傾斜的平行通道(旗面)。這通常是空方休息的中繼站。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏空」</strong>型態。通道雖向上，但那是虛漲。主力隨時可能發動下一波殺盤。圖中展示了<strong>紅綠雙向劇本</strong>，目標價皆以「旗桿高度」進行等幅測距。<br>
+            <strong>【操作戰略】</strong><br>
+            1. <strong>空方(綠 - 主趨勢)</strong>：跌破上升支撐線。目標 = 通道上緣 - 旗桿長。<br>
+            2. <strong>多方(紅 - 反轉)</strong>：突破上升壓力線。目標 = 通道下緣 + 旗桿長。
+        `,
+        calc: (v) => {
+            const poleHeight = v.startHigh - v.flagLow; // H
+            
+            // 時間軸
+            const t_pole_end = 1;   
+            const t_break = 7;      // 決策點
+            const t_target = v.duration - 1;
+
+            // 通道參數
+            const channelWidth = poleHeight * 0.25; 
+            const slope = (poleHeight * 0.2) / (t_break - t_pole_end);
+
+            // 通道方程式
+            const getBtmLine = (t) => v.flagLow + slope * (t - t_pole_end);
+            const getTopLine = (t) => getBtmLine(t) + channelWidth;
+
+            // ★關鍵修正：目標價計算邏輯
+            // 取得決策點當下的通道上下緣價格
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // 空方目標 = 通道上緣 - H
+            let targetBear = getTopLine(t_break-1) - poleHeight;
+            if (targetBear < 0) targetBear = 0; // 防呆
+
+            // 多方目標 = 通道下緣 + H
+            const targetBull = priceBtmAtBreak + poleHeight;
+
+            // 決策點 (貼底)
+            const breakPrice = priceBtmAtBreak;
+
+            // 建構 K 線
+            let chartPoints = [];
+            chartPoints[0] = v.startHigh;
+            chartPoints[1] = v.flagLow; 
+            chartPoints[2] = getTopLine(2);
+            chartPoints[3] = getBtmLine(3);
+            chartPoints[4] = getTopLine(4);
+            chartPoints[5] = getBtmLine(5);
+            chartPoints[6] = getTopLine(6);
+            chartPoints[7] = breakPrice;      
+
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBear,
+                stop: getTopLine(t_break),
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    { x1: 0, x2: 1, y1: v.startHigh, y2: v.flagLow, color: '#2ecc71', label: '旗桿' },
+                    { x1: 1.5, x2: t_break, y1: getTopLine(1.5), y2: getTopLine(t_break), color: '#2ecc71', label: '上升壓力' },
+                    { x1: 1, x2: t_break, y1: v.flagLow, y2: breakPrice, color: '#2ecc71', label: '上升支撐' },
+
+                    // 目標價線
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.flagLow, y2: v.startHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // 路徑模擬 (起點修正為決策點 breakPrice)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '跌破' },
+					
+					// I. 多方路徑示意 (藍色虛線)
+                    { x1: 7, x2: 7, y1: priceBtmAtBreak, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: 6, x2: 6, y1: getTopLine(t_break-1), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' },
+                ],
+                
+                extraMarkers: [
+                    { type: 'point', xValue: t_break, yValue: breakPrice, backgroundColor: '#95a5a6', radius: 6, borderColor: 'white', borderWidth: 2 },
+                    { type: 'point', xValue: t_target, yValue: targetBull, backgroundColor: '#e74c3c', radius: 8, borderColor: 'white', borderWidth: 2, label: '多方' },
+                    { type: 'point', xValue: t_target, yValue: targetBear, backgroundColor: '#2ecc71', radius: 8, borderColor: 'white', borderWidth: 2, label: '空方' }
+                ]
+            };
+        }
     },
-    bearFlagFlat: {
-        name: "7. 快跌水平飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿頂", default: 100 }, { id: "brk", label: "跌破點", default: 80 }],
-        note: "<strong>特徵</strong>：急跌後，旗面水平橫移。<br><strong>戰略</strong>：跌破下緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.pole-v.brk), stop: v.brk+5, points: [v.pole, v.brk, v.brk+5, v.brk, v.brk+5, v.brk, v.brk-5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk,color:'#27ae60'}] })
+	bearFlagFlat: {
+        name: "7. 快跌水平飄旗 (Horizontal Bear Flag) - 急跌整理",
+        type: "bear", // 中性偏空
+        inputs: [
+            { id: "poleTop", label: "起跌點 (高)", default: 100 },
+            { id: "boxHigh", label: "旗面頂 (壓力)", default: 60 },
+            { id: "boxLow", label: "旗面底 (支撐)", default: 50 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>斷崖式急跌(旗桿)後，進入水平的箱型整理(旗面)。與上升飄旗不同，此處多空力量完全勢均力敵，呈現矩形震盪。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏空」</strong>型態。T7 決策點位於<strong>箱體下緣</strong>(支撐線)。這是一個中性結構，必須等待實質突破箱頂或跌破箱底。<br>
+            <strong>【操作戰略 (雙軌)】</strong><br>
+            1. <strong>空方(綠)</strong>：有效跌破箱底。目標 = 箱體上緣 - 旗桿長。<br>
+            2. <strong>多方(紅)</strong>：帶量突破箱頂。目標 = 箱體下緣 + 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.poleTop - v.boxLow; 
+            
+            // ==========================================
+            // 📐 幾何運算
+            // ==========================================
+            
+            // 時間軸
+            const t_break = 7;      // 決策點 (T7)
+            const t_target = v.duration - 1;
+
+            // 1. 設定目標價 (加入 Math.max 防止負值)
+            let targetBear = v.boxHigh - poleHeight;
+            if (targetBear < 0) targetBear = 0; // ★關鍵修正：最低 0 元
+
+            // 多方目標 (基準點是 boxHigh)
+            const targetBull = v.boxLow + poleHeight;
+
+            // 2. 建構 K 線路徑
+            let chartPoints = [];
+            
+            // T0: 起跌點
+            chartPoints[0] = v.poleTop;
+            
+            // T1: 急跌至箱底
+            chartPoints[1] = v.boxLow; 
+
+            // T2~T6: 箱型內震盪
+            chartPoints[2] = v.boxHigh;   // 頂
+            chartPoints[3] = v.boxLow;    // 底
+            chartPoints[4] = v.boxHigh;   // 頂
+            chartPoints[5] = v.boxLow;    // 底
+            chartPoints[6] = v.boxHigh;   // 頂
+            
+            // T7: 決策點 (貼底)
+            chartPoints[7] = v.boxLow;      
+
+            // 填充預測區
+            for (let i = 8; i <= t_target; i++) {
+                chartPoints.push(null); 
+            }
+
+            return {
+                entry: v.boxLow,
+                target: targetBear,
+                stop: v.boxHigh,
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿 (急跌段)
+                    { x1: 0, x2: 1, y1: v.poleTop, y2: v.boxLow, color: '#2ecc71', label: '旗桿' },
+                    
+                    // B. 上方壓力線
+                    { x1: 1, x2: t_break, y1: v.boxHigh, y2: v.boxHigh, color: '#2ecc71', label: '水平壓力' },
+                    
+                    // C. 下方支撐線
+                    { x1: 1, x2: t_break, y1: v.boxLow, y2: v.boxLow, color: '#2ecc71', label: '水平支撐' },
+
+                    // D. 目標價線-多 (紅)
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空 (綠)
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅虛線 (旗桿高 H)
+                    { x1: 0.5, x2: 0.5, y1: v.boxLow, y2: v.poleTop, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑模擬
+                    { x1: t_break, x2: t_target, y1: v.boxHigh, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑模擬
+                    { x1: t_break, x2: t_target, y1: v.boxLow, y2: targetBear, color: '#2ecc71', dashed: true, label: '跌破' },
+					
+					// I. 多方路徑示意 (藍色虛線)
+                    { x1: 7, x2: 7, y1: v.boxLow, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: 6, x2: 6, y1: v.boxHigh, y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' },
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: v.boxLow,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標點
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標點
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
-    bearFlagDown: {
-        name: "8. 快跌下降飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿頂", default: 100 }, { id: "brk", label: "跌破點", default: 80 }],
-        note: "<strong>特徵</strong>：急跌後，旗面向下傾斜(較少見)。<br><strong>戰略</strong>：跌破下緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.pole-v.brk), stop: v.brk+5, points: [v.pole, v.brk+5, v.brk+8, v.brk+3, v.brk+6, v.brk, v.brk-5], trendlines: [{x1:3,x2:5,y1:v.brk+3,y2:v.brk,color:'#27ae60'}] })
+	bearFlagDown: {
+        name: "8. 快跌下降飄旗 (Descending Bear Flag) - 極度疲弱",
+        type: "bear", // 中性偏空
+        inputs: [
+            { id: "poleTop", label: "起跌點 (高)", default: 80 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 55 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 45 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>經歷斷崖式急跌(旗桿)後，股價連反彈都無力，形成高低點持續降低的下降通道(旗面)。這顯示市場極度疲弱。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏空」</strong>型態。T7 決策點位於<strong>下降支撐線</strong>上。雖然趨勢向下，但下降楔型有時也是反轉訊號，故採用雙向策略。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>空方(綠)</strong>：跌破下降支撐。目標 = 通道上緣 - 旗桿長。<br>
+            2. <strong>多方(紅)</strong>：突破下降壓力。目標 = 通道下緣 + 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H (起跌點 - 旗面起點的底)
+            const poleHeight = v.poleTop - v.flagStartLow; 
+            
+            // ==========================================
+            // 📐 下降通道幾何運算
+            // ==========================================
+            
+            // 時間軸
+            const t_pole_end = 1;   
+            const t_break = 7;      // 決策點 (T7)
+            const t_target = v.duration - 1;
+
+            // 通道參數
+            // 計算通道寬度
+            const channelWidth = v.flagStartHigh - v.flagStartLow;
+            // 設定下降斜率 (每單位時間跌多少)
+            // 這裡設定一個適中的下降幅度，例如 7 根 K 棒跌掉 10 點
+            const slope = -1.5; 
+
+            // 通道方程式 (從 t_pole_end 開始)
+            const getBtmLine = (t) => v.flagStartLow + slope * (t - t_pole_end);
+            const getTopLine = (t) => getBtmLine(t) + channelWidth;
+
+            // ★關鍵修正：目標價計算邏輯 (保守版)
+            // 取得決策點當下的通道上下緣價格
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // 空方目標 = 通道上緣(較高點) - H
+            // 邏輯：雖然是空方，但我們從比較高的位置起算扣除，讓目標價比較不容易太深(保守)
+            let targetBear = getTopLine(t_break-1) - poleHeight;
+            if (targetBear < 0) targetBear = 0; // 防呆
+
+            // 多方目標 = 通道下緣(較低點) + H
+            // 邏輯：從低點起算加回去，讓漲幅目標比較保守
+            const targetBull = priceBtmAtBreak + poleHeight;
+
+            // 決策點 (貼底)
+            const breakPrice = priceBtmAtBreak;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            // T0: 起跌點
+            chartPoints[0] = v.poleTop;
+            
+            // T1: 急跌至旗面起點底
+            chartPoints[1] = v.flagStartLow; 
+
+            // T2~T6: 下降通道內震盪 (幾何對齊)
+            chartPoints[2] = getTopLine(2);   // 碰頂
+            chartPoints[3] = getBtmLine(3);   // 碰底
+            chartPoints[4] = getTopLine(4);   // 碰頂
+            chartPoints[5] = getBtmLine(5);   // 碰底
+            chartPoints[6] = getTopLine(6);   // 碰頂
+            
+            // T7: ★決策點 (強制對齊下降支撐)
+            chartPoints[7] = breakPrice;      
+
+            // 填充預測區
+            for (let i = 8; i <= t_target; i++) {
+                chartPoints.push(null); 
+            }
+
+            return {
+                entry: breakPrice,
+                target: targetBear,
+                stop: priceTopAtBreak, // 停損設在上緣
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿 (急跌段)
+                    { x1: 0, x2: 1, y1: v.poleTop, y2: v.flagStartLow, color: '#2ecc71', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (下降)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '下降壓力' },
+                    
+                    // C. 下方支撐線 (下降)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '下降支撐' },
+
+                    // D. 目標價線-多 (紅)
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空 (綠)
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅虛線 (旗桿高 H)
+                    { x1: 0.5, x2: 0.5, y1: v.flagStartLow, y2: v.poleTop, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑模擬 (紅虛線) - 突破後向上
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑模擬 (綠虛線) - 跌破後向下
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '跌破' },
+					
+					// I. 多方路徑示意 (藍色虛線)
+                    { x1: 7, x2: 7, y1: priceBtmAtBreak, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: 6, x2: 6, y1: getTopLine(t_break-1), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' },
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點 (灰色，位於下降支撐線上)
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標點
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標點
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
     // --- 快跌三角飄旗系列 (Bear Pennants) ---
-    bearPennantUp: {
-        name: "9. 快跌上升三角飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿頂", default: 100 }, { id: "brk", label: "跌破點", default: 80 }],
-        note: "<strong>特徵</strong>：急跌後收斂，重心略升。<br><strong>戰略</strong>：跌破下緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.pole-v.brk), stop: v.brk+5, points: [v.pole, v.brk, v.brk+5, v.brk+2, v.brk+4, v.brk, v.brk-5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk,color:'#27ae60'}] })
+	bearPennantUp: {
+        name: "9. 快跌上升三角飄旗 (Rising Wedge Flag) - 中繼再跌",
+        type: "bear", // 中性偏空
+        inputs: [
+            { id: "poleTop", label: "起跌點 (高)", default: 80 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 50 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 30 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急跌(旗桿)後，進入高低點同時墊高的「上升楔型」整理。下方支撐線比上方壓力線更陡，雖看似上漲，實為多頭力竭的收斂。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏空」</strong>型態。T7 決策點位於<strong>上升支撐線</strong>上。此型態在空頭趨勢中常為「中繼再跌」訊號，但仍需防範多頭強勢V轉。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>空方(綠)</strong>：跌破上升支撐。目標 = 壓力線(上緣) - 旗桿長。<br>
+            2. <strong>多方(紅)</strong>：突破上升壓力。目標 = 支撐線(下緣) + 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.poleTop - v.flagStartLow; 
+            
+            // ==========================================
+            // 📐 上升楔型幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // 決策點 (T7)
+            const t_target = v.duration - 1;
+
+            // 幾何參數設定 (收斂)
+            // 兩條線都向上，但下方 (Btm) 升得比上方 (Top) 快 -> 形成楔型
+            const slopeTop = 1.0; // 緩升
+            const slopeBtm = 2.5; // 陡升
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slopeTop * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slopeBtm * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：強制貼在「上升支撐線」
+            const breakPrice = priceBtmAtBreak;
+
+            // ★ 保守目標價計算 (從反向邊界起算)
+            // 空方：從較高的壓力線扣除 H (因楔型向上，壓力線很高，這樣算目標價比較保守)
+            let targetBear = getTopLine(t_break-1) - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 多方：從較低的支撐線加上 H
+            const targetBull = priceBtmAtBreak + poleHeight;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleTop;
+            chartPoints[1] = v.flagStartLow; 
+            
+            // 楔型震盪 (高低點墊高)
+            chartPoints[2] = getTopLine(2);   
+            chartPoints[3] = getBtmLine(3);   
+            chartPoints[4] = getTopLine(4);   
+            chartPoints[5] = getBtmLine(5);   
+            chartPoints[6] = getTopLine(6);   
+            
+            // T7: 貼底
+            chartPoints[7] = breakPrice;      
+
+            // 填充預測區
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBear,
+                stop: priceTopAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleTop, y2: v.flagStartLow, color: '#2ecc71', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (緩升)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '上升壓力' },
+                    
+                    // C. 下方支撐線 (陡升)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '上升支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.flagStartLow, y2: v.poleTop, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '跌破' },
+					
+					// I. 多方路徑示意 (藍色虛線)
+                    { x1: t_break, x2: t_break, y1: priceBtmAtBreak, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: t_break-1, x2: t_break-1, y1: getTopLine(t_break-1), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' },
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點 (T7，位於上升支撐)
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
-    bearPennantFlat: {
-        name: "10. 快跌水平三角飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿頂", default: 100 }, { id: "brk", label: "跌破點", default: 80 }],
-        note: "<strong>特徵</strong>：急跌後標準收斂三角。<br><strong>戰略</strong>：跌破下緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.pole-v.brk), stop: v.brk+5, points: [v.pole, v.brk, v.brk+6, v.brk+1, v.brk+3, v.brk, v.brk-5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk,color:'#27ae60'}] })
+	bearPennantFlat: {
+        name: "10. 快跌水平三角飄旗 (Symmetrical Triangle Flag) - 三角收斂",
+        type: "bear", // 中性偏空
+        inputs: [
+            { id: "poleTop", label: "起跌點 (高)", default: 80 },
+            { id: "flagHigh", label: "旗面起點 (頂)", default: 60 },
+            { id: "flagLow", label: "旗面起點 (底)", default: 40 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>經歷斷崖式急跌(旗桿)後，多空力道開始收斂。高點降低、低點墊高，形成對稱三角形(旗面)。能量壓縮至極致。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏空」</strong>型態。T7 決策點位於三角形的<strong>收斂尖端</strong>。此為中性型態，必須等待實質突破。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>空方(綠)</strong>：跌破上升支撐線。目標 = 壓力線(上緣) - 旗桿長。<br>
+            2. <strong>多方(紅)</strong>：突破下降壓力線。目標 = 支撐線(下緣) + 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.poleTop - v.flagLow; 
+            
+            // ==========================================
+            // 📐 幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // 決策點 (T7)
+            const t_target = v.duration - 1;
+
+            // 設定虛擬尖端在 T10
+            const t_apex = 10; 
+
+            // 理論收斂中心
+            const midPoint = (v.flagHigh + v.flagLow) / 2;
+
+            // 建立方程式
+            const slopeTop = (midPoint - v.flagHigh) / (t_apex - t_pole_end);
+            const getTopLine = (t) => v.flagHigh + slopeTop * (t - t_pole_end);
+
+            const slopeBtm = (midPoint - v.flagLow) / (t_apex - t_pole_end);
+            const getBtmLine = (t) => v.flagLow + slopeBtm * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★關鍵修正：決策點 T7 強制設定在「上升支撐線」上
+            const breakPrice = priceBtmAtBreak;
+
+            // 目標價計算 (保守原則：從反向邊界起算)
+            let targetBear = getTopLine(t_break-1) - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            const targetBull = priceBtmAtBreak + poleHeight;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleTop;
+            chartPoints[1] = v.flagLow; 
+            
+            // 收斂震盪
+            chartPoints[2] = getTopLine(2);   
+            chartPoints[3] = getBtmLine(3);   
+            chartPoints[4] = getTopLine(4);   
+            chartPoints[5] = getBtmLine(5);   
+            chartPoints[6] = getTopLine(6);   
+            
+            // T7: 貼在底部
+            chartPoints[7] = breakPrice;      
+
+            // 填充預測區
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBear,
+                stop: priceTopAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleTop, y2: v.flagLow, color: '#2ecc71', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (虛線延伸至尖端)
+                    { x1: 1, x2: t_apex, y1: v.flagHigh, y2: midPoint, color: 'rgba(46, 204, 113, 0.5)', dashed: true },
+                    { x1: 1, x2: t_break, y1: v.flagHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '收斂壓力' },
+                    
+                    // C. 下方支撐線 (虛線延伸至尖端)
+                    { x1: 1, x2: t_apex, y1: v.flagLow, y2: midPoint, color: 'rgba(46, 204, 113, 0.5)', dashed: true },
+                    { x1: 1, x2: t_break, y1: v.flagLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '收斂支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.flagLow, y2: v.poleTop, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (從底部向上噴出)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (從底部直接跌破)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '跌破' },
+					
+					// I. 多方路徑示意 (藍色虛線)
+                    { x1: t_break, x2: t_break, y1: priceBtmAtBreak, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: t_break-1, x2: t_break-1, y1: getTopLine(t_break-1), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' },
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點 (T7，位於底部)
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
     bearPennantDown: {
-        name: "11. 快跌下降三角飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿頂", default: 100 }, { id: "brk", label: "跌破點", default: 80 }],
-        note: "<strong>特徵</strong>：急跌後收斂，重心下降。<br><strong>戰略</strong>：跌破下緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.pole-v.brk), stop: v.brk+5, points: [v.pole, v.brk+2, v.brk+6, v.brk+1, v.brk+3, v.brk, v.brk-5], trendlines: [{x1:3,x2:5,y1:v.brk+1,y2:v.brk,color:'#27ae60'}] })
+        name: "11. 快跌下降三角飄旗 (Falling Wedge Flag) - 保守測幅",
+        type: "bear", // 中性偏空
+        inputs: [
+            { id: "poleTop", label: "起跌點 (高)", default: 80 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 60 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 40 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急跌(旗桿)後，進入高低點同時降低的「下降楔型」整理。上方壓力線比下方支撐線更陡，價格波動區間逐漸收窄。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏空」</strong>型態。下降楔型常被視為潛在的多頭反轉訊號(跌無可跌)，但趨勢尚未改變前仍屬空方。T7 決策點位於<strong>下降支撐線</strong>上。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>空方(綠)</strong>：跌破下降支撐。目標 = 壓力線(上緣) - 旗桿長。<br>
+            2. <strong>多方(紅)</strong>：突破下降壓力。目標 = 支撐線(下緣) + 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.poleTop - v.flagStartLow; 
+            
+            // ==========================================
+            // 📐 下降楔型幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // 決策點 (T7)
+            const t_target = v.duration - 1;
+
+            // 幾何參數設定 (收斂)
+            // 上方跌得快 (-2.5)，下方跌得慢 (-1.0) -> 形成楔型
+            const slopeTop = -2.5; 
+            const slopeBtm = -1.0; 
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slopeTop * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slopeBtm * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：強制貼在「下降支撐線」
+            const breakPrice = priceBtmAtBreak;
+
+            // ★ 保守目標價計算 (從反向邊界起算)
+            // 空方：從較高的壓力線扣除 H
+            let targetBear = getTopLine(t_break-1) - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 多方：從較低的支撐線加上 H
+            const targetBull = priceBtmAtBreak + poleHeight;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleTop;
+            chartPoints[1] = v.flagStartLow; 
+            
+            // 楔型震盪
+            chartPoints[2] = getTopLine(2);   
+            chartPoints[3] = getBtmLine(3);   
+            chartPoints[4] = getTopLine(4);   
+            chartPoints[5] = getBtmLine(5);   
+            chartPoints[6] = getTopLine(6);   
+            
+            // T7: 貼底
+            chartPoints[7] = breakPrice;      
+
+            // 填充預測區
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBear,
+                stop: priceTopAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleTop, y2: v.flagStartLow, color: '#2ecc71', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (陡降)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '下降壓力' },
+                    
+                    // C. 下方支撐線 (緩降)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '下降支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.flagStartLow, y2: v.poleTop, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '跌破' },
+					
+					// I. 多方路徑示意 (藍色虛線)
+                    { x1: t_break, x2: t_break, y1: priceBtmAtBreak, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: t_break-1, x2: t_break-1, y1: getTopLine(t_break-1), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' },
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點 (T7，位於下降支撐)
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
 
     // --- 快漲飄旗系列 (Bull Flags) ---
-    bullFlagUp: {
-        name: "12. 快漲上升飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿底", default: 40 }, { id: "brk", label: "突破點", default: 60 }],
-        note: "<strong>特徵</strong>：急漲後，旗面向上傾斜(較少見)。<br><strong>戰略</strong>：突破上緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk + (v.brk-v.pole), stop: v.brk-5, points: [v.pole, v.brk-5, v.brk-8, v.brk-2, v.brk-5, v.brk, v.brk+5], trendlines: [{x1:3,x2:5,y1:v.brk-2,y2:v.brk,color:'#c0392b'}] })
+	bullFlagUp: {
+        name: "12. 快漲上升飄旗 (Rising Flag) - 雙向策略",
+        type: "bull", // 中性偏多
+        inputs: [
+            { id: "poleBtm", label: "起漲點 (低)", default: 10 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 90 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 45 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急漲(旗桿)後，進入高低點同時墊高的「上升飄旗」整理。雖然趨勢向上，但斜率趨緩，暗示多頭動能可能逐漸耗盡(或為誘多)。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏多」</strong>型態。T7 決策點位於<strong>上升支撐線</strong>上。此處是多頭格局的生命線，守住則續攻，跌破則確認反轉。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>多方(紅)</strong>：突破上升壓力。目標 = 支撐線(下緣) + 旗桿長。<br>
+            2. <strong>空方(綠)</strong>：跌破上升支撐。目標 = 壓力線(上緣) - 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.flagStartHigh - v.poleBtm; 
+            
+            // ==========================================
+            // 📐 上升飄旗幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // ★ 決策點移至 T7 (佔比 50%)
+            const t_target = v.duration - 1;
+
+            // 幾何參數設定
+            const slope = 1.5; 
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slope * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slope * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break); 
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：強制貼在「上升壓力線」
+            const breakPrice = priceTopAtBreak;
+
+            // ★ 保守目標價計算
+            const targetBull = getBtmLine(t_break-2) + poleHeight;
+
+            let targetBear = getTopLine(t_break) - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 建構 K 線路徑 (寬版 W)
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleBtm;       // T0
+            chartPoints[1] = v.flagStartHigh; // T1: W起點 (頂)
+            
+            // --- 第一隻腳 ---
+            chartPoints[2] = getBtmLine(2);   // T2: 急殺至底
+            // T3: 緩漲中繼 (介於 T2底 與 T4頂 之間)
+            chartPoints[3] = (getBtmLine(2) + getTopLine(4)) / 2;
+            chartPoints[4] = getTopLine(4);   // T4: 攻頂 (W中間峰)
+            
+            // --- 第二隻腳 ---
+            chartPoints[5] = getBtmLine(5);   // T5: 急殺至底
+            // T6: 緩漲中繼 (介於 T5底 與 T7頂 之間)
+            chartPoints[6] = (getBtmLine(5) + getTopLine(7)) / 2;
+            
+            // T7: ★決策點 (攻頂 - 右肩突破)
+            chartPoints[7] = breakPrice;      
+
+            // 填空
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBull,
+                stop: priceBtmAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleBtm, y2: v.flagStartHigh, color: '#e74c3c', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (T1 -> T7)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '上升壓力' },
+                    
+                    // C. 下方支撐線 (T2 -> T5 的延伸)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '上升支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.poleBtm, y2: v.flagStartHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '反轉' },
+                    
+                    // I. 多方路徑示意 (藍色虛線 - 向上)
+                    { x1: t_break-2, x2: t_break-2, y1: getBtmLine(t_break-2), y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: t_break, x2: t_break, y1: getTopLine(t_break), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' }
+                ],
+                
+                extraMarkers: [
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
     bullFlagFlat: {
-        name: "13. 快漲水平飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿底", default: 40 }, { id: "brk", label: "突破點", default: 60 }],
-        note: "<strong>特徵</strong>：急漲後，旗面水平橫移。<br><strong>戰略</strong>：突破上緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk + (v.brk-v.pole), stop: v.brk-5, points: [v.pole, v.brk, v.brk-5, v.brk, v.brk-5, v.brk, v.brk+5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk,color:'#c0392b'}] })
+        name: "13. 快漲水平飄旗 (Horizontal Flag) - 寬版M攻頂",
+        type: "bull", // 中性偏多
+        inputs: [
+            { id: "poleBtm", label: "起漲點 (低)", default: 10 },
+            { id: "boxHigh", label: "箱型頂 (壓力)", default: 90 }, // 拉大箱體高度
+            { id: "boxLow", label: "箱型底 (支撐)", default: 45 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急漲(旗桿)後，股價在水平箱體內進行「寬版 M 型」震盪。高點與低點分別在固定的水平價位上反覆測試。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏多」</strong>型態。T7 決策點位於<strong>箱型頂部(壓力線)</strong>。这是多頭第三次嘗試突破，是「飛越過牆」還是「假突破拉回」的關鍵時刻。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>多方(紅)</strong>：突破箱頂壓力。目標 = 箱底(下緣) + 旗桿長。<br>
+            2. <strong>空方(綠)</strong>：壓力受阻回跌。目標 = 箱頂(上緣) - 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H (箱頂 - 起漲點)
+            const poleHeight = v.boxHigh - v.poleBtm; 
+            
+            // ==========================================
+            // 📐 水平飄旗幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // ★ 決策點 T7 (佔比 50%)
+            const t_target = v.duration - 1;
+
+            // 箱型參數 (水平)
+            // 不需要 slope，直接用 boxHigh 和 boxLow
+
+            // 計算 T7 當下的通道邊界價 (就是固定的箱頂箱底)
+            const priceTopAtBreak = v.boxHigh;
+            const priceBtmAtBreak = v.boxLow;
+
+            // ★ T7 決策點：強制貼在「箱頂 (壓力線)」
+            const breakPrice = priceTopAtBreak;
+
+            // ★ 保守目標價計算 (從反向邊界起算)
+            // 多方：從較低的箱底加上 H
+            const targetBull = priceBtmAtBreak + poleHeight;
+
+            // 空方：從較高的箱頂扣除 H
+            let targetBear = priceTopAtBreak - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 建構 K 線路徑 (寬版 M 型)
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleBtm; // T0: 起漲
+            chartPoints[1] = v.boxHigh; // T1: 攻頂 (M起點)
+            
+            // --- 第一波回檔 ---
+            chartPoints[2] = v.boxLow;  // T2: 測底
+            // T3: 中繼
+            chartPoints[3] = (v.boxHigh + v.boxLow) / 2;
+            
+            // --- 第二波攻頂 ---
+            chartPoints[4] = v.boxHigh; // T4: 攻頂 (M中間峰)
+            
+            // --- 第二波回檔 ---
+            chartPoints[5] = v.boxLow;  // T5: 測底
+            // T6: 中繼
+            chartPoints[6] = (v.boxHigh + v.boxLow) / 2;
+            
+            // --- 第三波攻頂 (決策) ---
+            chartPoints[7] = breakPrice;// T7: 攻頂 (決策點)
+
+            // 填空
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBull,
+                stop: priceBtmAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleBtm, y2: v.boxHigh, color: '#e74c3c', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (水平)
+                    { x1: 1, x2: t_break, y1: v.boxHigh, y2: v.boxHigh, color: '#2ecc71', label: '水平壓力' },
+                    
+                    // C. 下方支撐線 (水平)
+                    { x1: 1, x2: t_break, y1: v.boxLow, y2: v.boxLow, color: '#2ecc71', label: '水平支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.poleBtm, y2: v.boxHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線 - 突破噴出)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線 - 假突破反轉)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '反轉' },
+                    
+                    // I. 多方路徑示意 (藍色虛線 - 向上)
+                    { x1: t_break-2, x2: t_break-2, y1: priceBtmAtBreak, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    // 從 T7 (Top) 直接畫下來
+                    { x1: t_break, x2: t_break, y1: priceTopAtBreak, y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' }
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點 (T7 - 在頂部)
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
-    bullFlagDown: {
-        name: "14. 快漲下降飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿底", default: 40 }, { id: "brk", label: "突破點", default: 60 }],
-        note: "<strong>特徵</strong>：急漲後，旗面向下傾斜(最標準)。<br><strong>戰略</strong>：突破上緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk + (v.brk-v.pole), stop: v.brk-5, points: [v.pole, v.brk, v.brk-5, v.brk-2, v.brk-7, v.brk-4, v.brk+5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk-4,color:'#c0392b'}] })
+	bullFlagDown: {
+        name: "14. 快漲下降飄旗 (Bull Flag) - 寬版洗盤攻頂",
+        type: "bull", // 中性偏多
+        inputs: [
+            { id: "poleBtm", label: "起漲點 (低)", default: 10 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 90 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 60 }, // 設定通道寬度
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急漲(旗桿)後，進入向右下方傾斜的「下降飄旗」整理。採用寬版佈局，顯示主力進行深幅洗盤，高低點有序降低。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏多」</strong>型態。T7 決策點位於<strong>下降壓力線(上緣)</strong>。這是「牛旗」的標準突破位置，若帶量突破將重啟漲勢；若突破失敗則可能轉為空頭。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>多方(紅)</strong>：突破下降壓力。目標 = 支撐線(下緣) + 旗桿長。<br>
+            2. <strong>空方(綠)</strong>：壓力受阻回跌。目標 = 壓力線(上緣) - 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.flagStartHigh - v.poleBtm; 
+            
+            // ==========================================
+            // 📐 下降飄旗幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // ★ 決策點 T7 (佔比 50%)
+            const t_target = v.duration - 1;
+
+            // 幾何參數設定 (下降 slope)
+            const slope = -2.0; // 下降斜率
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slope * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slope * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：強制貼在「下降壓力線 (上緣)」
+            const breakPrice = priceTopAtBreak;
+
+            // ★ 保守目標價計算 (從反向邊界起算)
+            // 多方：從較低的支撐線加上 H (牛旗保守測幅)
+            const targetBull = getBtmLine(t_break-2) + poleHeight;
+
+            // 空方：從較高的壓力線扣除 H
+            let targetBear = getTopLine(t_break) - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 建構 K 線路徑 (寬版下降震盪)
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleBtm;       // T0: 起漲
+            chartPoints[1] = v.flagStartHigh; // T1: 旗面起點 (頂)
+            
+            // --- 第一波洗盤 ---
+            chartPoints[2] = getBtmLine(2);   // T2: 測底
+            // T3: 中繼 (反彈一半)
+            chartPoints[3] = (getBtmLine(2) + getTopLine(4)) / 2;
+            
+            // --- 第二波測試 ---
+            chartPoints[4] = getTopLine(4);   // T4: 攻頂 (高點降低)
+            chartPoints[5] = getBtmLine(5);   // T5: 測底 (低點降低)
+            
+            // T6: 中繼
+            chartPoints[6] = (getBtmLine(5) + getTopLine(7)) / 2;
+            
+            // --- 決策時刻 ---
+            chartPoints[7] = breakPrice;      // T7: 攻頂 (決策點)
+
+            // 填空
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBull,
+                stop: priceBtmAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleBtm, y2: v.flagStartHigh, color: '#e74c3c', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (下降)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '下降壓力' },
+                    
+                    // C. 下方支撐線 (下降)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '下降支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.poleBtm, y2: v.flagStartHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線 - 突破)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線 - 反轉)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '反轉' },
+                    
+                    // I. 多方路徑示意 (藍色虛線 - 向上)
+                    { x1: t_break-2, x2: t_break-2, y1: getBtmLine(t_break-2), y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    // 從 T7 (Top) 直接畫下來
+                    { x1: t_break, x2: t_break, y1: getTopLine(t_break), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' }
+                ],
+                
+                extraMarkers: [
+                    // 1. 決策點 (T7 - 在頂部)
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    // 2. 多方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    // 3. 空方目標
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
     // --- 快漲三角飄旗系列 (Bull Pennants) ---
-    bullPennantUp: {
-        name: "15. 快漲上升三角飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿底", default: 40 }, { id: "brk", label: "突破點", default: 60 }],
-        note: "<strong>特徵</strong>：急漲後收斂，重心上升。<br><strong>戰略</strong>：突破上緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk + (v.brk-v.pole), stop: v.brk-5, points: [v.pole, v.brk-2, v.brk-6, v.brk-1, v.brk-3, v.brk, v.brk+5], trendlines: [{x1:3,x2:5,y1:v.brk-1,y2:v.brk,color:'#c0392b'}] })
+	bullPennantUp: {
+        name: "15. 快漲上升三角飄旗 (Rising Wedge) - 寬版楔型攻頂",
+        type: "bull", // 中性偏多
+        inputs: [
+            { id: "poleBtm", label: "起漲點 (低)", default: 10 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 90 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 45 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急漲後進入「上升楔型」整理。下方支撐線比上方壓力線更陡，價格在創高的同時，波動區間卻被壓縮(收斂)。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏多」</strong>型態。T7 決策點位於<strong>楔型頂端(壓力線)</strong>。此型態常暗示多頭動能耗盡(價漲量縮)，若T7無法強勢噴出，極易形成假突破後的反轉。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>多方(紅)</strong>：突破楔型頂端。目標 = 支撐線(下緣) + 旗桿長。<br>
+            2. <strong>空方(綠)</strong>：頂端受阻回跌。目標 = 壓力線(上緣) - 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.flagStartHigh - v.poleBtm; 
+            
+            // ==========================================
+            // 📐 極致收斂幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // ★ 決策點 T7
+            const t_target = v.duration - 1;
+
+            // 幾何參數設定 (極致收斂)
+            // 上方近乎走平 (緩升)
+            const slopeTop = 1.0; 
+            // 下方急速追趕 (陡升) -> 為了在 6 格內追上 45 的差距，斜率要很大
+            const slopeBtm = 6.5; 
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slopeTop * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slopeBtm * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：強制貼在「楔型頂端 (壓力線)」
+            const breakPrice = priceTopAtBreak;
+
+            // ★ 保守目標價計算
+            // 多方：從較低的支撐線加上 H
+            const targetBull = getBtmLine(t_break-2) + poleHeight;
+
+            // 空方：從較高的壓力線扣除 H
+            let targetBear = priceTopAtBreak - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 建構 K 線路徑 (寬版 -> 極窄)
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleBtm;       // T0
+            chartPoints[1] = v.flagStartHigh; // T1 (頂)
+            
+            // --- 寬廣的第一波 ---
+            chartPoints[2] = getBtmLine(2);   // T2 (底) - 此時距離頂還很遠
+            
+            // T3: 中繼 (稍微拉高一點)
+            chartPoints[3] = (getBtmLine(2) + getTopLine(4)) / 2;
+            
+            // --- 壓縮的第二波 ---
+            chartPoints[4] = getTopLine(4);   // T4 (攻頂)
+            chartPoints[5] = getBtmLine(5);   // T5 (測底) - 此時底已經墊很高了
+            
+            // T6: 中繼 (空間變小)
+            chartPoints[6] = (getBtmLine(5) + getTopLine(7)) / 2;
+            
+            // --- 窒息的決策點 ---
+            chartPoints[7] = breakPrice;      // T7 (頂) - 幾乎與底貼在一起
+
+            // 填空
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBull,
+                stop: priceBtmAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleBtm, y2: v.flagStartHigh, color: '#e74c3c', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (緩升)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '收斂壓力' },
+                    
+                    // C. 下方支撐線 (急升) -> 視覺上會看到這條線往上衝去撞壓力線
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '收斂支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.poleBtm, y2: v.flagStartHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '反轉' },
+                    
+                    // I. 多方路徑示意 (藍色虛線 - 向上)
+                    { x1: t_break-2, x2: t_break-2, y1: getBtmLine(t_break-2), y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: t_break, x2: t_break, y1: priceTopAtBreak, y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' }
+                ],
+                
+                extraMarkers: [
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
-    bullPennantFlat: {
-        name: "16. 快漲水平三角飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿底", default: 40 }, { id: "brk", label: "突破點", default: 60 }],
-        note: "<strong>特徵</strong>：急漲後標準收斂三角。<br><strong>戰略</strong>：突破上緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk + (v.brk-v.pole), stop: v.brk-5, points: [v.pole, v.brk, v.brk-6, v.brk-1, v.brk-3, v.brk, v.brk+5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk,color:'#c0392b'}] })
+	bullPennantFlat: {
+        name: "16. 快漲水平三角飄旗 (Symmetrical Triangle) - 極致收斂表態",
+        type: "bull", // 中性偏多
+        inputs: [
+            { id: "poleBtm", label: "起漲點 (低)", default: 10 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 90 }, // 三角形頂
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 50 }, // 三角形底
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急漲後，股價進入「高點降低、低點墊高」的對稱收斂整理。隨著時間推移，K線波動幅度從寬廣(T1)逐漸被壓縮至窒息(T7)。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏多」</strong>型態。T7 決策點位於<strong>三角形收斂尖端</strong>。這是一個中性型態，代表多空力道暫時平衡，必須等待實質突破方向。<br>
+            <strong>【操作戰略 (雙向對稱)】</strong><br>
+            1. <strong>多方(紅)</strong>：突破收斂末端。目標 = 突破點 + 旗桿長。<br>
+            2. <strong>空方(綠)</strong>：跌破收斂末端。目標 = 突破點 - 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.flagStartHigh - v.poleBtm; 
+            
+            // ==========================================
+            // 📐 對稱三角幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // ★ 決策點 T7
+            const t_target = v.duration - 1;
+
+            // 計算收斂中心 (Midpoint)
+            // 假設收斂到 T9 (比 T7 稍晚，讓 T7 還有一點點開口)
+            const t_apex = 9;
+            const midPrice = (v.flagStartHigh + v.flagStartLow) / 2;
+
+            // 計算斜率 (讓兩條線在 t_apex 交會於 midPrice)
+            const slopeTop = (midPrice - v.flagStartHigh) / (t_apex - t_pole_end); // 負斜率
+            const slopeBtm = (midPrice - v.flagStartLow) / (t_apex - t_pole_end);  // 正斜率
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slopeTop * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slopeBtm * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：位於兩線中間 (收斂末端)
+            const breakPrice = (priceTopAtBreak + priceBtmAtBreak) / 2;
+
+            // ★ 目標價計算 (從突破點起算)
+            // 多方：突破點 + H
+            const targetBull = breakPrice + poleHeight;
+
+            // 空方：突破點 - H
+            let targetBear = breakPrice - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 建構 K 線路徑 (寬版收斂震盪)
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleBtm;       // T0
+            chartPoints[1] = v.flagStartHigh; // T1: 頂 (開口最大)
+            
+            // --- 第一波 (寬) ---
+            chartPoints[2] = getBtmLine(2);   // T2: 底
+            // T3: 中繼
+            chartPoints[3] = (getBtmLine(2) + getTopLine(4)) / 2;
+            
+            // --- 第二波 (窄) ---
+            chartPoints[4] = getTopLine(4);   // T4: 頂 (高點降低)
+            chartPoints[5] = getBtmLine(5);   // T5: 底 (低點墊高)
+            
+            // T6: 中繼
+            chartPoints[6] = (getBtmLine(5) + getTopLine(7)) / 2;
+            
+            // --- 決策時刻 (尖端) ---
+            chartPoints[7] = breakPrice;      // T7: 中心點
+
+            // 填空
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBull,
+                stop: priceBtmAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleBtm, y2: v.flagStartHigh, color: '#e74c3c', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (向右下)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '收斂壓力' },
+                    
+                    // C. 下方支撐線 (向右上)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '收斂支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.poleBtm, y2: v.flagStartHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '反轉' },
+                    
+                    // I. 多方路徑示意 (藍色虛線 - 向上)
+                    { x1: t_break, x2: t_break, y1: breakPrice, y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    { x1: t_break, x2: t_break, y1: breakPrice, y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' }
+                ],
+                
+                extraMarkers: [
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
-    bullPennantDown: {
-        name: "17. 快漲下降三角飄旗", type: "neutral",
-        inputs: [{ id: "pole", label: "旗桿底", default: 40 }, { id: "brk", label: "突破點", default: 60 }],
-        note: "<strong>特徵</strong>：急漲後收斂，重心下降。<br><strong>戰略</strong>：突破上緣。",
-        calc: (v) => ({ entry: v.brk, target: v.brk + (v.brk-v.pole), stop: v.brk-5, points: [v.pole, v.brk, v.brk-5, v.brk-2, v.brk-4, v.brk, v.brk+5], trendlines: [{x1:1,x2:5,y1:v.brk,y2:v.brk,color:'#c0392b'}] })
+	bullPennantDown: {
+        name: "17. 快漲下降三角飄旗 (Falling Wedge) - 寬版洗盤表態",
+        type: "bull", // 中性偏多
+        inputs: [
+            { id: "poleBtm", label: "起漲點 (低)", default: 10 },
+            { id: "flagStartHigh", label: "旗面起點 (頂)", default: 90 },
+            { id: "flagStartLow", label: "旗面起點 (底)", default: 60 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>急漲後進入「下降楔型」整理。上方壓力線陡降(壓盤)，下方支撐線緩降(惜售)，兩線向右下收斂。這是一種強勢的洗盤型態。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>此為<strong>「中性偏多」</strong>型態。T7 決策點位於<strong>楔型上緣(壓力線)</strong>。此處為多空分水嶺：突破即為「噴出段」的開始；若受阻回落則需防範趨勢轉空。<br>
+            <strong>【操作戰略 (保守雙軌)】</strong><br>
+            1. <strong>多方(紅)</strong>：突破下降壓力。目標 = 支撐線(下緣) + 旗桿長。<br>
+            2. <strong>空方(綠)</strong>：壓力受阻回跌。目標 = 壓力線(上緣) - 旗桿長。
+        `,
+        calc: (v) => {
+            // 計算旗桿高度 H
+            const poleHeight = v.flagStartHigh - v.poleBtm; 
+            
+            // ==========================================
+            // 📐 下降楔型幾何運算
+            // ==========================================
+            
+            const t_pole_end = 1;   
+            const t_break = 7;      // ★ 決策點 T7
+            const t_target = v.duration - 1;
+
+            // 幾何參數設定 (下降收斂)
+            // 上方壓得快 (Steep)
+            const slopeTop = -2.5; 
+            // 下方跌得慢 (Gentle) -> 形成楔型
+            const slopeBtm = -0.8; 
+
+            // 建立方程式
+            const getTopLine = (t) => v.flagStartHigh + slopeTop * (t - t_pole_end);
+            const getBtmLine = (t) => v.flagStartLow + slopeBtm * (t - t_pole_end);
+
+            // 計算 T7 當下的通道邊界價
+            const priceTopAtBreak = getTopLine(t_break);
+            const priceBtmAtBreak = getBtmLine(t_break);
+
+            // ★ T7 決策點：強制貼在「下降壓力線 (上緣)」
+            const breakPrice = priceTopAtBreak;
+
+            // ★ 保守目標價計算
+            // 多方：從較低的支撐線加上 H (保守測幅)
+            const targetBull = getBtmLine(t_break-2) + poleHeight;
+
+            // 空方：從較高的壓力線扣除 H
+            let targetBear = getTopLine(t_break) - poleHeight;
+            if (targetBear < 0) targetBear = 0; 
+
+            // 建構 K 線路徑 (寬版下降震盪)
+            let chartPoints = [];
+            
+            chartPoints[0] = v.poleBtm;       // T0
+            chartPoints[1] = v.flagStartHigh; // T1: 頂
+            
+            // --- 第一波 ---
+            chartPoints[2] = getBtmLine(2);   // T2: 測底
+            // T3: 中繼
+            chartPoints[3] = (getBtmLine(2) + getTopLine(4)) / 2;
+            
+            // --- 第二波 (收斂中) ---
+            chartPoints[4] = getTopLine(4);   // T4: 攻頂 (高點大幅降低)
+            chartPoints[5] = getBtmLine(5);   // T5: 測底 (低點微幅降低)
+            
+            // T6: 中繼
+            chartPoints[6] = (getBtmLine(5) + getTopLine(7)) / 2;
+            
+            // --- 決策時刻 ---
+            chartPoints[7] = breakPrice;      // T7: 頂端決策
+
+            // 填空
+            for (let i = 8; i <= t_target; i++) chartPoints.push(null); 
+
+            return {
+                entry: breakPrice,
+                target: targetBull,
+                stop: priceBtmAtBreak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 旗桿
+                    { x1: 0, x2: 1, y1: v.poleBtm, y2: v.flagStartHigh, color: '#e74c3c', label: '旗桿' },
+                    
+                    // B. 上方壓力線 (陡降)
+                    { x1: 1, x2: t_break, y1: v.flagStartHigh, y2: priceTopAtBreak, color: '#2ecc71', label: '收斂壓力' },
+                    
+                    // C. 下方支撐線 (緩降)
+                    { x1: 1, x2: t_break, y1: v.flagStartLow, y2: priceBtmAtBreak, color: '#2ecc71', label: '收斂支撐' },
+
+                    // D. 目標價線-多
+                    { x1: t_break, x2: t_target, y1: targetBull, y2: targetBull, color: '#e74c3c', label: '目標價-多' },
+                    
+                    // E. 目標價線-空
+                    { x1: t_break, x2: t_target, y1: targetBear, y2: targetBear, color: '#2ecc71', label: '目標價-空' },
+
+                    // F. 測幅 H
+                    { x1: 0.5, x2: 0.5, y1: v.poleBtm, y2: v.flagStartHigh, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // G. 多方路徑 (紅虛線 - 突破)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBull, color: '#e74c3c', dashed: true, label: '突破' },
+                    
+                    // H. 空方路徑 (綠虛線 - 反轉)
+                    { x1: t_break, x2: t_target, y1: breakPrice, y2: targetBear, color: '#2ecc71', dashed: true, label: '反轉' },
+                    
+                    // I. 多方路徑示意 (藍色虛線 - 向上)
+                    { x1: t_break-2, x2: t_break-2, y1: getBtmLine(t_break-2), y2: targetBull, color: '#3498db', dashed: true, label: '向上測幅' },
+                    
+                    // J. 空方路徑示意 (藍色虛線 - 向下)
+                    // 從 T7 (Top) 直接畫下來
+                    { x1: t_break, x2: t_break, y1: getTopLine(t_break), y2: targetBear, color: '#3498db', dashed: true, label: '向下測幅' }
+                ],
+                
+                extraMarkers: [
+                    {
+                        type: 'point',
+                        xValue: t_break,
+                        yValue: breakPrice,
+                        backgroundColor: '#95a5a6',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBull,
+                        backgroundColor: '#e74c3c',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '多方'
+                    },
+                    {
+                        type: 'point',
+                        xValue: t_target,
+                        yValue: targetBear,
+                        backgroundColor: '#2ecc71',
+                        radius: 8,
+                        borderColor: 'white',
+                        borderWidth: 2,
+                        label: '空方'
+                    }
+                ]
+            };
+        }
     },
 
     // ------------------------------------------
     // C. 下跌型態 (Bearish)
     // ------------------------------------------
-    vTop: {
-        name: "1. 倒V字型 (Inverted V)", type: "bear",
-        inputs: [{ id: "peak", label: "尖頂", default: 100 }, { id: "sup", label: "起漲支撐", default: 80 }],
-        note: "<strong>特徵</strong>：急漲急跌。<br><strong>戰略</strong>：跌破起漲支撐。",
-        calc: (v) => ({ entry: v.sup, target: v.sup - (v.peak-v.sup), stop: v.peak, points: [v.sup, v.peak, v.sup, v.sup-20], trendlines: [{x1:0,x2:2,y1:v.sup,y2:v.sup,color:'#e67e22'}] })
+	vTop: {
+        name: "1. 倒V字型 (Inverted V) - 尖頭反轉",
+        type: "bear", // 明確的空方型態
+        inputs: [
+            { id: "startPrice", label: "起漲頸線", default: 50 },
+            { id: "peakPrice", label: "最高價", default: 90 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>股價呈現噴出式急漲，隨後在無預警下出現「尖頭反轉」急殺。左側怎麼漲，右側就怎麼跌，完全抹滅漲幅。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T7 決策點為<strong>「回測頸線」</strong>(圖中藍點處)。急跌破線後通常會有微幅反彈，測試頸線壓力，此為確認空頭的最後逃命/放空點。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+            1. <strong>進場</strong>：T7 反彈測試頸線不過時放空。<br>
+            2. <strong>目標</strong>：頸線 - (最高價 - 頸線)。即向下映照一段等幅跌幅。
+        `,
+        calc: (v) => {
+            // 計算高度 H
+            const height = v.peakPrice - v.startPrice;
+            
+            // ==========================================
+            // 📐 倒V字幾何運算
+            // ==========================================
+            
+            const t_start = 0;
+            const t_peak = 3;     // T3 見頂
+            const t_return = 6;   // T6 回到起點 (跌破)
+            const t_test = 7;     // ★ T7 回測頸線 (決策點)
+            const t_target = v.duration - 1;
+
+            // 頸線 (水平)
+            const neckline = v.startPrice;
+
+            // ★ 空方目標價計算 (向下等幅測距)
+            // Target = 頸線 - H
+            let targetPrice = neckline - height;
+            // 為了畫圖美觀，如果目標價是負的，限制在 0 或低點
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            // T0: 起漲
+            chartPoints[0] = neckline;
+            
+            // T1~T2: 急漲中途
+            chartPoints[1] = neckline + height * 0.4;
+            chartPoints[2] = neckline + height * 0.8;
+            
+            // T3: 尖頭頂 (爆量)
+            chartPoints[3] = v.peakPrice;
+            
+            // T4~T5: 急殺中途
+            chartPoints[4] = neckline + height * 0.7; // 殺得比漲得快一點
+            chartPoints[5] = neckline + height * 0.3;
+            
+            // T6: 回到頸線 (跌破前夕/剛好跌破)
+            chartPoints[6] = neckline - (height * 0.05); // 微破
+            
+            // T7: ★ 反彈回測頸線 (決策點)
+            // 碰到頸線就下來，代表壓力確認
+            chartPoints[7] = neckline;
+
+            // T8~T11: 續跌至目標
+            // 模擬圖中右側的箭頭路徑
+            for (let i = 8; i <= t_target; i++) {
+                // 線性遞減到目標價
+                const progress = (i - 7) / (t_target - 7);
+                chartPoints[i] = neckline - (neckline - targetPrice) * progress;
+            }
+
+            return {
+                entry: neckline, // 在頸線處進場空
+                target: targetPrice,
+                stop: v.peakPrice, // 停損設在天花板(或設為 H 的一半)
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 頸線 (綠色水平線)
+                    { x1: 0, x2: t_target, y1: neckline, y2: neckline, color: '#2ecc71', label: '頸線(支撐/壓力)' },
+                    
+                    // B. 上漲路徑 (左側)
+                    { x1: 0, x2: t_peak, y1: neckline, y2: v.peakPrice, color: '#e74c3c', label: '急漲' },
+                    
+                    // C. 下跌路徑 (右側)
+                    { x1: t_peak, x2: t_return, y1: v.peakPrice, y2: neckline, color: '#2ecc71', label: '急殺' },
+
+                    // D. 目標價測幅線 (藍色虛線 - 向下)
+                    { x1: t_test, x2: t_test, y1: neckline, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅滿足' },
+                    
+                    // E. 高度測量 (藍色虛線 - 向上)
+                    { x1: t_peak, x2: t_peak, y1: neckline, y2: v.peakPrice, color: '#3498db', dashed: true, label: '漲幅H' },
+                    
+                    // F. 續跌路徑 (空方走勢)
+                    { x1: t_test, x2: t_target, y1: neckline, y2: targetPrice, color: '#2ecc71', dashed: true, label: '主跌段' }
+                ],
+            };
+        }
     },
-    nTop: {
-        name: "2. 倒N字頂 (Inverted N)", type: "bear",
-        inputs: [{ id: "l1", label: "前低 (L1)", default: 80 }, { id: "h2", label: "反彈高 (H2)", default: 90 }],
-        note: "<strong>特徵</strong>：跌→彈不過高→跌破低。<br><strong>戰略</strong>：跌破L1進場。",
-        calc: (v) => ({ entry: v.l1, target: v.l1 - (v.h2-v.l1), stop: v.h2, points: [100, v.l1, v.h2, v.l1, v.l1-10], trendlines: [{x1:1,x2:3,y1:v.l1,y2:v.l1,color:'#e67e22'}] })
+	nTop: {
+        name: "2. 倒N字頂 (Inverted N-Top) - 弱勢反彈殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "neckline", label: "頸線支撐", default: 50 },
+            { id: "peakPrice", label: "頭部最高價", default: 90 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>股價創高(頭部)後回檔，隨後出現「弱勢反彈」。右肩(T5)僅反彈至跌幅的 1/2 即無力上攻，形成倒 N 字結構。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T7 決策點為<strong>「跌破頸線」</strong>。但真正的空方發動點始於 T5 (右肩確認不過高)。<br>
+            <strong>【操作戰略 (務實空方)】</strong><br>
+            1. <strong>進場</strong>：T5 右肩轉折向下時佈局空單。<br>
+            2. <strong>目標</strong>：右肩高點(T5) - 頭部高度(H)。此測幅從反彈頂點起算，獲利目標較容易達成。
+        `,
+        calc: (v) => {
+            // 計算頭部高度 H
+            const headHeight = v.peakPrice - v.neckline;
+            
+            // 計算右峰高度 (T5, 1/2 反彈)
+            const bouncePrice = v.neckline + headHeight * 0.5;
+
+            // ==========================================
+            // 📐 倒N字幾何運算
+            // ==========================================
+            
+            const t_start = 0;
+            const t_head = 2;     // T2: 頭部
+            const t_neck_1 = 4;   // T4: 頸線
+            const t_bounce = 5;   // T5: 右肩 (1/2)
+            const t_break = 7;    // T7: 跌破
+            const t_target = v.duration - 1;
+
+            // ★ 修正目標價公式：Target = T5 - H
+            let targetPrice = bouncePrice - headHeight;
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            chartPoints[0] = v.neckline;
+            chartPoints[1] = v.neckline + headHeight * 0.6;
+            chartPoints[2] = v.peakPrice; // 頭部
+            chartPoints[3] = v.neckline + headHeight * 0.4;
+            chartPoints[4] = v.neckline; // 回測頸線
+            
+            // T5: 右肩
+            chartPoints[5] = bouncePrice;
+            
+            chartPoints[6] = v.neckline + (bouncePrice - v.neckline) * 0.3; 
+            
+            // T7: 跌破頸線
+            chartPoints[7] = v.neckline; 
+
+            // T8~End: 殺至目標
+            for (let i = 8; i <= t_target; i++) {
+                const progress = (i - 7) / (t_target - 7);
+                // 這裡稍微調整曲線，讓它最後收在 targetPrice
+                // 為了視覺連貫，從頸線(T7) 連到 Target
+                chartPoints[i] = v.neckline - (v.neckline - targetPrice) * progress;
+            }
+
+            return {
+                entry: bouncePrice, // 建議進場點改為 T5 (因測幅從這開始)
+                target: targetPrice,
+                stop: v.peakPrice, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 頸線
+                    { x1: 0, x2: t_target, y1: v.neckline, y2: v.neckline, color: '#2ecc71', label: '頸線' },
+                    
+                    // B. 頭部高度測量 (H)
+                    { x1: t_head, x2: t_head, y1: v.neckline, y2: v.peakPrice, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // C. 1/2 反彈標示
+                    //{ x1: t_bounce, x2: t_bounce, y1: v.neckline, y2: bouncePrice, color: '#3498db', dashed: true },
+                    
+                    // D. ★ 目標價測幅 (從 T5 往下畫 H)
+                    { x1: t_bounce, x2: t_bounce, y1: bouncePrice, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅H (從T5算)' },
+                    
+                    // E. 目標價水平線 (視覺輔助)
+                    //{ x1: t_bounce, x2: t_target, y1: targetPrice, y2: targetPrice, color: '#2ecc71', dashed: true, label: '目標價' },
+                    
+                    // F. K線路徑連線
+                    { x1: 0, x2: t_head, y1: v.neckline, y2: v.peakPrice, color: '#e74c3c' },
+                    { x1: t_head, x2: t_neck_1, y1: v.peakPrice, y2: v.neckline, color: '#2ecc71' },
+                    { x1: t_neck_1, x2: t_bounce, y1: v.neckline, y2: bouncePrice, color: '#e74c3c' },
+                    { x1: t_bounce, x2: t_break, y1: bouncePrice, y2: v.neckline, color: '#2ecc71' },
+                    { x1: t_break, x2: t_target, y1: v.neckline, y2: targetPrice, color: '#2ecc71', dashed: true, label: '崩跌' }
+                ],
+            };
+        }
     },
-    hsTop: {
-        name: "3. 頭肩頂 (Head & Shoulders Top)", type: "bear",
-        inputs: [{ id: "neck", label: "頸線", default: 80 }, { id: "head", label: "頭部高", default: 100 }, { id: "rs", label: "右肩高", default: 90 }],
-        note: "<strong>特徵</strong>：右肩不過頭。<br><strong>戰略</strong>：跌破頸線進場。",
-        calc: (v) => ({ entry: v.neck, target: v.neck - (v.head-v.neck), stop: v.rs, points: [v.neck, 88, v.neck, v.head, v.neck, v.rs, v.neck, v.neck-5], trendlines: [{x1:0,x2:6,y1:v.neck,y2:v.neck,color:'#e67e22'}] })
+	hsTop: {
+        name: "3. 頭尖頂 (Head & Shoulders) - 經典測幅殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "neckline", label: "頸線支撐", default: 50 },
+            { id: "headPeak", label: "頭部最高價", default: 90 },
+            { id: "shoulderPeak", label: "肩部高度", default: 70 }, // 左右肩高度
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>從頸線起漲，經歷「左肩、頭部、右肩」三次攻頂。右肩反彈無力(僅達約 1/2 處)，且多次回測頸線支撐，顯示多頭大勢已去。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T7 決策點為<strong>「跌破頸線」</strong>。圖中模擬了跌破後的「回測動作」(Retest)，此為確認頸線由支撐轉壓力的關鍵時刻，也是絕佳空點。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+            1. <strong>進場</strong>：跌破頸線(T7)或回測頸線不過(T8)時。<br>
+            2. <strong>目標</strong>：頸線 - (頭部 - 頸線)。即向下映照「等幅測距」。
+        `,
+        calc: (v) => {
+            // 計算頭部高度 H
+            const headHeight = v.headPeak - v.neckline;
+            
+            // ==========================================
+            // 📐 頭肩頂幾何運算
+            // ==========================================
+            
+            const t_start = 0;
+            const t_l_shoulder = 1; // T1: 左肩
+            const t_neck_1 = 2;     // T2: 頸線
+            const t_head = 3;       // T3: 頭部
+            const t_neck_2 = 4;     // T4: 頸線
+            const t_r_shoulder = 5; // T5: 右肩
+            const t_break = 7;      // ★ T7: 跌破頸線 (決策點)
+            const t_retest = 8;     // T8: 回測 (Kiss Goodbye)
+            const t_target = v.duration - 1;
+
+            // ★ 目標價計算：Target = 頸線 - H
+            let targetPrice = v.neckline - headHeight;
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            // T0: ★ 起點 (修正：對齊頸線)
+            chartPoints[0] = v.neckline;
+            
+            // T1: 左肩
+            chartPoints[1] = v.shoulderPeak; 
+            
+            // T2: 回頸線
+            chartPoints[2] = v.neckline;     
+            
+            // T3: 頭部
+            chartPoints[3] = v.headPeak;     
+            
+            // T4: 回頸線
+            chartPoints[4] = v.neckline;     
+            
+            // T5: 右肩
+            chartPoints[5] = v.shoulderPeak; 
+            
+            // T6: 跌破前夕 (逼近頸線)
+            chartPoints[6] = v.neckline + (v.shoulderPeak - v.neckline) * 0.3;
+            
+            // T7: ★ 跌破頸線
+            chartPoints[7] = v.neckline; 
+
+            // T8: 回測 (稍微反彈一下，碰到頸線下緣)
+            chartPoints[8] = v.neckline - 1; 
+
+            // T9~End: 殺至目標
+            for (let i = 9; i <= t_target; i++) {
+                const progress = (i - 8) / (t_target - 8);
+                chartPoints[i] = v.neckline - (v.neckline - targetPrice) * progress;
+            }
+
+            return {
+                entry: v.neckline,
+                target: targetPrice,
+                stop: v.shoulderPeak, 
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 頸線 (綠色水平線)
+                    { x1: 0, x2: t_target, y1: v.neckline, y2: v.neckline, color: '#2ecc71', label: '頸線' },
+                    
+                    // B. 頭部高度測量 (H)
+                    { x1: t_head, x2: t_head, y1: v.neckline, y2: v.headPeak, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // C. 右肩 1/2 高度標示
+                    { x1: t_neck_2, x2: t_break, y1: v.shoulderPeak, y2: v.shoulderPeak, color: '#9b59b6', label: '1/2壓力' },
+                    
+                    // D. 目標價測幅 (從頸線往下畫 H)
+                    { x1: t_break, x2: t_break, y1: v.neckline, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅H' },
+                    
+                    // E. 目標價水平線
+                    //{ x1: t_break, x2: t_target, y1: targetPrice, y2: targetPrice, color: '#2ecc71', dashed: true, label: '目標價' },
+                    
+                    // F. 路徑連線
+                    // 左肩段 (從頸線開始)
+                    { x1: 0, x2: t_l_shoulder, y1: v.neckline, y2: v.shoulderPeak, color: '#e74c3c' },
+                    { x1: t_l_shoulder, x2: t_neck_1, y1: v.shoulderPeak, y2: v.neckline, color: '#2ecc71' },
+                    // 頭部段
+                    { x1: t_neck_1, x2: t_head, y1: v.neckline, y2: v.headPeak, color: '#e74c3c' },
+                    { x1: t_head, x2: t_neck_2, y1: v.headPeak, y2: v.neckline, color: '#2ecc71' },
+                    // 右肩段
+                    { x1: t_neck_2, x2: t_r_shoulder, y1: v.neckline, y2: v.shoulderPeak, color: '#e74c3c' },
+                    { x1: t_r_shoulder, x2: t_break, y1: v.shoulderPeak, y2: v.neckline, color: '#2ecc71' },
+                    
+                    // G. 崩跌路徑 (含回測)
+                    { x1: t_break, x2: t_retest, y1: v.neckline, y2: chartPoints[8], color: '#e74c3c', dashed: true },
+                    { x1: t_retest, x2: t_target, y1: chartPoints[8], y2: targetPrice, color: '#2ecc71', dashed: true, label: '主跌段' }
+                ],
+            };
+        }
     },
-    complexHsTop: {
-        name: "4. 複式頭尖頂", type: "bear",
-        inputs: [{ id: "neck", label: "頸線", default: 50 }, { id: "head", label: "最高點", default: 60 }, { id: "rs", label: "右肩高", default: 55 }],
-        note: "<strong>特徵</strong>：多重頭部或肩部。<br><strong>戰略</strong>：跌破長期頸線。",
-        calc: (v) => ({ entry: v.neck, target: v.neck - (v.head-v.neck), stop: v.rs, points: [52, v.neck, 54, v.neck, v.head, v.neck, 56, v.neck, v.rs, v.neck, v.neck-5], trendlines: [{x1:0,x2:10,y1:v.neck,y2:v.neck,color:'#e67e22'}] })
+	complexHsTop: {
+        name: "4. 複式頭尖頂 (Complex H&S) - 多肩盤整殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "neckline", label: "頸線支撐", default: 50 },
+            { id: "headPeak", label: "頭部最高價", default: 90 },
+            { id: "shoulderPeak", label: "肩部高度", default: 70 },
+            { id: "duration", label: "顯示週期", default: 15 } // 開到15以容納T14
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>比標準頭肩頂更複雜，擁有「雙左肩」與「雙右肩」的五峰結構。顯示主力在高檔出貨時間拉長，籌碼松動更嚴重。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T12 決策點為<strong>「跌破頸線」</strong>。由於經歷了長時間的「多肩」盤整，一旦頸線失守，累積的套牢賣壓將引發更深幅的崩跌。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+            1. <strong>進場</strong>：T11 反彈不過高時(激進)，或 T12 跌破頸線時(保守)。<br>
+            2. <strong>目標</strong>：頸線 - (頭部 - 頸線)。
+        `,
+        calc: (v) => {
+            // 計算頭部高度 H
+            const headHeight = v.headPeak - v.neckline;
+            
+            // ==========================================
+            // 📐 T14 時間軸規劃 (總長 14格)
+            // ==========================================
+            // T0 start
+            // Left M: T0->T1(峰)->T2(底)->T3(峰)->T4(底)
+            // Head V: T4->T6(頂)->T8(底)  <-- 頭部時間拉長一點顯得大器
+            // Right M: T8->T9(峰)->T10(底)->T11(峰)->T12(跌破)
+            // Drop: T12->T14
+            
+            const t_break = 12; // 決策點延後到 T12
+            const t_target = 14;
+
+            // ★ 目標價計算
+            let targetPrice = v.neckline - headHeight;
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑 (整數點位精確定義)
+            let chartPoints = [];
+            
+            // --- 左小 M ---
+            chartPoints[0] = v.neckline;
+            chartPoints[1] = v.shoulderPeak; 
+            chartPoints[2] = v.neckline;     // 貼頸
+            chartPoints[3] = v.shoulderPeak;
+            chartPoints[4] = v.neckline;     // 貼頸 (接頭部)
+            
+            // --- 中間倒 V (頭) ---
+            // T5 是上漲中途
+            chartPoints[5] = (v.neckline + v.headPeak) / 2; 
+            chartPoints[6] = v.headPeak;     // 頭頂
+            // T7 是下跌中途
+            chartPoints[7] = (v.neckline + v.headPeak) / 2;
+            chartPoints[8] = v.neckline;     // 貼頸 (接右肩)
+            
+            // --- 右小 M ---
+            chartPoints[9] = v.shoulderPeak;
+            chartPoints[10] = v.neckline;    // 貼頸
+            chartPoints[11] = v.shoulderPeak;
+            chartPoints[12] = v.neckline;    // ★ T12 跌破點
+            
+            // --- 崩跌段 ---
+            // T13
+            chartPoints[13] = v.neckline - (v.neckline - targetPrice) * 0.5;
+            // T14 目標
+            chartPoints[14] = targetPrice;
+
+            return {
+                entry: v.neckline,
+                target: targetPrice,
+                stop: v.shoulderPeak,
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 頸線 (貫穿全場)
+                    { x1: 0, x2: t_target, y1: v.neckline, y2: v.neckline, color: '#2ecc71', label: '頸線(鐵板)' },
+                    
+                    // ====================================
+                    // B. 左小 M (Left M) - T0~T4
+                    // ====================================
+                    { x1: 0, x2: 1, y1: v.neckline, y2: v.shoulderPeak, color: '#e74c3c' },
+                    { x1: 1, x2: 2, y1: v.shoulderPeak, y2: v.neckline, color: '#2ecc71' },
+                    { x1: 2, x2: 3, y1: v.neckline, y2: v.shoulderPeak, color: '#e74c3c' },
+                    { x1: 3, x2: 4, y1: v.shoulderPeak, y2: v.neckline, color: '#2ecc71' },
+
+                    // ====================================
+                    // C. 中間倒 V (Head) - T4~T8
+                    // ====================================
+                    { x1: 4, x2: 6, y1: v.neckline, y2: v.headPeak, color: '#e74c3c' }, // 緩漲攻頭
+                    { x1: 6, x2: 8, y1: v.headPeak, y2: v.neckline, color: '#2ecc71' }, // 緩跌回頸
+                    
+                    // ====================================
+                    // D. 右小 M (Right M) - T8~T12
+                    // ====================================
+                    { x1: 8, x2: 9, y1: v.neckline, y2: v.shoulderPeak, color: '#e74c3c' },
+                    { x1: 9, x2: 10, y1: v.shoulderPeak, y2: v.neckline, color: '#2ecc71' },
+                    { x1: 10, x2: 11, y1: v.neckline, y2: v.shoulderPeak, color: '#e74c3c' },
+                    { x1: 11, x2: 12, y1: v.shoulderPeak, y2: v.neckline, color: '#2ecc71' }, // ★ T12 跌破
+
+                    // ====================================
+                    // E. 測幅與崩跌
+                    // ====================================
+                    
+                    // 頭部高度 H (畫在 T6)
+                    { x1: 6, x2: 6, y1: v.neckline, y2: v.headPeak, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // 跌幅 H (從 T12 往下畫)
+                    { x1: 12, x2: 12, y1: v.neckline, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅H' },
+                    
+                    // 崩跌路徑
+                    { x1: 12, x2: 14, y1: v.neckline, y2: targetPrice, color: '#2ecc71', dashed: true, label: '主跌段' }
+                ],
+            };
+        }
     },
-    doubleTop: {
-        name: "5. 雙重頂/M頭 (Double Top)", type: "bear",
-        inputs: [{ id: "neck", label: "頸線", default: 80 }, { id: "high", label: "頂部高點", default: 100 }],
-        note: "<strong>特徵</strong>：兩次攻頂不過。<br><strong>戰略</strong>：跌破中間頸線。",
-        calc: (v) => ({ entry: v.neck, target: v.neck - (v.high-v.neck), stop: v.high, points: [v.neck, v.high, v.neck, v.high-2, v.neck, v.neck-5], trendlines: [{x1:0,x2:4,y1:v.neck,y2:v.neck,color:'#e67e22'}] })
+	doubleTop: {
+        name: "5. 雙重頂/M頭 (Double Top) - 頸線跌破殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "neckline", label: "頸線支撐", default: 50 },
+            { id: "peakPrice", label: "左峰高度", default: 90 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>股價兩度攻頂失敗，形成類似英文字母「M」的走勢。圖中右峰略低於左峰，顯示多頭動能衰退，且上方壓力線逐漸壓低。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T8 決策點為<strong>「跌破頸線」</strong>(藍點處)。兩峰之間的低點(T4)確立了頸線位置，一旦此支撐失守，上方套牢賣壓將全數湧出。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+            1. <strong>進場</strong>：T8 跌破頸線時。<br>
+            2. <strong>目標</strong>：頸線 - (頭部 - 頸線)。即向下映照「等幅測距」。
+        `,
+        calc: (v) => {
+            // 計算左峰高度 H
+            const headHeight = v.peakPrice - v.neckline;
+            
+            // 設定右峰高度 (略低，模擬圖中綠色壓力線向下)
+            const peak2 = v.neckline + headHeight * 0.95; 
+
+            // ==========================================
+            // 📐 M頭幾何運算 (對稱結構)
+            // ==========================================
+            
+            const t_start = 0;
+            const t_peak1 = 2;    // 左峰
+            const t_mid = 4;      // 中間谷底 (頸線)
+            const t_peak2 = 6;    // 右峰
+            const t_break = 8;    // ★ T8: 跌破頸線
+            const t_target = v.duration - 1;
+
+            // ★ 目標價計算
+            let targetPrice = v.neckline - headHeight;
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            // T0: 起點 (對齊頸線)
+            chartPoints[0] = v.neckline;
+            
+            // T1: 攻頂途中
+            chartPoints[1] = v.neckline + headHeight * 0.6;
+            
+            // T2: 左峰
+            chartPoints[2] = v.peakPrice;
+            
+            // T3: 回檔途中
+            chartPoints[3] = v.neckline + headHeight * 0.4;
+            
+            // T4: ★ 頸線 (M的中間)
+            chartPoints[4] = v.neckline;
+            
+            // T5: 反彈途中
+            chartPoints[5] = v.neckline + (peak2 - v.neckline) * 0.6;
+            
+            // T6: 右峰
+            chartPoints[6] = peak2;
+            
+            // T7: 下殺途中
+            chartPoints[7] = v.neckline + (peak2 - v.neckline) * 0.3;
+            
+            // T8: ★ 跌破頸線 (決策點)
+            chartPoints[8] = v.neckline;
+
+            // T9~End: 崩跌至目標
+            for (let i = 9; i <= t_target; i++) {
+                const progress = (i - 8) / (t_target - 8);
+                chartPoints[i] = v.neckline - (v.neckline - targetPrice) * progress;
+            }
+
+            return {
+                entry: v.neckline,
+                target: targetPrice,
+                stop: peak2, // 停損設在右峰
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 頸線 (綠色水平線)
+                    { x1: 0, x2: t_target, y1: v.neckline, y2: v.neckline, color: '#2ecc71', label: '頸線' },
+                    
+                    // B. 上方壓力線 (連接兩峰，微幅向下)
+                    { x1: t_peak1, x2: t_target, y1: v.peakPrice, y2: v.peakPrice - (v.peakPrice - peak2) * ((t_target - t_peak1)/(t_peak2 - t_peak1)), color: '#2ecc71', label: '壓力線' },
+                    
+                    // C. 高度測量 H (在中間畫)
+                    { x1: t_mid, x2: t_mid, y1: v.neckline, y2: v.peakPrice, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // D. 跌幅測量 H (從跌破點往下畫)
+                    { x1: t_break, x2: t_break, y1: v.neckline, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅H' },
+                    
+                    // E. 目標價水平線
+                    //{ x1: t_break, x2: t_target, y1: targetPrice, y2: targetPrice, color: '#2ecc71', dashed: true, label: '目標價' },
+                    
+                    // F. K線連線
+                    { x1: 0, x2: t_peak1, y1: v.neckline, y2: v.peakPrice, color: '#e74c3c' },
+                    { x1: t_peak1, x2: t_mid, y1: v.peakPrice, y2: v.neckline, color: '#2ecc71' },
+                    { x1: t_mid, x2: t_peak2, y1: v.neckline, y2: peak2, color: '#e74c3c' },
+                    { x1: t_peak2, x2: t_break, y1: peak2, y2: v.neckline, color: '#2ecc71' },
+                    { x1: t_break, x2: t_target, y1: v.neckline, y2: targetPrice, color: '#2ecc71', dashed: true, label: '主跌段' }
+                ],
+            };
+        }
     },
-    roundingTop: {
-        name: "6. 圓弧頂 (Rounding Top)", type: "bear",
-        inputs: [{ id: "neck", label: "支撐線", default: 80 }, { id: "high", label: "圓弧頂", default: 100 }],
-        note: "<strong>特徵</strong>：緩漲緩跌。<br><strong>戰略</strong>：跌破支撐線。",
-        calc: (v) => ({ entry: v.neck, target: v.neck - (v.high-v.neck), stop: v.high, points: [85, 95, 98, v.high, 98, 95, 85, v.neck, v.neck-5], trendlines: [{x1:0,x2:7,y1:v.neck,y2:v.neck,color:'#e67e22'}] })
+	roundingTop: {
+        name: "6. 圓弧頂 (Rounding Top) - 緩跌平台殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "neckline", label: "頸線支撐", default: 50 },
+            { id: "peakPrice", label: "圓弧頂高", default: 90 },
+            { id: "duration", label: "顯示週期", default: 12 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>股價呈圓弧狀緩步做頭，多空勢力在潛移默化中易位。圖中右側在崩跌前出現一個<strong>「小平台整理」</strong>(Handle)，這是最後的逃命波。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T8 決策點為<strong>「反彈失敗跌破頸線」</strong>。此處確認平台整理失敗，多頭最後防線崩潰，即將進入主跌段。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+            1. <strong>進場</strong>：T8 跌破頸線時。<br>
+            2. <strong>目標</strong>：頸線 - (頂部 - 頸線)。即向下映照「圓弧高度」。
+        `,
+        calc: (v) => {
+            // 計算高度 H
+            const height = v.peakPrice - v.neckline;
+            
+            // ==========================================
+            // 📐 圓弧頂幾何運算
+            // ==========================================
+            
+            const t_top_peak = 3;
+            const t_touch_neck = 6;   // ★ T6: 回到頸線
+            const t_handle_peak = 7;  // T7: 反彈高點
+            const t_break = 8;        // ★ T8: 跌破
+            const t_target = v.duration - 1;
+
+            // ★ 目標價計算
+            let targetPrice = v.neckline - height;
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            // --- 圓弧主體 (T0~T6) ---
+            chartPoints[0] = v.neckline;
+            chartPoints[1] = v.neckline + height * 0.65; // 急漲一點
+            chartPoints[2] = v.neckline + height * 0.95; // 接近頂
+            chartPoints[3] = v.peakPrice;                // 頭頂
+            chartPoints[4] = v.neckline + height * 0.90; // 緩跌開始
+            chartPoints[5] = v.neckline + height * 0.55; // 加速跌
+            
+            // T6: ★ 完美貼頸 (支撐測試)
+            chartPoints[6] = v.neckline;
+            
+            // --- 右側平台 (誘多反彈) ---
+            // T7: 弱勢反彈 (約 1/4 高度)
+            const handleHeight = v.neckline + height * 0.25;
+            chartPoints[7] = handleHeight;
+            
+            // --- 崩跌 ---
+            // T8: ★ 跌破頸線 (決策點)
+            chartPoints[8] = v.neckline;
+
+            // T9~End: 殺至目標
+            for (let i = 9; i <= t_target; i++) {
+                const progress = (i - 8) / (t_target - 8);
+                chartPoints[i] = v.neckline - (v.neckline - targetPrice) * progress;
+            }
+
+            return {
+                entry: v.neckline,
+                target: targetPrice,
+                stop: handleHeight, // 停損設在反彈高點
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 頸線 (綠色水平線)
+                    { x1: 0, x2: t_target, y1: v.neckline, y2: v.neckline, color: '#2ecc71', label: '頸線' },
+                    
+                    // B. 頭部高度測量 H
+                    { x1: t_top_peak, x2: t_top_peak, y1: v.neckline, y2: v.peakPrice, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // C. 跌幅測量 H
+                    { x1: t_break, x2: t_break, y1: v.neckline, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅H' },
+                    
+                    // D. 圓弧示意線 (紫色)
+                    // 使用多段線逼近圓弧
+                    //{ x1: 0, x2: 1.5, y1: v.neckline, y2: v.neckline + height*0.8, color: '#9b59b6' }, 
+                    //{ x1: 1.5, x2: 4.5, y1: v.neckline + height*0.8, y2: v.neckline + height*0.8, color: '#9b59b6', label: '圓弧頂' }, 
+                    //{ x1: 4.5, x2: 6, y1: v.neckline + height*0.8, y2: v.neckline, color: '#9b59b6' },
+                    
+                    // E. 目標價水平線
+                    //{ x1: t_break, x2: t_target, y1: targetPrice, y2: targetPrice, color: '#2ecc71', dashed: true, label: '目標價' },
+                    
+                    // F. K線連線
+                    // 圓弧段
+                    { x1: 0, x2: 3, y1: v.neckline, y2: v.peakPrice, color: '#e74c3c' },
+                    { x1: 3, x2: 6, y1: v.peakPrice, y2: v.neckline, color: '#2ecc71' },
+                    // 平台反彈段
+                    { x1: 6, x2: 7, y1: v.neckline, y2: handleHeight, color: '#e74c3c', dashed: true, label: '誘多' },
+                    { x1: 7, x2: 8, y1: handleHeight, y2: v.neckline, color: '#2ecc71' },
+                    // 主跌段
+                    { x1: 8, x2: t_target, y1: v.neckline, y2: targetPrice, color: '#2ecc71', dashed: true, label: '主跌段' }				
+                ],
+            };
+        }
     },
-    ascRightTriTop: {
-        name: "7. 上升直角三角頂", type: "bear",
-        inputs: [{ id: "res", label: "水平壓力", default: 100 }, { id: "sup", label: "上升支撐破點", default: 90 }],
-        note: "<strong>特徵</strong>：壓力水平，低點墊高但最後失敗。<br><strong>戰略</strong>：跌破上升支撐線。",
-        calc: (v) => ({ entry: v.sup, target: v.sup - (v.res-v.sup), stop: v.res, points: [80, v.res, 85, v.res, v.sup, 88, v.sup-5], trendlines: [{x1:0,x2:4,y1:v.res,y2:v.res,color:'#c0392b'},{x1:0,x2:4,y1:80,y2:v.sup,color:'#27ae60'}] })
+	ascRightTriTop: {
+        name: "7. 上升直角三角頂 (Ascending Triangle Top) - 誘多崩跌殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "neckline", label: "水平頸線", default: 50 },
+            { id: "highestPeak", label: "最高峰值", default: 90 },
+            { id: "duration", label: "顯示週期", default: 15 } // 延長時間軸
+        ],
+        note: `
+			<strong style="color: #e74c3c;">【圖解特徵】</strong>高點持續墊高(誘多)，但低點死守在同一水平線上。這通常被視為多頭型態，看似強勢，但 T6 創高後遭遇沈重賣壓急殺至頸線(T8)，因此一旦「向下跌破水平支撐」，殺傷力極強(多殺多)。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T9 的<strong>「1/2 弱勢反彈」</strong>是關鍵警訊，顯示多頭已無力再攻。隨後 T10 回測頸線，最終於 <strong>T11 正式跌破</strong>。這段「反彈-回測-跌破」的過程是主力最後的出貨確認。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+            1. <strong>進場</strong>：T9 反彈不過高(激進)，或 T11 跌破水平線(保守)。<br>
+            2. <strong>目標</strong>：頸線 - (最高峰 - 頸線)。
+        `,
+        calc: (v) => {
+            // 計算最大高度 H (從最高峰算)
+            const height = v.highestPeak - v.neckline;
+            
+            // 第一峰高度 (80%)
+            const peak1 = v.neckline + height * 0.8;
+            
+            // T9 反彈高度 (50%)
+            const reboundPeak = v.neckline + height * 0.5;
+
+            // ==========================================
+            // 📐 時間軸規劃 (T0 ~ T14)
+            // ==========================================
+            // T0: 起
+            // T2: 峰1
+            // T4: 回頸
+            // T6: 峰2 (最高)
+            // T8: 回頸
+            // T9: 反彈 (1/2)
+            // T10: 回頸 (貼齊)
+            // T11: 跌破
+            
+            const t_break = 11;   // ★ T11: 跌破
+            const t_target = 14;
+
+            // ★ 目標價計算
+            let targetPrice = v.neckline - height;
+            if (targetPrice < 5) targetPrice = 5;
+
+            // 建構 K 線路徑
+            let chartPoints = [];
+            
+            chartPoints[0] = v.neckline;
+            chartPoints[1] = v.neckline + (peak1 - v.neckline) * 0.6;
+            chartPoints[2] = peak1;        // T2: 峰1
+            chartPoints[3] = v.neckline + (peak1 - v.neckline) * 0.4;
+            chartPoints[4] = v.neckline;   // T4: 貼頸
+            chartPoints[5] = v.neckline + height * 0.6;
+            chartPoints[6] = v.highestPeak;// T6: 最高峰
+            chartPoints[7] = v.neckline + height * 0.3;
+            chartPoints[8] = v.neckline;   // T8: 貼頸 (急殺後)
+            
+            // ★ T9: 1/2 弱勢反彈
+            chartPoints[9] = reboundPeak;
+            
+            // ★ T10: 再次貼頸 (空方蓄力)
+            chartPoints[10] = v.neckline;
+            
+            // ★ T11: 跌破
+            chartPoints[11] = v.neckline; // 視覺上剛好破線
+
+            // T12~End: 崩跌
+            chartPoints[12] = v.neckline - (v.neckline - targetPrice) * 0.4;
+            chartPoints[13] = v.neckline - (v.neckline - targetPrice) * 0.8;
+            chartPoints[14] = targetPrice;
+
+            return {
+                entry: v.neckline,
+                target: targetPrice,
+                stop: reboundPeak, // 停損設在 T9 高點
+                
+                points: chartPoints,
+                
+                trendlines: [
+                    // A. 水平頸線 (綠色)
+                    { x1: 0, x2: t_target, y1: v.neckline, y2: v.neckline, color: '#2ecc71', label: '水平支撐' },
+                    
+                    // B. 上升壓力線 (連接 T2 和 T6)
+                    { x1: 2, x2: 7, y1: peak1, y2: v.highestPeak + (v.highestPeak-peak1)/4, color: '#2ecc71', label: '誘多' },
+                    
+                    // C. 高度測量 H
+                    { x1: 6, x2: 6, y1: v.neckline, y2: v.highestPeak, color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // D. T9 反彈高度示意 (1/2)
+                    { x1: 9, x2: 9, y1: v.neckline, y2: reboundPeak, color: '#9b59b6', dashed: true, label: '1/2' },
+                    
+                    // E. 跌幅測量 H (從 T11 往下畫)
+                    { x1: 11, x2: 11, y1: v.neckline, y2: targetPrice, color: '#3498db', dashed: true, label: '跌幅H' },
+                    
+                    // F. K線連線
+                    { x1: 0, x2: 2, y1: v.neckline, y2: peak1, color: '#e74c3c' },
+                    { x1: 2, x2: 4, y1: peak1, y2: v.neckline, color: '#2ecc71' },
+                    { x1: 4, x2: 6, y1: v.neckline, y2: v.highestPeak, color: '#e74c3c' },
+                    { x1: 6, x2: 8, y1: v.highestPeak, y2: v.neckline, color: '#2ecc71', label: '急殺' },
+                    // 反彈段
+                    { x1: 8, x2: 9, y1: v.neckline, y2: reboundPeak, color: '#e74c3c' },
+                    { x1: 9, x2: 10, y1: reboundPeak, y2: v.neckline, color: '#2ecc71' },
+                    // 崩跌段
+                    { x1: 10, x2: 11, y1: v.neckline, y2: v.neckline, color: '#2ecc71' }, // 短暫停留
+                    { x1: 11, x2: 14, y1: v.neckline, y2: targetPrice, color: '#2ecc71', dashed: true, label: '崩跌' }
+                ],
+            };
+        }
     },
-    ascWedge: {
-        name: "8. 上升楔型 (Ascending Wedge)", type: "bear",
-        inputs: [{ id: "brk", label: "跌破點", default: 80 }, { id: "high", label: "最高點", default: 90 }, { id: "width", label: "開口寬度", default: 10 }],
-        note: "<strong>特徵</strong>：高過高但收斂。<br><strong>戰略</strong>：跌破下緣支撐。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - v.width, stop: v.high, points: [70, v.brk+5, 75, v.high, v.brk, 88, v.brk-5], trendlines: [{x1:1,x2:5,y1:v.brk+5,y2:88,color:'#27ae60'},{x1:0,x2:4,y1:70,y2:v.high,color:'#c0392b'}] })
+	ascWedge: {
+        name: "8. 上升楔型 (Ascending Wedge) - 窒息量縮殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "breakout", label: "跌破點 (支撐線)", default: 45 },
+            { id: "high", label: "楔型尖端高點", default: 55 },
+            { id: "width", label: "開口高度 (H)", default: 15 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>高點與低點同時墊高，但「下方支撐線(陡)」比「上方壓力線(緩)」上升得更快，導致型態向右上方收斂。這代表多頭雖在創高，但買盤動能逐漸枯竭。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>圖中紅色虛線箭頭顯示，跌破上升支撐線後，常有<strong>「反彈回測」</strong>動作(Kiss Goodbye)。確認壓力不過後，隨即展開主跌段。<br>
+            <strong>【操作戰略】</strong><br>
+            1. 賣點：跌破下方支撐線時(藍點)。<br>
+            2. 測幅：採「垂直等幅」測量(藍色虛線)。目標價 = 跌破點 - 楔型最寬處高度。
+        `,
+        calc: (v) => {
+            // 空方目標 = 跌破點 - 高度
+            const target = v.breakout - v.width;
+            
+            // ==========================================
+            // 📐 雙軌幾何運算 (Rising Wedge)
+            // ==========================================
+            
+            // 定義時間軸
+            // T0:起漲 | T1:高 | T2:低 | T3:尖端高 | T4:跌破 | T5:急殺 | T6:回測
+            const t0 = 0;
+            const t3 = 3;
+            const t4 = 4;
+
+            // 1. 建立【下方支撐線】方程式 (陡升)
+            // 這條線是關鍵，通過 T4 (Breakout)
+            const p4 = v.breakout;
+            // 設定 T0 (起漲點) 的高度 = 跌破點 - 開口寬度 (因為是上升，起點較低)
+            const p0 = v.breakout - v.width;
+            
+            // 計算斜率 m_supp (較陡的正斜率)
+            const m_supp = (p4 - p0) / (t4 - t0);
+            const getSupportLine = (t) => p0 + m_supp * (t - t0);
+
+            // 2. 建立【上方壓力線】方程式 (緩升)
+            // 通過 T3 (High - 尖端)
+            const p3 = v.high;
+            
+            // 為了收斂，壓力線斜率必須比支撐線「平緩」
+            // 設定 m_res 為 m_supp 的 40%
+            const m_res = m_supp * 0.4; 
+            
+            // 反推壓力線截距: y = mx + c => c = y - mx
+            const c_res = p3 - (m_res * t3);
+            const getResistLine = (t) => (m_res * t) + c_res;
+
+            // 3. 計算關鍵點位
+            // T1 (前高): 必須在壓力線上
+            const p1 = getResistLine(1);
+            // T2 (前低): 必須在支撐線上
+            const p2 = getSupportLine(2);
+            // T6 (回測點): 回到跌破點附近 (確認支撐轉壓力)
+            const p6 = v.breakout;
+
+            return {
+                entry: v.breakout,
+                target: target,
+                stop: v.high,
+                
+                // 走勢優化：鋸齒狀上升後跌破
+                // T0: 起漲低點
+                // T1: 前高 (★對齊壓力)
+                // T2: 前低 (★對齊支撐)
+                // T3: 尖端高 (★對齊壓力)
+                // T4: 跌破 (★對齊支撐 - 藍點)
+                // T5: 急殺
+                // T6: 回測 (模擬紅色虛線箭頭)
+                // T7: 達標
+                points: [
+                    p0,                     // T0
+                    p1,                     // T1
+                    p2,                     // T2
+                    p3,                     // T3
+                    p4,                     // T4
+                    p4 - v.width * 0.25,    // T5
+                    p6,                     // T6 (回測)
+                    target                  // T7
+                ],
+                
+                trendlines: [
+                    // A. 下方支撐線 (陡) - 連接 T0 -> T4
+                    { 
+                        x1: 0, x2: 4.5, 
+                        y1: p0, y2: getSupportLine(4.5), 
+                        color: '#2ecc71', 
+                        label: '上升支撐 (陡)' 
+                    },
+                    
+                    // B. 上方壓力線 (緩) - 連接 T1 -> T3 -> 延伸顯示收斂
+                    { 
+                        x1: 0.5, x2: 6, 
+                        y1: getResistLine(0.5), y2: getResistLine(6), 
+                        color: '#2ecc71', 
+                        label: '收斂壓力 (緩)' 
+                    },
+
+                    // C. 目標價線
+                    { x1: 6, x2: 7.5, y1: target, y2: target, color: '#2ecc71', label: '目標價' },
+
+                    // D. 測幅虛線 (左側開口 H)
+                    // 測量 T0 到 對應上方的距離
+                    { x1: 0.2, x2: 0.2, y1: p0, y2: getResistLine(0), color: '#3498db', dashed: true, label: '高度H' },
+                    
+                    // E. 測幅虛線 (右側投射)
+                    { x1: 7, x2: 7, y1: p4, y2: target, color: '#3498db', dashed: true, label: '等幅H' }
+                ],
+                
+                // 藍色跌破點
+                extraMarkers: [
+                    {
+                        type: 'point',
+                        xValue: 4, // T4
+                        yValue: p4,
+                        backgroundColor: '#3498db',
+                        radius: 6,
+                        borderColor: 'white',
+                        borderWidth: 2
+                    }
+                ]
+            };
+        }
     },
-    broadeningTop: {
-        name: "9. 上升擴張喇叭型頂", type: "bear",
-        inputs: [{ id: "brk", label: "跌破點", default: 80 }, { id: "high", label: "最後高", default: 90 }, { id: "amp", label: "振幅", default: 20 }],
-        note: "<strong>特徵</strong>：波動擴大，高檔失控。<br><strong>戰略</strong>：跌破下緣支撐。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - v.amp, stop: v.high, points: [85, 82, 88, 80, v.high, v.brk, v.brk-5], trendlines: [{x1:3,x2:5,y1:80,y2:v.brk,color:'#27ae60'}] })
+	broadeningTop: {
+		name: "9. 上升擴張喇叭頂 (Broadening Wedge) - 失控寬幅殺",
+		type: "bear",
+		inputs: [
+			{ id: "startPrice", label: "起始價格", default: 40 },
+			{ id: "spread", label: "擴張力道", default: 2.2 },
+			{ id: "duration", label: "顯示週期", default: 12 } // 鎖定為12個節點
+		],
+		note: `
+				<strong style="color: #e74c3c;">【形態識別】</strong>高點更高(HH)、低點更高(HL)，但波幅放大（喇叭狀）。這是市場情緒失控的表現。<br>
+				<strong style="color: #3498db;">【關鍵訊號】</strong>T8 跌破上升趨勢線，T9 反彈不過高(逃命波)確認轉空。<br>
+				<strong>【操作策略】</strong>跌破 T8 進場，或 T9 反彈不過時加碼。目標價為「跌破點 - 喇叭口高度(H)」。
+			`,
+		calc: (v) => {
+			// ==========================================
+			// 📐 幾何定義
+			// ==========================================
+			const p_start = v.startPrice;
+			const s = v.spread;
+			
+			// 上軌陡(2.0)，下軌緩(0.7)但向上
+			const getTop = (x) => p_start + (x * 1.8) + (x * 0.4 * s);
+			const getBot = (x) => p_start + (x * 0.7) - (x * 0.2 * s);
+
+			let cp = [];
+
+			// --- 階段一：擴張震盪 (T0-T5) ---
+			cp[0] = p_start;
+			cp[1] = getTop(1);
+			cp[2] = getBot(2);
+			cp[3] = getTop(3);
+			cp[4] = getBot(4);
+			cp[5] = getTop(5); // Peak (最高點)
+
+			// --- 階段二：誘多與弱勢反彈 (T6-T7) ---
+			
+			// T6: 貼齊上升趨勢線下緣 (支撐似乎有效)
+			cp[6] = getBot(6);
+
+			// T7: 反彈不過前高 1/2
+			// 計算 T5 到 T6 的跌幅
+			const drop_wave = cp[5] - cp[6];
+			// 反彈係數設為 0.4 (即 40%，符合 < 1/2 的條件)
+			cp[7] = cp[6] + (drop_wave * 0.4);
+
+			// --- 階段三：跌破與回測 (T8-T9) ---
+
+			// 計算測幅目標 (以 T5 高度計算)
+			const height_H = cp[5] - getBot(5);
+			
+			// T8: 跌破上升趨勢線 (決策點)
+			// 價格需顯著低於下軌
+			const t8_trend_price = getBot(8);
+			cp[8] = t8_trend_price - (height_H * 0.25); 
+
+			// T9: 回測上升趨勢線下緣 (Kiss of Death)
+			// 價格回到延伸趨勢線附近，但略低一點點
+			const t9_trend_price = getBot(9);
+			cp[9] = t9_trend_price - (height_H * 0.05);
+
+			// --- 階段四：N字下跌至目標 (T10-T11) ---
+			
+			// 設定最終目標價 (跌破點 T8 - H)
+			// 為了視覺平衡，我們稍微調整目標價計算基準
+			let targetPrice = t8_trend_price - height_H;
+			if (targetPrice < 2) targetPrice = 2;
+
+			// T10: N字下跌的中繼低點 (加速趕底)
+			cp[10] = cp[8] - (height_H * 0.4);
+
+			// T11: 抵達目標價
+			cp[11] = targetPrice;
+
+			return {
+				entry: cp[8], // T8 為做空點
+				target: targetPrice,
+				stop: cp[7],  // 停損設在 T7 高點
+				
+				points: cp,
+
+				trendlines: [
+					// 1. 上升擴張趨勢線 (綠色實線只畫到 T6/T7 附近)
+					{ x1: 1, x2: 5.5, y1: cp[1], y2: getTop(5.5), color: '#2ecc71', width: 2 },
+					{ x1: 0, x2: 6.5, y1: cp[0], y2: getBot(6.5), color: '#2ecc71', width: 2, label: '上升趨勢線' },
+					
+					// 2. 趨勢線延伸 (虛線，變成壓力)
+					{ x1: 6.5, x2: 10, y1: getBot(6.5), y2: getBot(10), color: '#e74c3c', dashed: true, label: '壓力' },
+
+					// 3. T7 反彈幅度示意 (細灰線)
+					{ x1: 6, x2: 7, y1: cp[6] + (drop_wave * 0.5), y2: cp[6] + (drop_wave * 0.5), color: '#95a5a6', dashed: true, width: 1, label: '50%' },
+
+					// 4. 目標價投射
+					{ x1: 8, x2: 8, y1: t8_trend_price, y2: targetPrice, color: '#3498db', dashed: true, arrow: 'end', label: 'H' },
+					{ x1: 8, x2: 11, y1: targetPrice, y2: targetPrice, color: '#2ecc71', dashed: true, label: 'Target' },
+
+					// 5. 走勢連線
+					{ x1: 0, x2: 1, y1: cp[0], y2: cp[1], color: '#e74c3c' },
+					{ x1: 1, x2: 2, y1: cp[1], y2: cp[2], color: '#e74c3c' },
+					{ x1: 2, x2: 3, y1: cp[2], y2: cp[3], color: '#e74c3c' },
+					{ x1: 3, x2: 4, y1: cp[3], y2: cp[4], color: '#e74c3c' },
+					{ x1: 4, x2: 5, y1: cp[4], y2: cp[5], color: '#e74c3c' }, 
+					{ x1: 5, x2: 6, y1: cp[5], y2: cp[6], color: '#e74c3c' }, // 回檔貼線
+					{ x1: 6, x2: 7, y1: cp[6], y2: cp[7], color: '#e74c3c', width: 2 }, // 弱彈
+					{ x1: 7, x2: 8, y1: cp[7], y2: cp[8], color: '#e74c3c', width: 3 }, // ★ T8 實體黑K跌破
+					{ x1: 8, x2: 9, y1: cp[8], y2: cp[9], color: '#e74c3c', dashed: true }, // T9 回測
+					{ x1: 9, x2: 10, y1: cp[9], y2: cp[10], color: '#e74c3c' }, // T10 N字殺
+					{ x1: 10, x2: 11, y1: cp[10], y2: cp[11], color: '#e74c3c', arrow: 'end' },
+					
+					// 6. 測幅虛線 (H)
+                    { x1: 5, x2: 5, y1: cp[5], y2: getBot(5), color: '#3498db', dashed: true, label: '等幅H' }
+				],
+
+				extraMarkers: [
+					{
+						type: 'point',
+						xValue: 6,
+						yValue: cp[6],
+						backgroundColor: '#f1c40f', // 黃燈警示
+						radius: 4,
+						label: '支撐?'
+					},
+					{
+						type: 'point',
+						xValue: 7,
+						yValue: cp[7],
+						backgroundColor: '#95a5a6',
+						radius: 4,
+						label: '<50%'
+					},
+					{
+						type: 'point',
+						xValue: 8,
+						yValue: cp[8],
+						backgroundColor: '#e74c3c', // 紅燈做空
+						borderColor: 'white',
+						borderWidth: 2,
+						radius: 6,
+						label: '決策點'
+					},
+					{
+						type: 'point',
+						xValue: 9,
+						yValue: cp[9],
+						backgroundColor: '#3498db', 
+						radius: 4,
+						label: '回測'
+					}
+				]
+			};
+		}
+	},
+	diamondTop: {
+        name: "10. 前漲菱型 (Diamond Top) - 擴張收斂殺",
+        type: "bear", // 空方型態
+        inputs: [
+            { id: "centerPrice", label: "中心價格", default: 50 },
+            { id: "diamondHeight", label: "菱型高度 (H)", default: 30 },
+            { id: "duration", label: "顯示週期", default: 20 }
+        ],
+        note: `
+            <strong style="color: #e74c3c;">【圖解特徵】</strong>結合了「擴張喇叭」與「對稱三角」的罕見型態。股價先是劇烈震盪(擴張)，隨後波動收窄(收斂)，形成狀似鑽石的頂部。<br>
+            <strong style="color: #9b59b6;">【關鍵細節】</strong>T6 為<strong>「跌破右下支撐」</strong>的關鍵點(藍點)。圖中紅色虛線顯示跌破後常有回測動作。此型態一旦確認，下跌目標通常非常明確且深遠。<br>
+            <strong>【操作戰略 (空方)】</strong><br>
+        1. <strong>進場</strong>：T6 實質跌破右下上升趨勢線時。<br>
+        2. <strong>防守</strong>：T5 (右肩高點) 或 T3 (最高點)。<br>
+        3. <strong>目標</strong>：跌破價 - H (菱型最寬處的垂直高度)。
+        `,
+        calc: (v) => {
+			const halfH = v.diamondHeight / 2;
+			const p_center = v.centerPrice;
+			
+			// --- 1. 價格定義 ---
+			const p_top = p_center + halfH;          // T3: 頂
+			const p_bottom = p_center - halfH;       // T4: 底
+			const p_t1 = p_center + halfH * 0.6;     // T1: 左肩高
+			const p_t2 = p_center - halfH * 0.6;     // T2: 左肩低
+			const p_t5 = p_center + halfH * 0.5;     // T5: 右肩高
+			
+			// 跌破點 (T6): 在右下支撐線下方一點點
+			const p_break = p_bottom + (halfH * 0.25); 
+			
+			// 回測點 (T7): 反彈測試頸線
+			const p_pullback = p_break + (halfH * 0.15);
+
+			// 目標價
+			let targetPrice = p_break - v.diamondHeight;
+			if (targetPrice < 2) targetPrice = 2;
+
+			// --- 2. 節點生成 (共 12 點: T0 ~ T11) ---
+			let cp = []; // chartPoints 簡寫
+			
+			cp[0] = p_center - halfH * 0.8; // 起漲
+			cp[1] = p_t1;                   // 擴張上
+			cp[2] = p_t2;                   // 擴張下
+			cp[3] = p_top;                  // 鑽石頂
+			cp[4] = p_bottom;               // 鑽石底
+			cp[5] = p_t5;                   // 收斂上
+			cp[6] = p_break;                // ★ 跌破
+			cp[7] = p_pullback;             // 回測
+			
+			// T8 ~ T11: 殺盤階段 (分4段跌到目標)
+			// 使用緩衝函式讓下跌看起來有加速感
+			const dropStart = cp[7];
+			const totalDrop = dropStart - targetPrice;
+			
+			cp[8]  = dropStart - totalDrop * 0.3; // 殺
+			cp[9]  = dropStart - totalDrop * 0.6; // 殺
+			cp[10] = dropStart - totalDrop * 0.85; // 殺
+			cp[11] = targetPrice;                 // 抵達目標
+
+			return {
+				entry: p_break,
+				target: targetPrice,
+				stop: p_t5,
+				
+				points: cp,
+				
+				trendlines: [
+					// --- 幾何邊界 (藍色虛線) ---
+					{ x1: 1, x2: 3, y1: cp[1], y2: cp[3], color: '#3498db', dashed: true }, // 左上
+					{ x1: 2, x2: 4, y1: cp[2], y2: cp[4], color: '#3498db', dashed: true }, // 左下
+					{ x1: 3, x2: 5, y1: cp[3], y2: cp[5], color: '#3498db', dashed: true }, // 右上
+					
+					// ★ 關鍵頸線 (T4 -> T6 延伸)
+					{ x1: 4, x2: 7, y1: cp[4], y2: p_break + (p_break - cp[4])*0.5, color: '#e67e22', width: 2, label: '頸線' },
+
+					// --- 測量線 ---
+					{ x1: 3.5, x2: 3.5, y1: cp[4], y2: cp[3], color: '#95a5a6', dashed: true, label: 'H' },
+					{ x1: 6, x2: 11, y1: targetPrice, y2: targetPrice, color: '#2ecc71', dashed: true, label: 'Target' },
+
+					// --- 走勢連線 (Zigzag) ---
+					{ x1: 0, x2: 1, y1: cp[0], y2: cp[1], color: '#e74c3c' },
+					{ x1: 1, x2: 2, y1: cp[1], y2: cp[2], color: '#2ecc71' },
+					{ x1: 2, x2: 3, y1: cp[2], y2: cp[3], color: '#e74c3c' },
+					{ x1: 3, x2: 4, y1: cp[3], y2: cp[4], color: '#2ecc71' },
+					{ x1: 4, x2: 5, y1: cp[4], y2: cp[5], color: '#e74c3c' },
+					{ x1: 5, x2: 6, y1: cp[5], y2: cp[6], color: '#2ecc71', width: 2 }, // 跌破
+					{ x1: 6, x2: 7, y1: cp[6], y2: cp[7], color: '#e74c3c', dashed: true }, // 回測
+					{ x1: 7, x2: 11, y1: cp[7], y2: cp[11], color: '#27ae60', width: 2 },    // 主跌
+					
+					// 測幅虛線 (H)
+					{ x1: 6, x2: 6, y1: p_break, y2: targetPrice, color: '#3498db', dashed: true, label: '高度H' }
+				],
+				
+				extraMarkers: [
+					{
+						type: 'point',
+						xValue: 6,
+						yValue: cp[6],
+						backgroundColor: '#e74c3c',
+						radius: 5,
+						label: 'Break'
+					}
+				]
+			};
+		}
     },
-    diamondTop: {
-        name: "10. 前漲菱型 (Diamond Top)", type: "bear",
-        inputs: [{ id: "brk", label: "跌破點", default: 80 }, { id: "high", label: "菱形高", default: 90 }, { id: "low", label: "菱形低", default: 70 }],
-        note: "<strong>特徵</strong>：頭部出現擴張後收斂。<br><strong>戰略</strong>：跌破右側支撐。",
-        calc: (v) => ({ entry: v.brk, target: v.brk - (v.high-v.low), stop: v.high, points: [85, v.low, 85, v.high, 82, v.brk, v.brk-5], trendlines: [{x1:1,x2:5,y1:v.high,y2:v.brk,color:'#27ae60'}] })
-    }
 };
 
 // ==========================================
