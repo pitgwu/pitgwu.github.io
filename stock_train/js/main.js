@@ -204,13 +204,25 @@
   // 當天交易 → 隔天跳下一根 K
   // ----------------------------------------------------------
   function finishToday() {
-    if (currentIndex < data.length - 1) {
-      currentIndex++;
-      updateDisplays();
-    } else {
+    // 已經是最後一天 → 直接結束
+    if (currentIndex >= data.length - 1) {
       gameEnd();
+      return;
+    }
+
+    // 先推進一天
+    currentIndex++;
+
+    // 先更新畫面（讓最後一天K棒被畫出來）
+    updateDisplays();
+
+    // 如果推進後剛好到最後一天 → 立刻結束並顯示總結
+    if (currentIndex >= data.length - 1) {
+      // 用 setTimeout 讓 UI 先 render 完再顯示 alert/summary（避免閃或被擋）
+      setTimeout(gameEnd, 0);
     }
   }
+
 
   function refreshTradeUI() {
     updateStats();
@@ -387,8 +399,7 @@
     U.el("hold").onclick = doHold;
 
     U.el("nextDay").onclick = () => {
-      if (currentIndex < data.length - 1) currentIndex++;
-      updateDisplays();
+      finishToday();
     };
     U.el("prevDay").onclick = () => {
       if (currentIndex > 0) currentIndex--;
