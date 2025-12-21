@@ -42,7 +42,7 @@
   
   const STOCK_POOLS = {
 	"ETF-00981A": {
-	  folder: “data_981a”,
+	  folder: "data_981a",
 	  stocks: [
         "2330","2317","6669","1475","2368","3665","2308","2345","6223","3653",
         "6274","6805","2449","2317","8210","2454","2059","3231","1303","3661",
@@ -52,19 +52,20 @@
       ]
 	},
     "大型權值股": {
-	  folder: “data_big”,
+	  folder: "data_big",
 	  stocks: [
-        "2330"
+        "2330","2317","2454","2412","2881","2382","2303","2882","2891","3711"
       ]
 	},
     "中小成長股": {
-	  folder: “data_small”,
+	  folder: "data_small",
 	  stocks: [
-        "6669"
+        "6442","4749","4772","2374","2353","2409","3715","7749","6290","2377",
+        "6415","2347","6409","3702"
       ]
 	},
     "飇股": {
-	  folder: “data_small”,
+	  folder: "data_highest",
 	  stocks: [
         "1519","2329","2344","2359","2408","3230","3231","3450","3661","3715",
 		"4583","4722","4763","4946","5314","5475","6117","6139","6199","6235",
@@ -72,7 +73,7 @@
       ]
 	},
     "今日台指期（5分K）": {
-	  folder: “data_small”,
+	  folder: "data_txf_5m_daily",
 	  stocks: [
         "6669"
       ]
@@ -138,7 +139,7 @@
     U.el("stockName").innerText = ""; // 一開始隱藏
 	U.el("feedback").innerText = "";  // 一開始隱藏
 
-    fetch(`data/${stock}.csv`)
+    fetch(csvPath)
       .then(r => r.text())
       .then(text => {
         const lines = text.split("\n").slice(1);
@@ -177,7 +178,7 @@
         Chart.init();
         bindEvents();
         updateDisplays();
-		console.log(`✅ 已載入 ${poolName} → ${stock}`);
+		//console.log(`✅ 已載入 ${poolName} → ${stock}`);
       })
       .catch(e => alert("CSV 載入失敗: " + e.message));
   }
