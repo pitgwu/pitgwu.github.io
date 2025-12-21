@@ -52,6 +52,18 @@
   }
 
   function init() {
+
+    cacheReady = false;
+    maCache = { ma5: [], ma10: [], ma20: [] };
+    bbCache = { u: [], m: [], l: [] };
+
+    // 如果 chart 已存在，先移除
+    if (chart) {
+      chart.remove();
+      volChart.remove();
+      indChart.remove();
+    }
+	  
     chart = fixedChart(document.getElementById("chart"), 420);
 
     // ✅ K 線：固定用 right scale

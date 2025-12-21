@@ -47,7 +47,7 @@
       "6510","6139","6191","5536","3533","8358","4958","3515","2354","6515",
       "3715","3081","1560","3711","3211","5347","1319","3044","3217","5274",
       "3008","2327","2357","2439","2884","3037","3045","3583","8996","8299"
-    ];
+    ],
     "大型權值股": [
       "2330","2317","2454","2308","3008"
     ],
@@ -64,6 +64,11 @@
     
   function initStockPoolSelect() {
     const sel = U.el("stockPoolSelect");
+    if (!sel) {
+      console.error("stockPoolSelect not found");
+      return;
+    }
+
     sel.innerHTML = "";
 
     Object.keys(STOCK_POOLS).forEach(name => {
@@ -72,6 +77,8 @@
       opt.textContent = name;
       sel.appendChild(opt);
     });
+
+    sel.selectedIndex = 0;
   }
   
   function loadCSV() {
@@ -181,7 +188,7 @@
       showMA: maVisible,
       showBB: sel === "bb",
       indicatorType: (sel === "bb") ? null : sel,
-      trendlines: tline,
+      trendlines: maVisible ? tline : null,
       wPattern: maVisible ? w : null,
       triangle: maVisible ? tri : null
     });
