@@ -95,6 +95,8 @@
     const poolName = U.el("stockPoolSelect").value;
     const pool = STOCK_POOLS[poolName];
 
+    console.log("Loading pool:", poolName);
+
     if (!pool || !pool.length) {
       alert("此清單沒有股票");
       return;
@@ -498,5 +500,6 @@
   }
   
   initStockPoolSelect();
+  bindEvents();   // ✅ 一開始就綁定按鈕
 
 })(window);
