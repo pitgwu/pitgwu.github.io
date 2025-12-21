@@ -220,61 +220,61 @@
         if (SR[0]) { resLine.setData([{ time:t, value:SR[0].price }]); resLine.applyOptions({ visible:true }); }
         if (SR[1]) { supLine.setData([{ time:t, value:SR[1].price }]); supLine.applyOptions({ visible:true }); }
       }
-
-      // 趨勢線
-      if (opt.trendlines) {
-        const { upLines, downLines } = opt.trendlines;
-        if (upLines?.length) {
-          const u = upLines.at(-1);
-          trendUp.setData([
-            { time: shown[u.p1.index].time, value: u.p1.price },
-            { time: shown[u.p2.index].time, value: u.p2.price },
-          ]);
-          trendUp.applyOptions({ visible:true });
-        }
-        if (downLines?.length) {
-          const d = downLines.at(-1);
-          trendDn.setData([
-            { time: shown[d.p1.index].time, value: d.p1.price },
-            { time: shown[d.p2.index].time, value: d.p2.price },
-          ]);
-          trendDn.applyOptions({ visible:true });
-        }
+    }
+	
+    // 趨勢線
+    if (opt.trendlines) {
+      const { upLines, downLines } = opt.trendlines;
+      if (upLines?.length) {
+        const u = upLines.at(-1);
+        trendUp.setData([
+          { time: shown[u.p1.index].time, value: u.p1.price },
+          { time: shown[u.p2.index].time, value: u.p2.price },
+        ]);
+        trendUp.applyOptions({ visible:true });
       }
-
-      // 三角
-      if (opt.triangle) {
-        triUp.setData([
-          { time: shown[opt.triangle.upperLine.p1.index].time, value: opt.triangle.upperLine.p1.price },
-          { time: shown[opt.triangle.upperLine.p2.index].time, value: opt.triangle.upperLine.p2.price },
+      if (downLines?.length) {
+        const d = downLines.at(-1);
+        trendDn.setData([
+          { time: shown[d.p1.index].time, value: d.p1.price },
+          { time: shown[d.p2.index].time, value: d.p2.price },
         ]);
-        triLow.setData([
-          { time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price },
-          { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price },
-        ]);
-        triUp.applyOptions({ visible:true });
-        triLow.applyOptions({ visible:true });
+        trendDn.applyOptions({ visible:true });
       }
+	} 
 
-      // W 底
-      if (opt.wPattern) {
-        const W = opt.wPattern;
-        wLine1.setData([
-          { time: shown[W.p1.index].time, value: W.p1.price },
-          { time: shown[W.p2.index].time, value: W.p2.price },
-        ]);
-        wLine2.setData([
-          { time: shown[W.p3.index].time, value: W.p3.price },
-          { time: shown[W.p4.index].time, value: W.p4.price },
-        ]);
-        wNeck.setData([
-          { time: shown[W.p1.index].time, value: W.neck },
-          { time: shown[shown.length - 1].time, value: W.neck },
-        ]);
-        wLine1.applyOptions({ visible:true });
-        wLine2.applyOptions({ visible:true });
-        wNeck.applyOptions({ visible:true });
-      }
+    // 三角
+    if (opt.triangle) {
+      triUp.setData([
+        { time: shown[opt.triangle.upperLine.p1.index].time, value: opt.triangle.upperLine.p1.price },
+        { time: shown[opt.triangle.upperLine.p2.index].time, value: opt.triangle.upperLine.p2.price },
+      ]);
+      triLow.setData([
+        { time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price },
+        { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price },
+      ]);
+      triUp.applyOptions({ visible:true });
+      triLow.applyOptions({ visible:true });
+    }
+
+    // W 底
+    if (opt.wPattern) {
+      const W = opt.wPattern;
+      wLine1.setData([
+        { time: shown[W.p1.index].time, value: W.p1.price },
+        { time: shown[W.p2.index].time, value: W.p2.price },
+      ]);
+      wLine2.setData([
+        { time: shown[W.p3.index].time, value: W.p3.price },
+        { time: shown[W.p4.index].time, value: W.p4.price },
+      ]);
+      wNeck.setData([
+        { time: shown[W.p1.index].time, value: W.neck },
+        { time: shown[shown.length - 1].time, value: W.neck },
+      ]);
+      wLine1.applyOptions({ visible:true });
+      wLine2.applyOptions({ visible:true });
+      wNeck.applyOptions({ visible:true });
     }
 
     // ===== 指標區 =====

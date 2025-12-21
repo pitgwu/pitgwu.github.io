@@ -123,7 +123,7 @@
       showMA: maVisible,
       showBB: sel === "bb",
       indicatorType: (sel === "bb") ? null : sel,
-      trendlines: maVisible ? tline : null,
+      trendlines: tline,
       wPattern: maVisible ? w : null,
       triangle: maVisible ? tri : null
     });
