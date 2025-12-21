@@ -39,19 +39,77 @@
   // ----------------------------------------------------------
   // CSV 載入
   // ----------------------------------------------------------
-  function loadCSV() {
-    const stockList = [
+  
+  const STOCK_POOLS = {
+	"ETF-00981A": [
       "2330","2317","6669","1475","2368","3665","2308","2345","6223","3653",
       "6274","6805","2449","2317","8210","2454","2059","3231","1303","3661",
       "6510","6139","6191","5536","3533","8358","4958","3515","2354","6515",
       "3715","3081","1560","3711","3211","5347","1319","3044","3217","5274",
       "3008","2327","2357","2439","2884","3037","3045","3583","8996","8299"
     ];
+    "大型權值股": [
+      "2330","2317","2454","2308","3008"
+    ],
+    "中小成長股": [
+      "6669","3653","3665","5274","3037"
+    ],
+    "飇股": [
+      "8996","8299","3583","8358","8210"
+    ],
+    "台股當日加權指數（期貨5分K）": [
+      "8996"
+    ],
+  };
+    
+  function initStockPoolSelect() {
+    const sel = U.el("stockPoolSelect");
+    sel.innerHTML = "";
 
-    const stock = stockList[Math.floor(Math.random() * stockList.length)];
+    Object.keys(STOCK_POOLS).forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  }
+  
+  function loadCSV() {
+
+    // 🔄 重置遊戲狀態（非常重要，給 restart 用）
+    cash = INITIAL_CASH;
+    position = 0;
+    lots = [];
+    trades = [];
+    realizedList = [];
+    signalVisible = false;
+    maVisible = false;
+
+    const poolName = U.el("stockPoolSelect").value;
+    const pool = STOCK_POOLS[poolName];
+
+    if (!pool || !pool.length) {
+      alert("此清單沒有股票");
+      return;
+    }
+
+    const stock = pool[Math.floor(Math.random() * pool.length)];
     global.__currentStock = stock;
+	U.el("feedback").innerText = "";
+
+//    const stockList = [
+//      "2330","2317","6669","1475","2368","3665","2308","2345","6223","3653",
+//      "6274","6805","2449","2317","8210","2454","2059","3231","1303","3661",
+//      "6510","6139","6191","5536","3533","8358","4958","3515","2354","6515",
+//      "3715","3081","1560","3711","3211","5347","1319","3044","3217","5274",
+//      "3008","2327","2357","2439","2884","3037","3045","3583","8996","8299"
+//    ];
+
+//    const stock = stockList[Math.floor(Math.random() * stockList.length)];
+//    global.__currentStock = stock;
 
     U.el("stockName").innerText = ""; // 一開始隱藏
+	U.el("feedback").innerText = "";  // 一開始隱藏
 
     fetch(`data/${stock}.csv`)
       .then(r => r.text())
@@ -394,6 +452,11 @@
   // UI 綁定
   // ----------------------------------------------------------
   function bindEvents() {
+	//loadCSV();
+    U.el("loadGame").onclick = () => {
+      loadCSV();
+    };
+  
     U.el("buy").onclick = doBuy;
     U.el("sell").onclick = doSell;
     U.el("hold").onclick = doHold;
@@ -426,7 +489,7 @@
 
     U.el("indicatorSelect").onchange = updateDisplays;
   }
-
-  loadCSV();
+  
+  initStockPoolSelect();
 
 })(window);
