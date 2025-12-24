@@ -28,13 +28,26 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run script
-        run: python fetch_txf_5m_daily.py
+        run: |
+          python fetch_981A_year_data.py
+          python fetch_2023_highest_year_data.py
+          python fetch_2024_highest_year_data.py
+          python fetch_2025_highest_year_data.py
+          python fetch_big_year_data.py
+          python fetch_small_year_data.py
+          python fetch_txf_5m_daily.py
 
       - name: Commit and Push changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          # 確保路徑正確
-          git add stock_train/data_txf_5m_daily/txf_5m_daily.csv || echo "No files to add"
-          git commit -m "📈 Auto update TX data: $(date +'%Y-%m-%d')" || exit 0
-          git push
+          # 1. 強制加入 stock_train 資料夾下的所有變動 (包含子資料夾與新檔案)
+          git add stock_train/\*.csv
+          
+          # 2. 檢查是否有東西可以 commit (避免因為沒資料更新而報錯)
+          if git diff --cached --quiet; then
+            echo "沒有偵測到任何 CSV 檔案變動，跳過提交。"
+          else
+            git commit -m "📈 自動更新數據庫: $(date +'%Y-%m-%d %H:%M')"
+            git push
+          fi
