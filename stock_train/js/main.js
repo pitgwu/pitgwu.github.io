@@ -26,14 +26,29 @@
 
   let signalVisible = false;
   let maVisible = false;
+  
+  let tradeMode = "stock"; // "stock" | "future"
+
+  const FUTURE_SPEC = {
+    margin: 338000,
+    pointValue: 200
+  };
 
   // ----------------------------------------------------------
   // 1️⃣ 計算「總未實現損益」
   // ----------------------------------------------------------
   function calcUnrealTotal(currentPrice) {
-    return lots.reduce((sum, lot) => {
-      return sum + (currentPrice - lot.price) * lot.qty;
-    }, 0);
+    // 期貨
+    if (tradeMode === "future") {
+      return lots.reduce((sum, lot) => {
+	    return sum + (currentPrice - lot.price) * FUTURE_SPEC.pointValue * lot.qty;
+      }, 0);
+	}
+
+	// 股票
+	return lots.reduce((sum, lot) => {
+	  return sum + (currentPrice - lot.price) * lot.qty;
+	}, 0);
   }
 
   // ----------------------------------------------------------
@@ -75,8 +90,9 @@
     "今日台指期（5分K）": {
 	  folder: "data_txf_5m_daily",
 	  stocks: [
-        "6669"
-      ]
+        "txf_5m_daily"
+      ],
+	  mode: "future"
 	}
   };
     
@@ -118,6 +134,20 @@
     if (!pool) {
       alert("找不到股票清單設定");
       return;
+    }
+	
+	tradeMode = pool.mode || "stock";
+    console.log("交易模式:", tradeMode);
+
+    if (tradeMode === "future") {
+      U.el("shareInput").step = 1;
+      U.el("shareInput").value = 1;
+      U.el("assetStats").insertAdjacentHTML(
+      "afterbegin",
+      `<div style="color:#c00">
+        台指期：1口保證金 338,000｜1點 = 200 元
+       </div>`
+      );
     }
 
     const { folder, stocks } = pool;
@@ -225,16 +255,18 @@
   // ----------------------------------------------------------
   function updateStats() {
     const price = data[currentIndex].close;
-    const holdingValue = position * price;
+    const holdingValue = 0;
+	if (tradeMode === "stock") {
+      holdingValue = position * price;
+    }
     const unreal = calcUnrealTotal(price);
     const realized = realizedList.reduce((s, r) => s + r.realized, 0);
-    const total = cash + holdingValue;
-
-    const roi = (((total / INITIAL_CASH) - 1) * 100).toFixed(2);
+    const total = cash + unreal + holdingValue;
+    const roi = (((total / INITIAL_CASH) - 1) * 100).toFixed(2);   
 
     U.el("cash").innerText = U.formatNumber(cash);
     U.el("position").innerText = position;
-    U.el("holdingValue").innerText = U.formatNumber(holdingValue);
+    U.el("holdingValue").innerText = tradeMode === "future" ? "—" : U.formatNumber(holdingValue);
     U.el("totalAsset").innerText = U.formatNumber(total);
     U.el("roi").innerText = roi;
 
@@ -310,7 +342,6 @@
     }
   }
 
-
   function refreshTradeUI() {
     updateStats();
     updateTradeLog();
@@ -324,21 +355,35 @@
     const price = data[currentIndex].close;
     const cost = qty * price;
  
-    // 🔒 現金不足檢查
-    if (cost > cash) {
-      alert("⚠️ 現金不足，無法完成買進");
-      return;
-    }
+    if (tradeMode === "future") {
+		const requiredMargin = qty * FUTURE_SPEC.margin;
 
-    lots.push({
-      qty,
-      price,
-      date: data[currentIndex].time
-    });
+        // 🔒 現金不足檢查
+		if (requiredMargin > cash) {
+		  alert("⚠️ 保證金不足，無法開倉");
+		  return;
+		}
 
-    cash -= cost;
-    position += qty;
+		lots.push({ qty, price, date: data[currentIndex].time });
 
+		// ⚠️ 期貨只佔用保證金
+		cash -= requiredMargin;
+		position += qty;
+
+	} else {
+	    // ===== 股票原邏輯 =====
+		// 🔒 現金不足檢查
+		const cost = qty * price;
+		if (cost > cash) {
+		  alert("⚠️ 現金不足");
+		  return;
+		}
+
+		lots.push({ qty, price, date: data[currentIndex].time });
+		cash -= cost;
+		position += qty;
+	} 
+ 
     trades.push({
       type: "buy",
       qty,
@@ -359,29 +404,56 @@
       return;
     }
 
-    const sellQty = Math.min(qty, position);
-    const price = data[currentIndex].close;
+	if (tradeMode === "future") {
+	  const sellQty = Math.min(qty, position);
+	  if (sellQty <= 0) return;
 
-    let remain = sellQty;
-    let realized = 0;
+	  const price = data[currentIndex].close;
+	  let realized = 0;
 
-    while (remain > 0 && lots.length) {
-      const lot = lots[0];
-      const use = Math.min(lot.qty, remain);
-      realized += (price - lot.price) * use;
-      lot.qty -= use;
-      remain -= use;
-      if (lot.qty === 0) lots.shift();
-    }
+	  while (sellQty > 0 && lots.length) {
+		const lot = lots[0];
+		const use = Math.min(lot.qty, sellQty);
 
-    cash += sellQty * price;
-    position -= sellQty;
+		realized += (price - lot.price) * FUTURE_SPEC.pointValue * use;
 
-    realizedList.push({
-      qty: sellQty,
-      realized,
-      date: data[currentIndex].time
-    });
+		lot.qty -= use;
+		if (lot.qty === 0) lots.shift();
+		sellQty -= use;
+	  }
+	
+	  cash += realized + (sellQty * FUTURE_SPEC.margin);
+	  position -= sellQty;
+
+	  realizedList.push({ realized, date: data[currentIndex].time });
+	  
+    } else {
+		
+      // ===== 股票原邏輯 =====
+	  const sellQty = Math.min(qty, position);
+	  const price = data[currentIndex].close;
+
+	  let remain = sellQty;
+	  let realized = 0;
+
+	  while (remain > 0 && lots.length) {
+	    const lot = lots[0];
+	    const use = Math.min(lot.qty, remain);
+	    realized += (price - lot.price) * use;
+	    lot.qty -= use;
+	    remain -= use;
+	    if (lot.qty === 0) lots.shift();
+	  }
+
+	  cash += sellQty * price;
+	  position -= sellQty;
+
+	  realizedList.push({
+	    qty: sellQty,
+		realized,
+		date: data[currentIndex].time
+	  });
+	}
 
     trades.push({
       type: "sell",
