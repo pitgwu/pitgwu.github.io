@@ -1,16 +1,10 @@
 name: 每日台股盤後資料更新
 
-# 設定觸發條件
 on:
   schedule:
-    # 說明:
-    # 分鐘: 0, 小時: 6 (UTC) = 台灣 14:00
-    # 週一到週五
     - cron: '0 6 * * 1-5'
-  # 允許手動從 Actions 頁面觸發
   workflow_dispatch:
-  
-# ⚠️ 重要：設定權限，允許 Actions 寫入 Repo
+
 permissions:
   contents: write
 
@@ -19,40 +13,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 下載程式碼
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 設定 Python 環境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10' # 修正：升級到 3.10 以支援 yfinance
           cache: 'pip'
 
-      # 3. 安裝依賴
       - name: Install dependencies
         run: |
-          # 這裡加上 pandas requests 確保基本依賴存在，避免 requirements.txt 遺失導致錯誤
-          pip install pandas requests
+          pip install yfinance pandas pytz
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # 4. 執行 Python 腳本
       - name: Run script
         run: python fetch_txf_5m_daily.py
-      
-      # 5-8. 提交與推送 (這就是原本報錯的地方，現在修復了)
-      - name: Commit and Push
+
+      - name: Commit and Push changes
         run: |
-          # 設定 Git 使用者
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          # 加入檔案 (注意：請確認你的 python 腳本生成的檔案路徑真的是這裡)
-          git add stock_train/data_txf_5m_daily/txf_5m_daily.csv
-          
-          # 提交 (使用 %F 簡化日期格式)
-          git commit -m "📈 Auto update TX data: $(date +%F)" || exit 0
-          
-          # 推送
+          # 確保路徑正確
+          git add stock_train/data_txf_5m_daily/txf_5m_daily.csv || echo "No files to add"
+          git commit -m "📈 Auto update TX data: $(date +'%Y-%m-%d')" || exit 0
           git push
