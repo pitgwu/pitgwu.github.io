@@ -1,3 +1,27 @@
+const olafQuotes = {
+    bullish: [
+        "這波漲勢就像夏天一樣溫暖！☀️",
+        "有些人值得為他融化，這檔股票值得為它進場！⛄",
+        "我看見了陽光、夏天，還有上漲的目標價！",
+        "嘿，看那根 K 線，它在對我笑耶！",
+        "我們要往上升了，就像被風吹散的雪花～❄️"
+    ],
+    bearish: [
+        "喔不，這檔股票需要一個溫暖的抱抱（止跌）。",
+        "我的腦袋掉下去了！就像這波跌勢一樣快。🥕",
+        "這裡感覺冷冰冰的，我們先躲進冰堡避難吧。",
+        "警惕！這看起來像是一個會讓人融化的陷阱。",
+        "看來我們需要一點魔法才能讓它停下來。✨"
+    ],
+    neutral: [
+        "它在那裡走來走去，就像我在找我的鼻子一樣。",
+        "我們就靜靜地看著，直到它決定要變成什麼樣子。",
+        "這是在做雪球嗎？滾來滾去的。⚪",
+        "耐心等待，驚喜總是在冰雪消融後出現！",
+        "我喜歡這平靜的感覺，雖然我更喜歡夏天。"
+    ]
+};
+
 // ==========================================
 // 1. 型態分類索引 (Category Index)
 // ==========================================
@@ -4848,6 +4872,17 @@ function loadPatternConfig() {
     calculateAndDraw();
 }
 
+// 假設你原本的邏輯中 category 是目前的型態分類 ('bullish', 'bearish', 'neutral')
+function updateOlafQuote(category) {
+    const quotes = olafQuotes[category] || olafQuotes['neutral'];
+    const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+    
+    const textElement = document.getElementById('olaf-text');
+    if (textElement) {
+        textElement.innerText = randomQuote;
+    }
+}
+
 function calculateAndDraw() {
     const patternId = document.getElementById('patternSelect').value;
     const pattern = patternsDB[patternId];
@@ -4871,6 +4906,12 @@ function calculateAndDraw() {
     document.getElementById('directionDisplay').innerText = dirText;
 
     renderChart(result, pattern.type);
+	
+	// 呼叫雪寶語錄函數
+    // 假設你用來存放目前分類的變數名稱是 currentCategory
+    // 如果你的變數名稱不同，請替換它（例如：document.getElementById('categorySelect').value）
+    const selectedCategory = document.getElementById('categorySelect').value;
+    updateOlafQuote(selectedCategory);
 }
 
 function renderChart(result, type) {
