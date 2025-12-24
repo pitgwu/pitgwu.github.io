@@ -1,107 +1,89 @@
-import requests
+import yfinance as yf
 import pandas as pd
 import os
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
+import pytz
 
 # --- 設定區 ---
-OUT_DIR = "stock_train/data_txf_5m_daily"  # 資料夾名稱
+OUT_DIR = "stock_train/data_txf_5m_daily"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# FinMind API 設定
-FINMIND_KLINE_API = "https://api.finmindtrade.com/api/v4/kline"
-TARGET_ID = "TX"  # 台指期代號
-START_DATE = "2025-01-01" # 開始日期
-# 結束日期設為今天 (避免抓取未來的空資料)
-END_DATE = datetime.now().strftime("%Y-%m-%d") 
+# 標的：加權指數
+SYMBOL = "^TWII" 
 
-# 如果有 FinMind Token 請填入，沒有則填 None (大量抓取建議要有)
-API_TOKEN = None 
+def fetch_today_5m():
+    # 取得台灣今天的日期字串 (例如: 2025-12-22)
+    tw_tz = pytz.timezone("Asia/Taipei")
+    today_date = datetime.now(tw_tz).date()
+    today_str = today_date.strftime("%Y-%m-%d")
 
-def fetch_one_day_5m(date_str):
-    """
-    抓取指定「單日」的 5分K 資料
-    """
-    params = {
-        "dataset": "TaiwanFuturesPrice",
-        "data_id": TARGET_ID,
-        "start_date": date_str,
-        "end_date": date_str, # 起始與結束同一天
-        "per": "5m",          # 指定週期 5分鐘
-    }
-    
-    headers = {}
-    if API_TOKEN:
-        headers["Authorization"] = f"Bearer {API_TOKEN}"
+    print(f"🚀 正在檢查 {SYMBOL} 今日 ({today_str}) 的 5分K 資料...")
 
     try:
-        r = requests.get(FINMIND_KLINE_API, params=params, headers=headers)
-        data = r.json()
-    except Exception as e:
-        print(f"❌ {date_str} 請求失敗: {e}")
-        return None
-
-    # 檢查是否有資料 (假日或休市會回傳空list)
-    if data.get("msg") != "success" or len(data.get("data", [])) == 0:
-        return None
-
-    df = pd.DataFrame(data["data"])
-    
-    # 欄位重新命名與整理
-    rename_map = {
-        "date": "datetime",
-        "open": "open",
-        "max": "high",
-        "min": "low",
-        "close": "close",
-        "Trading_Volume": "volume"
-    }
-    df = df.rename(columns=rename_map)
-    
-    # 防呆：只留存在的欄位
-    cols = ["datetime", "open", "high", "low", "close", "volume"]
-    existing_cols = [c for c in cols if c in df.columns]
-    df = df[existing_cols]
-    
-    return df
-
-def main():
-    print(f"🚀 開始抓取 {TARGET_ID} 日資料 ({START_DATE} ~ {END_DATE})...")
-    
-    # 產生日期範圍序列
-    date_range = pd.date_range(start=START_DATE, end=END_DATE)
-    
-    count_saved = 0
-    count_skipped = 0
-
-    for dt in date_range:
-        date_str = dt.strftime("%Y-%m-%d")
+        # 下載最近 1 天的資料
+        # valid_ranges: 1d, 5d, 1mo... 
+        df = yf.download(
+            tickers=SYMBOL, 
+            period="1d",      # 只抓最近一天
+            interval="5m",    # 5分鐘頻率
+            progress=False, 
+            auto_adjust=False, 
+            multi_level_index=False
+        )
         
-        # 簡單過濾：如果是週末(週六=5, 週日=6)，API通常沒資料，但如果有夜盤週六凌晨可能會有資料
-        # 這裡我們還是都去問問 API 比較保險，反正沒資料會回傳 None
-        
-        df = fetch_one_day_5m(date_str)
-        
-        if df is None or df.empty:
-            # 沒資料通常代表是假日或休市
-            count_skipped += 1
-            # 為了畫面乾淨，假日就不印出來了，或是可以印個 "." 代表跳過
-            print(f".", end="", flush=True) 
+        if df.empty:
+            print(f"⚠ 無資料回傳 (可能尚未開盤或今日休市)。")
+            return
+
+        # --- 欄位清洗 (處理 yfinance 的格式問題) ---
+        # 1. 如果是 MultiIndex，只取第一層
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        # 2. 處理時區 -> 轉為台灣時間
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert("Asia/Taipei")
         else:
-            # 有資料 -> 存檔
-            out_path = f"{OUT_DIR}/txf_5m_daily.csv"
-            df.to_csv(out_path, index=False, encoding="utf-8-sig")
-            count_saved += 1
-            print(f"\n✔ 已儲存: {date_str} ({len(df)} 根K棒)")
+            df.index = df.index.tz_localize("UTC").tz_convert("Asia/Taipei")
 
-        # 重要：FinMind 若無 Token 限制約每分鐘 60 次，這裡設定延遲
-        time.sleep(1.0) 
+        # 3. 重置索引
+        df = df.reset_index()
+        
+        # 4. 欄位轉小寫並改名
+        df.columns = [str(c).lower() for c in df.columns]
+        df = df.rename(columns={"date": "datetime"})
+        
+        # 5. 只留需要的欄位
+        req_cols = ["datetime", "open", "high", "low", "close", "volume"]
+        final_cols = [c for c in req_cols if c in df.columns]
+        df = df[final_cols]
 
-    print("\n" + "-" * 30)
-    print(f"🎉 全部完成！")
-    print(f"📂 資料存放於: {OUT_DIR}/")
-    print(f"📊 共儲存天數: {count_saved}")
-    print(f"💤 跳過天數(假日/無資料): {count_skipped}")
+        # --- 嚴格篩選：確保資料屬於「今天」 ---
+        # 雖然 period='1d'，但如果早上8點跑，Yahoo 可能回傳昨天的資料
+        # 所以這裡要再過濾一次
+        df["date_check"] = df["datetime"].dt.date
+        df_today = df[df["date_check"] == today_date].copy()
+        
+        # 移除輔助欄位
+        df_today = df_today.drop(columns=["date_check"])
+
+        if df_today.empty:
+            print(f"⚠ 下載成功，但資料日期不是今天 ({today_str})。可能是昨日資料或尚未開盤。")
+            # 如果你想看它是哪一天的，可以打開下面這行：
+            # print(f"   (抓到的資料日期是: {df['datetime'].dt.date.iloc[0]})")
+            return
+
+        # --- 存檔 ---
+        out_path = f"{OUT_DIR}/txf_5m_daily.csv"
+        df_today.to_csv(out_path, index=False, encoding="utf-8-sig")
+        
+        print(f"✔ 成功儲存今日資料！")
+        print(f"📂 檔案路徑: {out_path}")
+        print(f"📊 資料筆數: {len(df_today)} 根K棒")
+        print(f"🕒 最後一筆時間: {df_today.iloc[-1]['datetime']}")
+
+    except Exception as e:
+        print(f"❌ 發生錯誤: {e}")
 
 if __name__ == "__main__":
-    main()
+    fetch_today_5m()
