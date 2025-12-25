@@ -176,12 +176,22 @@
       .then(r => r.text())
       .then(text => {
         const lines = text.split("\n").slice(1);
+        let timeValue;
+
+        if (tradeMode === "future") {
+          // 假設 c[0] = "2024-03-15 09:05"
+          timeValue = Math.floor(new Date(c[0]).getTime() / 1000);
+        } else {
+          // 股票維持 YYYY-MM-DD
+          timeValue = c[0];
+        }
+		
         data = lines
           .filter(l => l.trim())
           .map(l => {
             const c = l.split(",");
             return {
-              time: c[0],  // YYYY-MM-DD
+              time: timeValue,
               open: +c[1],
               high: +c[2],
               low: +c[3],
@@ -199,7 +209,10 @@
         //  startIdx = 0;
         //}
 		// ⭐ 起始交易日 = 第22根K棒
-		let startIdx = 22
+		let startIdx = 
+		  tradeMode === "future"
+		    ? Math.max(50, Math.floor(data.length * 0.1))
+		    : 22;
 
         // ⭐ 交易日就是這一天
         currentIndex = startIdx;
