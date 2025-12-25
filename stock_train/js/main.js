@@ -186,9 +186,22 @@
 			let timeValue;
 
 			if (tradeMode === "future") {
-			  const t = new Date(c[0]).getTime();
-			  if (!Number.isFinite(t)) return null;   // ❌ 非法時間直接丟掉
-			  timeValue = Math.floor(t / 1000);
+			  //const t = new Date(c[0]).getTime();
+			  //if (!Number.isFinite(t)) return null;   // ❌ 非法時間直接丟掉
+			  //timeValue = Math.floor(t / 1000);
+			  
+			  // c[0] = "2024-03-15 09:00"
+              const [datePart, timePart] = c[0].split(" ");
+              const [y, m, d] = datePart.split("-").map(Number);
+              const [hh, mm] = timePart.split(":").map(Number);
+
+              timeValue = {
+                year: y,
+                month: m,
+                day: d,
+                hour: hh,
+                minute: mm
+              };
 			} else {
 			  if (!c[0]) return null;
 			  timeValue = c[0];
