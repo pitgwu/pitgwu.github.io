@@ -191,14 +191,11 @@
 			  const [y, m, d] = datePart.split("-").map(Number);
 			  const [hh, mm] = timePart.split(":").map(Number);
 
-			  // ✅ 正確：用「物件時間」，不是 timestamp
-			  timeValue = {
-				year: y,
-				month: m,
-				day: d,
-				hour: hh,
-				minute: mm
-			  };
+			  // ⭐ 台灣時間 → 轉成 UTC timestamp
+			  // 台灣 = UTC+8 → 減 8 小時
+			  const utcMillis = Date.UTC(y, m - 1, d, hh - 8, mm);
+
+			  timeValue = Math.floor(utcMillis / 1000);
 			} else {
 			  if (!c[0]) return null;
 			  timeValue = c[0];
