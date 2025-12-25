@@ -39,13 +39,14 @@
       leftPriceScale:  { visible: false },
 
       timeScale: {
-        timeVisible: true,
-        barSpacing: 8,
-        rightBarStaysOnScroll: true,
-        scrollEnabled: false,
-        zoomEnabled: false,
+        timeVisible: true,          // ✅ 盤中顯示 HH:mm
+        secondsVisible: false,
+        barSpacing: 6,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        rightBarStaysOnScroll: true,   // ✅ 關鍵：不要顯示盤前 / 盤後空白
       },
-
+	  
       handleScroll: false,
       handleScale: false,
     });
@@ -309,6 +310,7 @@
     }
 
     // ✅ 每次 update 都 setVisibleRange（toggle 時 shown.length 不變，但 series/scale 變了）
+    // ✅ 關鍵：強制只顯示你給的 5 分 K（09:00 起）
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
