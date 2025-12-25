@@ -191,10 +191,9 @@
 			  const [y, m, d] = datePart.split("-").map(Number);
 			  const [hh, mm] = timePart.split(":").map(Number);
 
-			  // ⭐ 台灣時間 → 轉成 UTC timestamp
-			  // 台灣 = UTC+8 → 減 8 小時
-			  const utcMillis = Date.UTC(y, m - 1, d, hh - 8, mm);
-
+			  // ✅ 關鍵：不要 -8
+			  // 讓 chart(UTC顯示) 直接顯示 09:00
+			  const utcMillis = Date.UTC(y, m - 1, d, hh, mm);
 			  timeValue = Math.floor(utcMillis / 1000);
 			} else {
 			  if (!c[0]) return null;
