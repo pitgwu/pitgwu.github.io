@@ -178,26 +178,32 @@
         const lines = text.split("\n").slice(1);
 
         data = lines
-          .filter(l => l.trim())
+          .map(l => l.trim())
+          .filter(l => l) // 移除空行
           .map(l => {
-            const c = l.split(",");
-			let timeValue;
-		    if (tradeMode === "future") {
-              // 假設 c[0] = "2024-03-15 09:05"
-              timeValue = Math.floor(new Date(c[0]).getTime() / 1000);
-            } else {
-              // 股票維持 YYYY-MM-DD
-              timeValue = c[0];
-            }
-            return {
-              time: timeValue,
-              open: +c[1],
-              high: +c[2],
-              low: +c[3],
-              close: +c[4],
-              volume: +c[5]
-            };
-          });
+          const c = l.split(",");
+
+          // ✅ 防呆：欄位不足直接丟棄
+          if (c.length < 6) return null;
+
+          let timeValue;
+          if (tradeMode === "future") {
+            const t = new Date(c[0]);
+            if (isNaN(t.getTime())) return null; // 時間格式錯誤
+            timeValue = Math.floor(t.getTime() / 1000);
+          } else {
+            timeValue = c[0];
+          }
+          return {
+            time: timeValue,
+            open: Number(c[1]),
+            high: Number(c[2]),
+            low: Number(c[3]),
+            close: Number(c[4]),
+            volume: Number(c[5])
+          };
+        })
+        .filter(Boolean); // 把 null 清掉
 
         if (!data.length) return alert("CSV 空白");
 
