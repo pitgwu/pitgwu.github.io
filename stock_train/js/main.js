@@ -139,14 +139,17 @@
 	tradeMode = pool.mode || "stock";
     console.log("交易模式:", tradeMode);
 
+    const statBox = U.el("assetStats");
     if (tradeMode === "future") {
       U.el("shareInput").step = 1;
       U.el("shareInput").value = 1;
-      U.el("assetStats").insertAdjacentHTML(
-      "afterbegin",
-      `<div style="color:#c00">
-        台指期：1口保證金 338,000｜1點 = 200 元
-       </div>`
+    }
+    if (!statBox.querySelector(".future-hint")) {
+      statBox.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="future-hint" style="color:#c00">
+          台指期：1口保證金 338,000｜1點 = 200 元
+         </div>`
       );
     }
 
@@ -255,7 +258,7 @@
   // ----------------------------------------------------------
   function updateStats() {
     const price = data[currentIndex].close;
-    const holdingValue = 0;
+    let holdingValue = 0;
 	if (tradeMode === "stock") {
       holdingValue = position * price;
     }
@@ -309,7 +312,10 @@
     const price = data[currentIndex].close;
 
     lots.forEach(l => {
-      const u = (price - l.price) * l.qty;
+      const u =
+        tradeMode === "future"
+          ? (price - l.price) * FUTURE_SPEC.pointValue * l.qty
+          : (price - l.price) * l.qty;
       unrealTotal += u;
       ul.innerHTML += `<li>${l.date} ${l.qty} 股 @ ${l.price} → 未實現 ${U.formatNumber(u)} 元</li>`;
     });
@@ -405,9 +411,10 @@
     }
 
 	if (tradeMode === "future") {
-	  const sellQty = Math.min(qty, position);
+	  let sellQty = Math.min(qty, position);
 	  if (sellQty <= 0) return;
-
+	  
+	  const originalQty = sellQty; // 用來回補保證金
 	  const price = data[currentIndex].close;
 	  let realized = 0;
 
@@ -422,10 +429,14 @@
 		sellQty -= use;
 	  }
 	
-	  cash += realized + (sellQty * FUTURE_SPEC.margin);
-	  position -= sellQty;
+	  cash += realized + (originalQty * FUTURE_SPEC.margin);
+      position -= originalQty;
 
-	  realizedList.push({ realized, date: data[currentIndex].time });
+      realizedList.push({
+        qty: originalQty,
+        realized,
+        date: data[currentIndex].time
+      });
 	  
     } else {
 		
