@@ -143,14 +143,14 @@
     if (tradeMode === "future") {
       U.el("shareInput").step = 1;
       U.el("shareInput").value = 1;
-    }
-    if (!statBox.querySelector(".future-hint")) {
-      statBox.insertAdjacentHTML(
-        "afterbegin",
-        `<div class="future-hint" style="color:#c00">
-          台指期：1口保證金 338,000｜1點 = 200 元
-         </div>`
-      );
+	  if (!statBox.querySelector(".future-hint")) {
+        statBox.insertAdjacentHTML(
+          "afterbegin",
+          `<div class="future-hint" style="color:#c00">
+            台指期：1口保證金 338,000｜1點 = 200 元
+           </div>`
+        );
+      }
     }
 
     const { folder, stocks } = pool;
@@ -410,30 +410,33 @@
       return;
     }
 
+    const price = data[currentIndex].close;
+    let executedQty = 0;     // ⭐ 真正成交數量
+    let realized = 0;
+
 	if (tradeMode === "future") {
 	  let sellQty = Math.min(qty, position);
 	  if (sellQty <= 0) return;
 	  
 	  const originalQty = sellQty; // 用來回補保證金
-	  const price = data[currentIndex].close;
-	  let realized = 0;
+	  
+      while (sellQty > 0 && lots.length) {
+        const lot = lots[0];
+        const use = Math.min(lot.qty, sellQty);
 
-	  while (sellQty > 0 && lots.length) {
-		const lot = lots[0];
-		const use = Math.min(lot.qty, sellQty);
+        realized += (price - lot.price) * FUTURE_SPEC.pointValue * use;
 
-		realized += (price - lot.price) * FUTURE_SPEC.pointValue * use;
+        lot.qty -= use;
+        sellQty -= use;
+        if (lot.qty === 0) lots.shift();
+      }
 
-		lot.qty -= use;
-		if (lot.qty === 0) lots.shift();
-		sellQty -= use;
-	  }
-	
-	  cash += realized + (originalQty * FUTURE_SPEC.margin);
+      cash += realized + (originalQty * FUTURE_SPEC.margin);
       position -= originalQty;
+      executedQty = originalQty;
 
       realizedList.push({
-        qty: originalQty,
+        qty: executedQty,
         realized,
         date: data[currentIndex].time
       });
@@ -441,34 +444,35 @@
     } else {
 		
       // ===== 股票原邏輯 =====
-	  const sellQty = Math.min(qty, position);
-	  const price = data[currentIndex].close;
+      const sellQty = Math.min(qty, position);
+      let remain = sellQty;
 
-	  let remain = sellQty;
-	  let realized = 0;
+      while (remain > 0 && lots.length) {
+        const lot = lots[0];
+        const use = Math.min(lot.qty, remain);
 
-	  while (remain > 0 && lots.length) {
-	    const lot = lots[0];
-	    const use = Math.min(lot.qty, remain);
-	    realized += (price - lot.price) * use;
-	    lot.qty -= use;
-	    remain -= use;
-	    if (lot.qty === 0) lots.shift();
-	  }
+        realized += (price - lot.price) * use;
 
-	  cash += sellQty * price;
-	  position -= sellQty;
+        lot.qty -= use;
+        remain -= use;
+        if (lot.qty === 0) lots.shift();
+      }
 
-	  realizedList.push({
-	    qty: sellQty,
-		realized,
-		date: data[currentIndex].time
-	  });
+      cash += sellQty * price;
+      position -= sellQty;
+      executedQty = sellQty;
+
+      realizedList.push({
+        qty: executedQty,
+        realized,
+        date: data[currentIndex].time
+      });
 	}
 
+    // ✅ 交易紀錄「只用 executedQty」
     trades.push({
       type: "sell",
-      qty: sellQty,
+      qty: executedQty,
       price,
       date: data[currentIndex].time
     });
