@@ -177,33 +177,33 @@
       .then(text => {
         const lines = text.split("\n").slice(1);
 
-        data = lines
-          .map(l => l.trim())
-          .filter(l => l) // 移除空行
-          .map(l => {
-          const c = l.split(",");
+		data = lines
+		  .map(l => l.trim())
+		  .filter(l => l)   // ✅ 先濾掉空行
+		  .map(l => {
+			const c = l.split(",");
 
-          // ✅ 防呆：欄位不足直接丟棄
-          if (c.length < 6) return null;
+			let timeValue;
 
-          let timeValue;
-          if (tradeMode === "future") {
-            const t = new Date(c[0]);
-            if (isNaN(t.getTime())) return null; // 時間格式錯誤
-            timeValue = Math.floor(t.getTime() / 1000);
-          } else {
-            timeValue = c[0];
-          }
-          return {
-            time: timeValue,
-            open: Number(c[1]),
-            high: Number(c[2]),
-            low: Number(c[3]),
-            close: Number(c[4]),
-            volume: Number(c[5])
-          };
-        })
-        .filter(Boolean); // 把 null 清掉
+			if (tradeMode === "future") {
+			  const t = new Date(c[0]).getTime();
+			  if (!Number.isFinite(t)) return null;   // ❌ 非法時間直接丟掉
+			  timeValue = Math.floor(t / 1000);
+			} else {
+			  if (!c[0]) return null;
+			  timeValue = c[0];
+			}
+
+			return {
+			  time: timeValue,
+			  open: +c[1],
+			  high: +c[2],
+			  low: +c[3],
+			  close: +c[4],
+			  volume: +c[5]
+			};
+		  })
+		  .filter(Boolean);   // ✅ 最後再清一次
 
         if (!data.length) return alert("CSV 空白");
 
@@ -214,10 +214,13 @@
         //  startIdx = 0;
         //}
 		// ⭐ 起始交易日 = 第22根K棒
-		let startIdx = 
-		  tradeMode === "future"
-		    ? Math.max(50, Math.floor(data.length * 0.1))
-		    : 22;
+		let startIdx;
+
+		if (tradeMode === "future") {
+		  startIdx = Math.min(10, data.length - 1); // ✅ 從 09:50 左右開始
+		} else {
+		  startIdx = 22;
+		}
 
         // ⭐ 交易日就是這一天
         currentIndex = startIdx;

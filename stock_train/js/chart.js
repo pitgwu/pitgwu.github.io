@@ -129,6 +129,8 @@
   }
 
   function update(shown, indicators, opt) {
+	shown = shown.filter(c => c.time != null);
+    if (shown.length < 2) return;
     if (!shown || !shown.length) return;
 
     const visibleBars = opt.visibleBars || 40;
