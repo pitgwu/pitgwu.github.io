@@ -7,12 +7,14 @@ import webbrowser
 
 # 設定資料來源目錄
 DATA_DIR = 'data'
-# 設定報表輸出目錄 (你原本想存的地方)
+# 設定報表輸出目錄
 REPORT_DIR = 'performance'
 
 def generate_report():
-    # 1. 讀取當月最新的 CSV
+    # 1. 取得當前年月 (例如: 2025_12)
     current_month = datetime.datetime.now().strftime('%Y_%m')
+    
+    # 讀取對應月份的 CSV
     filename = os.path.join(DATA_DIR, f'limit_up_{current_month}.csv')
     
     if not os.path.exists(filename):
@@ -30,7 +32,7 @@ def generate_report():
         print("⚠️ 無資料可分析。")
         return
 
-    # --- 去除重複邏輯 ---
+    # --- 去除重複邏輯 (只留最早進場的那一次) ---
     df = df.sort_values(by='Date', ascending=True)
     df = df.drop_duplicates(subset=['Code'], keep='first')
 
@@ -143,12 +145,14 @@ def generate_report():
         gen_time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     )
     
-    # --- [關鍵修正] 建立資料夾 ---
+    # 檢查並建立目錄
     if not os.path.exists(REPORT_DIR):
         print(f"📂 建立報表目錄: {REPORT_DIR}")
-        os.makedirs(REPORT_DIR) # 這裡會自動建立 performance 資料夾
+        os.makedirs(REPORT_DIR)
 
-    output_file = os.path.join(REPORT_DIR, 'performance_report.html')
+    # --- [修改點] 檔名加入年月 ---
+    output_filename = f'performance_report_{current_month}.html'
+    output_file = os.path.join(REPORT_DIR, output_filename)
     
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(final_html)
