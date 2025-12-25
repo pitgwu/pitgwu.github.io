@@ -192,8 +192,11 @@
 			  const [hh, mm] = timePart.split(":").map(Number);
 
 			  // ⭐ 關鍵：用 UTC 組時間（避免被減 8 小時）
-			  const utcMillis = Date.UTC(y, m - 1, d, hh - 8, mm);
-			  timeValue = Math.floor(utcMillis / 1000);
+			  //const utcMillis = Date.UTC(y, m - 1, d, hh - 8, mm);
+			  //timeValue = Math.floor(utcMillis / 1000);
+			  // ⭐ 正確：用本地時間（讓瀏覽器自己處理時區）
+			  const localMillis = new Date(y, m - 1, d, hh, mm).getTime();
+			  timeValue = Math.floor(localMillis / 1000);
 			} else {
 			  if (!c[0]) return null;
 			  timeValue = c[0];
