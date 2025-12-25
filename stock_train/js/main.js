@@ -186,22 +186,14 @@
 			let timeValue;
 
 			if (tradeMode === "future") {
-			  //const t = new Date(c[0]).getTime();
-			  //if (!Number.isFinite(t)) return null;   // ❌ 非法時間直接丟掉
-			  //timeValue = Math.floor(t / 1000);
-			  
 			  // c[0] = "2024-03-15 09:00"
-              const [datePart, timePart] = c[0].split(" ");
-              const [y, m, d] = datePart.split("-").map(Number);
-              const [hh, mm] = timePart.split(":").map(Number);
+			  const [datePart, timePart] = c[0].split(" ");
+			  const [y, m, d] = datePart.split("-").map(Number);
+			  const [hh, mm] = timePart.split(":").map(Number);
 
-              timeValue = {
-                year: y,
-                month: m,
-                day: d,
-                hour: hh,
-                minute: mm
-              };
+			  // ⭐ 關鍵：用 UTC 組時間（避免被減 8 小時）
+			  const utcMillis = Date.UTC(y, m - 1, d, hh - 8, mm);
+			  timeValue = Math.floor(utcMillis / 1000);
 			} else {
 			  if (!c[0]) return null;
 			  timeValue = c[0];
