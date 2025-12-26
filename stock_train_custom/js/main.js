@@ -134,8 +134,8 @@
 		customSel.innerHTML = "<option>Loading...</option>";
 		customSel.disabled = true;
 
-		// 加上 timestamp 防止瀏覽器快取舊的 list.txt
-		fetch(`data_custom/list.txt?v=${Date.now()}`)
+		// fetch list.txt
+		fetch(`data_custom/list.txt`)
 		  .then(r => {
 			if (!r.ok) throw new Error("找不到 list.txt");
 			return r.text();
