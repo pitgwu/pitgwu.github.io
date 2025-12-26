@@ -88,8 +88,8 @@
       ]
 	},
 	// ... (原本的清單保持不變) ...
-    "自選股 (My Watchlist)": {
-      folder: "data_custom", // 請建立這個資料夾
+    "自選股": {
+      folder: "data_custom",
       stocks: [],            // 這裡會由 localStorage 動態載入
       isCustom: true         // 標記這是自選
     },
@@ -121,85 +121,81 @@
     sel.selectedIndex = 0;
   }
   
-  function initCustomPanel() {
-	  const panel = U.el("customPanel");
-	  const select = U.el("stockPoolSelect");
-	  const input = U.el("newStockCode");
-	  const addBtn = U.el("addStockBtn");
-	  const listUl = U.el("customStockList");
-	  const copyBtn = U.el("copyListBtn");
+  // 新增自選股邏輯
+	function initCustomLogic() {
+	  const poolSel = U.el("stockPoolSelect");
+	  const customArea = U.el("customSelectArea");
+	  const customSel = U.el("customStockSelect");
+	  const msgBox = U.el("customMsg");
 
-	  // 從 localStorage 讀取舊資料
-	  let myStocks = JSON.parse(localStorage.getItem("my_watchlist") || "[]");
-	  
-	  // 更新 STOCK_POOLS 裡的資料
-	  STOCK_POOLS["自選股 (My Watchlist)"].stocks = myStocks;
+	  // 讀取 list.txt 並更新下拉選單
+	  function loadCustomListFromFile() {
+		msgBox.innerText = "讀取清單中...";
+		customSel.innerHTML = "<option>Loading...</option>";
+		customSel.disabled = true;
 
-	  function renderList() {
-		listUl.innerHTML = "";
-		STOCK_POOLS["自選股 (My Watchlist)"].stocks.forEach(code => {
-		  const li = document.createElement("li");
-		  li.className = "tag-item";
-		  li.innerHTML = `${code} <span class="tag-del" data-code="${code}">×</span>`;
-		  listUl.appendChild(li);
-		});
-		U.el("customListCount").innerText = STOCK_POOLS["自選股 (My Watchlist)"].stocks.length;
-		
-		// 同步存回 localStorage
-		localStorage.setItem("my_watchlist", JSON.stringify(STOCK_POOLS["自選股 (My Watchlist)"].stocks));
+		// 加上 timestamp 防止瀏覽器快取舊的 list.txt
+		fetch(`data_custom/list.txt?v=${Date.now()}`)
+		  .then(r => {
+			if (!r.ok) throw new Error("找不到 list.txt");
+			return r.text();
+		  })
+		  .then(text => {
+			// 解析文字檔：換行切割 -> 去除空白 -> 去除空行
+			const lines = text.split(/\r?\n/)
+							  .map(l => l.trim())
+							  .filter(l => l.length > 0);
+
+			customSel.innerHTML = "";
+			
+			if (lines.length === 0) {
+			  const opt = document.createElement("option");
+			  opt.text = "清單是空的";
+			  customSel.add(opt);
+			  msgBox.innerText = "請在 data_custom/list.txt 新增代號";
+			  return;
+			}
+
+			// 填入下拉選單
+			lines.forEach(code => {
+			  const opt = document.createElement("option");
+			  opt.value = code;
+			  opt.text = code;
+			  customSel.add(opt);
+			});
+
+			// 更新 STOCK_POOLS 裡的清單 (讓系統知道這些股票存在)
+			STOCK_POOLS["自選股 (My List)"].stocks = lines;
+
+			customSel.disabled = false;
+			msgBox.innerText = "";
+		  })
+		  .catch(err => {
+			console.error(err);
+			customSel.innerHTML = "<option>讀取失敗</option>";
+			msgBox.innerText = "請確認 data_custom/list.txt 存在";
+		  });
 	  }
 
-	  // 監聽：下拉選單改變
-	  select.addEventListener("change", () => {
-		const key = select.value;
+	  // 監聽模式切換
+	  poolSel.addEventListener("change", () => {
+		const key = poolSel.value;
 		if (STOCK_POOLS[key].isCustom) {
-		  panel.style.display = "block";
+		  customArea.style.display = "inline-block";
+		  // 切換過來時，自動讀取一次檔案
+		  loadCustomListFromFile();
 		} else {
-		  panel.style.display = "none";
+		  customArea.style.display = "none";
 		}
 	  });
 
-	  // 監聽：新增按鈕
-	  addBtn.onclick = () => {
-		const val = input.value.trim();
-		if (!val) return;
-		if (STOCK_POOLS["自選股 (My Watchlist)"].stocks.includes(val)) {
-		  alert("已經在清單內囉！");
-		  return;
-		}
-		STOCK_POOLS["自選股 (My Watchlist)"].stocks.push(val);
-		input.value = "";
-		renderList();
-	  };
-
-	  // 監聽：刪除按鈕 (事件委派)
-	  listUl.onclick = (e) => {
-		if (e.target.classList.contains("tag-del")) {
-		  const code = e.target.getAttribute("data-code");
-		  const arr = STOCK_POOLS["自選股 (My Watchlist)"].stocks;
-		  const idx = arr.indexOf(code);
-		  if (idx > -1) {
-			arr.splice(idx, 1);
-			renderList();
-		  }
-		}
-	  };
-	  
-	  // 監聽：複製清單 (方便貼到 Python)
-	  copyBtn.onclick = () => {
-		 const text = STOCK_POOLS["自選股 (My Watchlist)"].stocks.join(",");
-		 navigator.clipboard.writeText(text).then(()=>alert("已複製代號列表，請貼上至 Python 腳本更新資料"));
-	  };
-
-	  // 初次渲染
-	  renderList();
-	  
-	  // 如果預設選到自選股，要顯示面板
-	  if (STOCK_POOLS[select.value]?.isCustom) {
-		 panel.style.display = "block";
+	  // 初始化檢查
+	  if (STOCK_POOLS[poolSel.value]?.isCustom) {
+		  customArea.style.display = "inline-block";
+		  loadCustomListFromFile();
 	  }
-  }
-  
+	}
+    
   function loadCSV() {
 
     // 🔄 重置遊戲狀態（非常重要，給 restart 用）
@@ -238,15 +234,29 @@
       }
     }
 
-    const { folder, stocks } = pool;
+    if (pool.isCustom) {
+      // ⭐ 自選模式：直接讀取第二個下拉選單的值
+      const customSel = U.el("customStockSelect");
+      stock = customSel.value;
+      
+      // 防呆機制
+      if (!stock || stock === "Loading..." || stock === "讀取失敗" || stock === "清單是空的") {
+        alert("請先確認自選清單載入成功，並選擇一檔股票。");
+        return;
+      }
+    } else {
+      // 一般模式：隨機
+	  const { folder, stocks } = pool;
 
-    if (!stocks || !stocks.length) {
-      alert("此清單沒有股票");
-      return;
+      if (!stocks || !stocks.length) {
+        alert("此清單沒有股票");
+        return;
+      }
+
+      // 2️⃣ 隨機挑一檔股票
+      const stock = stocks[Math.floor(Math.random() * stocks.length)];
     }
 
-    // 2️⃣ 隨機挑一檔股票
-    const stock = stocks[Math.floor(Math.random() * stocks.length)];
     global.__currentStock = stock;
 
     // 3️⃣ 組出正確 CSV 路徑
@@ -719,7 +729,7 @@
   }
   
   initStockPoolSelect();
-  initCustomPanel(); // <--- 新增
+  initCustomLogic(); // 新增自選股邏輯
   bindEvents();   // ✅ 一開始就綁定按鈕
 
 })(window);
