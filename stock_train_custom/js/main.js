@@ -129,53 +129,64 @@
 	  const msgBox = U.el("customMsg");
 
 	  // 讀取 list.txt 並更新下拉選單
-	  function loadCustomListFromFile() {
-		msgBox.innerText = "讀取清單中...";
-		customSel.innerHTML = "<option>Loading...</option>";
-		customSel.disabled = true;
+		function loadCustomListFromFile() {
+			msgBox.innerText = "讀取 GitHub 清單中...";
+			customSel.innerHTML = "<option>Loading...</option>";
+			customSel.disabled = true;
 
-		// fetch list.txt
-		fetch(`data_custom/list.txt`)
-		  .then(r => {
-			if (!r.ok) throw new Error("找不到 list.txt");
-			return r.text();
-		  })
-		  .then(text => {
-			// 解析文字檔：換行切割 -> 去除空白 -> 去除空行
-			const lines = text.split(/\r?\n/)
-							  .map(l => l.trim())
-							  .filter(l => l.length > 0);
+			// ⭐ 修改處：使用你的 GitHub Pages 絕對路徑
+			// 我幫你修正了原本多打的一個斜線 (custom//data -> custom/data)
+			// 並且加上時間戳記 (?v=...) 避免瀏覽器快取到舊資料
+			const targetUrl = "https://pitgwu.github.io/stock_train_custom/data_custom/list.txt";
+			const fetchUrl = `${targetUrl}?v=${Date.now()}`;
 
-			customSel.innerHTML = "";
-			
-			if (lines.length === 0) {
-			  const opt = document.createElement("option");
-			  opt.text = "清單是空的";
-			  customSel.add(opt);
-			  msgBox.innerText = "請在 data_custom/list.txt 新增代號";
-			  return;
-			}
+			console.log("Fetching list from:", fetchUrl);
 
-			// 填入下拉選單
-			lines.forEach(code => {
-			  const opt = document.createElement("option");
-			  opt.value = code;
-			  opt.text = code;
-			  customSel.add(opt);
-			});
+			fetch(fetchUrl)
+			  .then(r => {
+				if (!r.ok) {
+					// 如果 GitHub 上還沒有這個檔案，會跳到 catch
+					throw new Error(`GitHub 讀取失敗 (${r.status})`); 
+				}
+				return r.text();
+			  })
+			  .then(text => {
+				// 解析文字檔邏輯不變
+				const lines = text.split(/\r?\n/)
+								  .map(l => l.trim())
+								  .filter(l => l.length > 0);
 
-			// 更新 STOCK_POOLS 裡的清單 (讓系統知道這些股票存在)
-			STOCK_POOLS["自選股 (My List)"].stocks = lines;
+				customSel.innerHTML = "";
+				
+				if (lines.length === 0) {
+				  const opt = document.createElement("option");
+				  opt.text = "GitHub 清單是空的";
+				  customSel.add(opt);
+				  msgBox.innerText = "請檢查 GitHub 上的 list.txt";
+				  return;
+				}
 
-			customSel.disabled = false;
-			msgBox.innerText = "";
-		  })
-		  .catch(err => {
-			console.error(err);
-			customSel.innerHTML = "<option>讀取失敗</option>";
-			msgBox.innerText = "請確認 data_custom/list.txt 存在";
-		  });
-	  }
+				// 填入下拉選單
+				lines.forEach(code => {
+				  const opt = document.createElement("option");
+				  opt.value = code;
+				  opt.text = code;
+				  customSel.add(opt);
+				});
+
+				// 更新 STOCK_POOLS
+				STOCK_POOLS["自選股 (My List)"].stocks = lines;
+
+				customSel.disabled = false;
+				msgBox.innerText = `已從 GitHub 載入 ${lines.length} 檔`;
+			  })
+			  .catch(err => {
+				console.error(err);
+				customSel.innerHTML = "<option>讀取失敗</option>";
+				msgBox.innerText = "無法讀取 GitHub 檔案 (請確認已 push)";
+				alert("讀取 GitHub 上的 list.txt 失敗！\n\n請確認：\n1. data_custom/list.txt 已經 git push 上傳成功。\n2. 你的 GitHub Pages 已經部署完成。");
+			  });
+		  }
 
 	  // 監聽模式切換
 	  poolSel.addEventListener("change", () => {
