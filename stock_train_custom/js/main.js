@@ -188,22 +188,27 @@
 			  });
 		  }
 
-	  // 監聽模式切換
+	  // ✅ 修正點 1：監聽模式切換，控制顯示/隱藏
 	  poolSel.addEventListener("change", () => {
-		const key = poolSel.value;
-		if (STOCK_POOLS[key].isCustom) {
-		  customArea.style.display = "inline-block";
-		  // 切換過來時，自動讀取一次檔案
-		  loadCustomListFromFile();
-		} else {
-		  customArea.style.display = "none";
-		}
+	    const key = poolSel.value;
+	    const pool = STOCK_POOLS[key];
+
+	    // 防呆：確認 pool 存在
+	    if (pool && pool.isCustom) {
+	      customArea.style.display = "inline-block"; // 顯示
+	      loadCustomListFromFile(); // 載入清單
+	    } else {
+  	      customArea.style.display = "none"; // 隱藏
+	    }
 	  });
 
-	  // 初始化檢查
-	  if (STOCK_POOLS[poolSel.value]?.isCustom) {
-		  customArea.style.display = "inline-block";
-		  loadCustomListFromFile();
+	  // ✅ 修正點 2：初始化時檢查 (針對重新整理網頁後，瀏覽器記住選項的情況)
+	  const currentKey = poolSel.value;
+	  if (STOCK_POOLS[currentKey]?.isCustom) {
+		customArea.style.display = "inline-block";
+		loadCustomListFromFile();
+	  } else {
+		customArea.style.display = "none";
 	  }
 	}
     
