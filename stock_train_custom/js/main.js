@@ -87,11 +87,11 @@
 		"6442","6640","6739","6949","8021","8210","8358","8374","8937"
       ]
 	},
-	// ... (原本的清單保持不變) ...
-    "自選股": {
-      folder: "data_custom",
-      stocks: [],            // 這裡會由 localStorage 動態載入
-      isCustom: true         // 標記這是自選
+	"自選股": { 
+      folder: "data_custom", 
+      // 👇 以後要加股票，就手動改這裡！例如 ["2330", "2603", "3231"]
+      stocks: ["2330", "2317""], 
+      isCustom: true 
     },
     "今日台指期（5分K）": {
 	  folder: "data_txf_5m_daily",
@@ -121,97 +121,58 @@
     sel.selectedIndex = 0;
   }
   
-  // 新增自選股邏輯
-	function initCustomLogic() {
-	  const poolSel = U.el("stockPoolSelect");
-	  const customArea = U.el("customSelectArea");
-	  const customSel = U.el("customStockSelect");
-	  const msgBox = U.el("customMsg");
+  function initCustomLogic() {
+    const poolSel = U.el("stockPoolSelect");
+    const customArea = U.el("customSelectArea");
+    const customSel = U.el("customStockSelect");
+    const msgBox = U.el("customMsg");
 
-	  // 讀取 list.txt 並更新下拉選單
-		function loadCustomListFromFile() {
-			msgBox.innerText = "讀取 GitHub 清單中...";
-			customSel.innerHTML = "<option>Loading...</option>";
-			customSel.disabled = true;
-
-			// ⭐ 修改處：使用你的 GitHub Pages 絕對路徑
-			// 我幫你修正了原本多打的一個斜線 (custom//data -> custom/data)
-			// 並且加上時間戳記 (?v=...) 避免瀏覽器快取到舊資料
-			const targetUrl = "https://pitgwu.github.io/stock_train_custom/data_custom/list.txt";
-			const fetchUrl = `${targetUrl}?v=${Date.now()}`;
-
-			console.log("Fetching list from:", fetchUrl);
-
-			fetch(fetchUrl)
-			  .then(r => {
-				if (!r.ok) {
-					// 如果 GitHub 上還沒有這個檔案，會跳到 catch
-					throw new Error(`GitHub 讀取失敗 (${r.status})`); 
-				}
-				return r.text();
-			  })
-			  .then(text => {
-				// 解析文字檔邏輯不變
-				const lines = text.split(/\r?\n/)
-								  .map(l => l.trim())
-								  .filter(l => l.length > 0);
-
-				customSel.innerHTML = "";
-				
-				if (lines.length === 0) {
-				  const opt = document.createElement("option");
-				  opt.text = "GitHub 清單是空的";
-				  customSel.add(opt);
-				  msgBox.innerText = "請檢查 GitHub 上的 list.txt";
-				  return;
-				}
-
-				// 填入下拉選單
-				lines.forEach(code => {
-				  const opt = document.createElement("option");
-				  opt.value = code;
-				  opt.text = code;
-				  customSel.add(opt);
-				});
-
-				// 更新 STOCK_POOLS
-				STOCK_POOLS["自選股 (My List)"].stocks = lines;
-
-				customSel.disabled = false;
-				msgBox.innerText = `已從 GitHub 載入 ${lines.length} 檔`;
-			  })
-			  .catch(err => {
-				console.error(err);
-				customSel.innerHTML = "<option>讀取失敗</option>";
-				msgBox.innerText = "無法讀取 GitHub 檔案 (請確認已 push)";
-				alert("讀取 GitHub 上的 list.txt 失敗！\n\n請確認：\n1. data_custom/list.txt 已經 git push 上傳成功。\n2. 你的 GitHub Pages 已經部署完成。");
-			  });
-		  }
-
-	  // ✅ 修正點 1：監聽模式切換，控制顯示/隱藏
-	  poolSel.addEventListener("change", () => {
-	    const key = poolSel.value;
-	    const pool = STOCK_POOLS[key];
-
-	    // 防呆：確認 pool 存在
-	    if (pool && pool.isCustom) {
-	      customArea.style.display = "inline-block"; // 顯示
-	      loadCustomListFromFile(); // 載入清單
-	    } else {
-  	      customArea.style.display = "none"; // 隱藏
-	    }
-	  });
-
-	  // ✅ 修正點 2：初始化時檢查 (針對重新整理網頁後，瀏覽器記住選項的情況)
-	  const currentKey = poolSel.value;
-	  if (STOCK_POOLS[currentKey]?.isCustom) {
-		customArea.style.display = "inline-block";
-		loadCustomListFromFile();
-	  } else {
-		customArea.style.display = "none";
-	  }
-	}
+    // 根據 STOCK_POOLS 裡的 stocks 陣列，更新第二個下拉選單
+    function renderCustomSelect() {
+      // 取得目前設定的自選股清單
+      const list = STOCK_POOLS["自選股 (My List)"].stocks;
     
+      customSel.innerHTML = ""; // 清空舊選項
+
+      if (!list || list.length === 0) {
+        customSel.innerHTML = "<option>請在 js/main.js 新增代號</option>";
+        return;
+      }
+
+      // 迴圈產生選項
+      list.forEach(code => {
+        const opt = document.createElement("option");
+        opt.value = code;
+        opt.textContent = code;
+        customSel.appendChild(opt);
+      });
+    
+      msgBox.innerText = `(共 ${list.length} 檔，請確認 CSV 已上傳)`;
+    }
+
+    // 監聽模式切換
+    poolSel.addEventListener("change", () => {
+      const key = poolSel.value;
+      const pool = STOCK_POOLS[key];
+
+      if (pool && pool.isCustom) {
+        customArea.style.display = "inline-block";
+        renderCustomSelect(); // 直接從 JS 變數讀取
+      } else {
+        customArea.style.display = "none";
+      }
+    });
+
+    // 初始化檢查 (避免重新整理後狀態跑掉)
+    const currentKey = poolSel.value;
+    if (STOCK_POOLS[currentKey]?.isCustom) {
+      customArea.style.display = "inline-block";
+      renderCustomSelect();
+    } else {
+      customArea.style.display = "none";
+    }
+  }
+  
   function loadCSV() {
 
     // 🔄 重置遊戲狀態（非常重要，給 restart 用）
@@ -255,14 +216,13 @@
       const customSel = U.el("customStockSelect");
       stock = customSel.value;
       
-      // 防呆機制
-      if (!stock || stock === "Loading..." || stock === "讀取失敗" || stock === "清單是空的") {
-        alert("請先確認自選清單載入成功，並選擇一檔股票。");
+      if (!stock || stock.includes("請在 js")) {
+        alert("請先在 main.js 的 STOCK_POOLS 新增股票代號");
         return;
       }
     } else {
-      // 一般模式：隨機
-	  const { folder, stocks } = pool;
+
+      const { folder, stocks } = pool;
 
       if (!stocks || !stocks.length) {
         alert("此清單沒有股票");
@@ -271,8 +231,7 @@
 
       // 2️⃣ 隨機挑一檔股票
       const stock = stocks[Math.floor(Math.random() * stocks.length)];
-    }
-
+	}
     global.__currentStock = stock;
 
     // 3️⃣ 組出正確 CSV 路徑
@@ -745,7 +704,7 @@
   }
   
   initStockPoolSelect();
-  initCustomLogic(); // 新增自選股邏輯
+  initCustomLogic();
   bindEvents();   // ✅ 一開始就綁定按鈕
 
 })(window);
