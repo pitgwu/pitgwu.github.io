@@ -109,22 +109,31 @@
     stratBullLine = chart.addLineSeries({ 
       color: '#ff0000', 
       lineWidth: 2, 
-      lineType: 1, // 1 = Step line
+      // lineType: 1,  <-- ❌ 移除這行 (不要階梯線)
+      // 預設就是 lineType: 0 (Simple Line)，它會直接連線，不會有垂直的轉折
       visible: false,
       priceScaleId: "right",
       // ⭐ 關鍵：告訴圖表「不要」參考這條線來縮放，以 K 線為主
-      autoscaleInfoProvider: () => null 
+      autoscaleInfoProvider: () => null  // 忽略縮放
+	  // ⭐ 新增：讓線條更乾淨，只顯示線本身
+      crosshairMarkerVisible: false, // 滑鼠移過去不要出現圓點
+      lastValueVisible: false,       // 不要顯示右側Y軸的標籤
+      priceLineVisible: false        // 不要顯示水平價格線
     });
   
     // 綠色壓力線 (階梯線)
     stratBearLine = chart.addLineSeries({ 
       color: '#00aa00', 
       lineWidth: 2, 
-      lineType: 1, // 1 = Step line
+      // lineType: 1,  <-- ❌ 移除這行 (不要階梯線)
+      // 預設就是 lineType: 0 (Simple Line)，它會直接連線，不會有垂直的轉折
       visible: false,
       priceScaleId: "right",
       // ⭐ 關鍵：告訴圖表「不要」參考這條線來縮放
-      autoscaleInfoProvider: () => null
+      autoscaleInfoProvider: () => null // 忽略縮放
+	  crosshairMarkerVisible: false, // 滑鼠移過去不要出現圓點
+      lastValueVisible: false,       // 不要顯示右側Y軸的標籤
+      priceLineVisible: false        // 不要顯示水平價格線
     });
 
     /* ===== 成交量 ===== */
