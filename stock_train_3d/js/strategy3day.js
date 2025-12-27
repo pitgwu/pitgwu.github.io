@@ -8,13 +8,13 @@
   // 演算法需求：今日收盤價 > 三日K棒(含今日)的高點
   // 這其實等於：今日收盤價 > 前兩日的高點 (因為若大於前兩日高點，且是紅K，通常就是三日最高)
   function getRefHigh(data, index) {
-    if (index < 2) return Infinity;
+    if (index < 2) return null; // 修正：回傳 null 而不是 Infinity
     // 取前兩日 (i-1, i-2) 的最高點做比較基準
     return Math.max(data[index - 1].high, data[index - 2].high);
   }
 
   function getRefLow(data, index) {
-    if (index < 2) return -Infinity;
+    if (index < 2) return null; // 修正：回傳 null 而不是 Infinity
     return Math.min(data[index - 1].low, data[index - 2].low);
   }
 

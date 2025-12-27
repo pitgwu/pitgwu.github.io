@@ -317,25 +317,18 @@
       wNeck.applyOptions({ visible:true });
     }
 
-    // 處理三日戰法資料更新
+    // ⭐ 處理三日戰法
     if (opt.strat3Day) {
-      // 合併標記：如果有其他的 markers (如買賣點)，這裡可能要合併
-      // 目前假設 strat3Day.markers 是主要的標記來源
-      const markers = opt.strat3Day.markers || [];
-      candle.setMarkers(markers);
-
-      setLineDataSafe(stratBullLine, opt.strat3Day.bullLine, true);
-      setLineDataSafe(stratBearLine, opt.strat3Day.bearLine, true);
+        // 合併標記
+        candle.setMarkers(opt.strat3Day.markers || []);
+        setLineDataSafe(stratBullLine, opt.strat3Day.bullLine, true);
+        setLineDataSafe(stratBearLine, opt.strat3Day.bearLine, true);
     } else {
-      // 關閉時隱藏
-      stratBullLine.applyOptions({ visible: false });
-      stratBearLine.applyOptions({ visible: false });
-    
-      // 如果沒有其他標記需求，就清空
-      // (如果你有實作買賣點標記，這裡要小心不要把買賣點清掉，
-      //  建議在 main.js 處理標記合併，或者這裡先簡單清空)
-      candle.setMarkers([]); 
-   }
+        // ⭐ 關鍵：關閉時要清空數據，否則 ghost data 會影響縮放
+        stratBullLine.setData([]); stratBullLine.applyOptions({ visible: false });
+        stratBearLine.setData([]); stratBearLine.applyOptions({ visible: false });
+        candle.setMarkers([]);
+    }
 
     // ===== 指標區 =====
     indAutoL1.setData([]); indAutoL2.setData([]);
