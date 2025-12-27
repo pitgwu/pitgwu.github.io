@@ -329,7 +329,7 @@
       indicatorType: (sel === "bb") ? null : sel,
       trendlines: maVisible ? tline : null,
       wPattern: maVisible ? w : null,
-      triangle: maVisible ? tri : null
+      triangle: maVisible ? tri : null,
 	  strat3Day: stratData // 傳入三日參數
     });
 
