@@ -95,10 +95,9 @@
 		"6442","6640","6739","6949","8021","8210","8358","8374","8937"
       ]
 	},
-	"自選股": { 
+    "自選股 (Input)": { 
       folder: "data_custom", 
-      // 👇 以後要加股票，就手動改這裡！例如 ["2330", "2603", "3231"]
-      stocks: ["2330", "2317"], 
+      // stocks: [],  <-- 這行可以刪掉了，因為我們改用手動輸入
       isCustom: true 
     },
     "今日台指期（5分K）": {
@@ -132,53 +131,27 @@
   function initCustomLogic() {
     const poolSel = U.el("stockPoolSelect");
     const customArea = U.el("customSelectArea");
-    const customSel = U.el("customStockSelect");
-    const msgBox = U.el("customMsg");
+    const customInput = U.el("customStockInput"); // 抓取 input 元素
 
-    // 根據 STOCK_POOLS 裡的 stocks 陣列，更新第二個下拉選單
-    function renderCustomSelect() {
-      // 取得目前設定的自選股清單
-      const list = STOCK_POOLS["自選股 (My List)"].stocks;
-    
-      customSel.innerHTML = ""; // 清空舊選項
-
-      if (!list || list.length === 0) {
-        customSel.innerHTML = "<option>請在 js/main.js 新增代號</option>";
-        return;
-      }
-
-      // 迴圈產生選項
-      list.forEach(code => {
-        const opt = document.createElement("option");
-        opt.value = code;
-        opt.textContent = code;
-        customSel.appendChild(opt);
-      });
-    
-      msgBox.innerText = `(共 ${list.length} 檔，請確認 CSV 已上傳)`;
-    }
-
-    // 監聽模式切換
-    poolSel.addEventListener("change", () => {
+    // 切換顯示狀態的函式
+    function toggleInput() {
       const key = poolSel.value;
       const pool = STOCK_POOLS[key];
 
       if (pool && pool.isCustom) {
         customArea.style.display = "inline-block";
-        renderCustomSelect(); // 直接從 JS 變數讀取
+        customInput.focus(); // 自動聚焦，方便輸入
       } else {
         customArea.style.display = "none";
+        customInput.value = ""; // 切換走的時候清空，避免混淆
       }
-    });
-
-    // 初始化檢查 (避免重新整理後狀態跑掉)
-    const currentKey = poolSel.value;
-    if (STOCK_POOLS[currentKey]?.isCustom) {
-      customArea.style.display = "inline-block";
-      renderCustomSelect();
-    } else {
-      customArea.style.display = "none";
     }
+
+    // 1. 監聽選單改變
+    poolSel.addEventListener("change", toggleInput);
+
+    // 2. 初始化檢查 (避免重新整理後狀態跑掉)
+    toggleInput();
   }
   
   function loadCSV() {
@@ -220,14 +193,14 @@
     }
 
     if (pool.isCustom) {
-      // ⭐ 自選模式：直接讀取第二個下拉選單的值
-      const customSel = U.el("customStockSelect");
-      stock = customSel.value;
+      // ⭐ 修改點：從 Input 讀取代號
+      const inputVal = U.el("customStockInput").value.trim();
       
-      if (!stock || stock.includes("請在 js")) {
-        alert("請先在 main.js 的 STOCK_POOLS 新增股票代號");
+      if (!inputVal) {
+        alert("請輸入股票代號 (例如 2330)");
         return;
       }
+      stock = inputVal;
     } else {
 
       const { folder, stocks } = pool;
