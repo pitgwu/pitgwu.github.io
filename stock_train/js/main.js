@@ -95,6 +95,11 @@
 		"6442","6640","6739","6949","8021","8210","8358","8374","8937"
       ]
 	},
+    "自選股 (Input)": { 
+      folder: "data_2025_yfinance", 
+      // stocks: [],  <-- 這行可以刪掉了，因為我們改用手動輸入
+      isCustom: true 
+    },
     "今日台指期（5分K）": {
 	  folder: "data_txf_5m_daily",
 	  stocks: [
@@ -121,6 +126,29 @@
     });
 
     sel.selectedIndex = 0;
+  }
+  
+  // ✅ 修正：改成 Input 顯示/隱藏邏輯，而不是下拉選單渲染
+  function initCustomLogic() {
+    const poolSel = U.el("stockPoolSelect");
+    const customArea = U.el("customSelectArea");
+    const customInput = U.el("customStockInput"); 
+
+    function toggleInput() {
+      const key = poolSel.value;
+      const pool = STOCK_POOLS[key];
+
+      if (pool && pool.isCustom) {
+        customArea.style.display = "inline-block";
+        if(customInput) customInput.focus();
+      } else {
+        customArea.style.display = "none";
+        if(customInput) customInput.value = "";
+      }
+    }
+
+    poolSel.addEventListener("change", toggleInput);
+    toggleInput(); // 初始化檢查
   }
   
   function loadCSV() {
@@ -161,15 +189,25 @@
       }
     }
 
-    const { folder, stocks } = pool;
-
-    if (!stocks || !stocks.length) {
-      alert("此清單沒有股票");
-      return;
-    }
-
-    // 2️⃣ 隨機挑一檔股票
-    const stock = stocks[Math.floor(Math.random() * stocks.length)];
+    let stock;
+	const { folder, stocks } = pool;
+    if (pool.isCustom) {
+      // ⭐ 修改點：從 Input 讀取代號
+      const inputVal = U.el("customStockInput").value.trim();
+      
+      if (!inputVal) {
+        alert("請輸入股票代號 (例如 2330)");
+        return;
+      }
+      stock = inputVal;
+    } else {
+      if (!stocks || !stocks.length) {
+        alert("此清單沒有股票");
+        return;
+      }
+      // 2️⃣ 隨機挑一檔股票
+      stock = stocks[Math.floor(Math.random() * stocks.length)];
+	}
     global.__currentStock = stock;
 
     // 3️⃣ 組出正確 CSV 路徑
@@ -642,6 +680,7 @@
   }
   
   initStockPoolSelect();
+  initCustomLogic();
   bindEvents();   // ✅ 一開始就綁定按鈕
 
 })(window);
