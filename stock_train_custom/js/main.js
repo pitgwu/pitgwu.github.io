@@ -190,6 +190,7 @@
     }
 
     let stock;
+	const { folder, stocks } = pool;
     if (pool.isCustom) {
       // ⭐ 修改點：從 Input 讀取代號
       const inputVal = U.el("customStockInput").value.trim();
@@ -200,14 +201,10 @@
       }
       stock = inputVal;
     } else {
-
-      const { folder, stocks } = pool;
-
       if (!stocks || !stocks.length) {
         alert("此清單沒有股票");
         return;
       }
-
       // 2️⃣ 隨機挑一檔股票
       stock = stocks[Math.floor(Math.random() * stocks.length)];
 	}
