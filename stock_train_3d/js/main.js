@@ -2,6 +2,52 @@
 (function (global) {
   "use strict";
 
+// ==========================================
+  // 🔒 登入驗證模組 (設定你的帳號密碼)
+  // ==========================================
+  const VALID_USER = "snow";  // 設定帳號
+  const VALID_PASS = "8888";   // 設定密碼
+
+  function initLogin() {
+    const modal = document.getElementById("loginModal");
+    const btn = document.getElementById("btnLoginBtn");
+    const msg = document.getElementById("loginMsg");
+    const uInput = document.getElementById("uName");
+    const pInput = document.getElementById("pWord");
+
+    // 檢查是否已經登入過 (用 sessionStorage，關閉瀏覽器後失效)
+    if (sessionStorage.getItem("isLoggedIn") === "true") {
+      if(modal) modal.style.display = "none";
+      return;
+    }
+
+    function check() {
+      if (uInput.value === VALID_USER && pInput.value === VALID_PASS) {
+        // 登入成功
+        modal.style.display = "none";
+        sessionStorage.setItem("isLoggedIn", "true"); // 紀錄登入狀態
+      } else {
+        // 登入失敗
+        msg.innerText = "❌ 帳號或密碼錯誤";
+        pInput.value = "";
+        uInput.focus();
+      }
+    }
+
+    if (btn) {
+      btn.onclick = check;
+      
+      // 支援按 Enter 登入
+      pInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") check();
+      });
+    }
+  }
+
+  // 立即啟動登入檢查
+  initLogin();
+  
+  // 正常初使化
   const U = global.Util;
   const Chart = global.ChartManager;
   const Indicators = global.Indicators;

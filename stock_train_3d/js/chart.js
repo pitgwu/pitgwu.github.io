@@ -111,7 +111,9 @@
       lineWidth: 2, 
       lineType: 1, // 1 = Step line
       visible: false,
-      priceScaleId: "right"
+      priceScaleId: "right",
+      // ⭐ 關鍵：告訴圖表「不要」參考這條線來縮放，以 K 線為主
+      autoscaleInfoProvider: () => null 
     });
   
     // 綠色壓力線 (階梯線)
@@ -120,7 +122,9 @@
       lineWidth: 2, 
       lineType: 1, // 1 = Step line
       visible: false,
-      priceScaleId: "right"
+      priceScaleId: "right",
+      // ⭐ 關鍵：告訴圖表「不要」參考這條線來縮放
+      autoscaleInfoProvider: () => null
     });
 
     /* ===== 成交量 ===== */
