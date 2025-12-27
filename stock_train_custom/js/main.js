@@ -96,7 +96,7 @@
       ]
 	},
     "自選股 (Input)": { 
-      folder: "data_custom", 
+      folder: "data_2025_yfinance", 
       // stocks: [],  <-- 這行可以刪掉了，因為我們改用手動輸入
       isCustom: true 
     },
