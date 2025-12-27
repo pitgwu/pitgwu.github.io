@@ -78,7 +78,9 @@
         if (bullSupport !== null) {
           if (cur.close < bullSupport) {
             bullBrokenCount++;
-            if (bullBrokenCount > 3) {
+			
+			// ⭐ 修正重點：滿 3 天就刪除 (原本是 >3)
+            if (bullBrokenCount >= 3) {
               // 跌破三天 -> 刪除線
               bullSupport = null;
               bullTrend = 0;
@@ -115,7 +117,9 @@
         if (bearResist !== null) {
           if (cur.close > bearResist) {
             bearBrokenCount++;
-            if (bearBrokenCount > 3) {
+			
+			// ⭐ 修正重點：滿 3 天就刪除
+            if (bearBrokenCount >= 3) {
               bearResist = null;
               bearTrend = 0;
               bearBrokenCount = 0;
