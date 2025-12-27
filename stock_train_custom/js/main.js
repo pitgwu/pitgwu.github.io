@@ -189,6 +189,7 @@
       }
     }
 
+    let stock;
     if (pool.isCustom) {
       // ⭐ 修改點：從 Input 讀取代號
       const inputVal = U.el("customStockInput").value.trim();
@@ -208,7 +209,7 @@
       }
 
       // 2️⃣ 隨機挑一檔股票
-      const stock = stocks[Math.floor(Math.random() * stocks.length)];
+      stock = stocks[Math.floor(Math.random() * stocks.length)];
 	}
     global.__currentStock = stock;
 
