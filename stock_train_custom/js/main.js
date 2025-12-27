@@ -128,30 +128,27 @@
     sel.selectedIndex = 0;
   }
   
+  // ✅ 修正：改成 Input 顯示/隱藏邏輯，而不是下拉選單渲染
   function initCustomLogic() {
     const poolSel = U.el("stockPoolSelect");
     const customArea = U.el("customSelectArea");
-    const customInput = U.el("customStockInput"); // 抓取 input 元素
+    const customInput = U.el("customStockInput"); 
 
-    // 切換顯示狀態的函式
     function toggleInput() {
       const key = poolSel.value;
       const pool = STOCK_POOLS[key];
 
       if (pool && pool.isCustom) {
         customArea.style.display = "inline-block";
-        customInput.focus(); // 自動聚焦，方便輸入
+        if(customInput) customInput.focus();
       } else {
         customArea.style.display = "none";
-        customInput.value = ""; // 切換走的時候清空，避免混淆
+        if(customInput) customInput.value = "";
       }
     }
 
-    // 1. 監聽選單改變
     poolSel.addEventListener("change", toggleInput);
-
-    // 2. 初始化檢查 (避免重新整理後狀態跑掉)
-    toggleInput();
+    toggleInput(); // 初始化檢查
   }
   
   function loadCSV() {
