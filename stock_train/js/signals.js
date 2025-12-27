@@ -134,6 +134,20 @@
 		 sig.push({ side: "bull", name: "低檔反彈機會" });
       }
 
+      // ==========================================
+      // ⭐ 新增：酒田戰法 K 線訊號整合
+      // ==========================================
+      // 我們只取截至當天 (i) 的資料片段 (往前取5根就夠了)
+      const slice = data.slice(Math.max(0, i - 5), i + 1);
+      
+      if (KPattern && slice.length >= 3) {
+        const kPatterns = KPattern.detectAll(slice);
+        // 將偵測到的 K 線型態加入訊號列表
+        kPatterns.forEach(p => {
+          sig.push({ side: p.side, name: p.name });
+        });
+      }
+
     }
 
     return out;
