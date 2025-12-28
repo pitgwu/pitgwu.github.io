@@ -19,16 +19,15 @@
   Strat.calculate = function (data) {
     const markers = [];
     
-    // ===== 多頭堆疊 (Support Stack) =====
-    // 陣列結構：[100, 105, 110...]，最後一個 (110) 是當前生效的支撐
+    // 使用堆疊 (Stack) 來記憶所有突破過的關卡
+    // 陣列尾端 (End) 是最新的關卡
     const bullStack = []; 
-    let bullBrokenCount = 0; // 跌破計數
+    let bullBrokenCount = 0; 
 
-    // ===== 空頭堆疊 (Resistance Stack) =====
     const bearStack = [];
-    let bearBrokenCount = 0; // 突破計數
+    let bearBrokenCount = 0; 
 
-    // 狀態標記 (用於畫箭頭)
+    // 狀態標記
     let bullTrend = 0; 
     let bearTrend = 0;
 
@@ -41,7 +40,7 @@
       const refHigh = getRefHigh(data, i);
       const refLow = getRefLow(data, i);
 
-      // 取得當前生效的支撐/壓力 (堆疊的最上層)
+      // 取出堆疊最上層 (當前生效的)
       let currentSupport = bullStack.length > 0 ? bullStack[bullStack.length - 1] : NaN;
       let currentResist = bearStack.length > 0 ? bearStack[bearStack.length - 1] : NaN;
 
@@ -49,15 +48,13 @@
       // 1. 多頭邏輯
       // ======================================
       
-      // A. 創新高：增加新的支撐
-      // 條件：收盤 > 前兩日高 且 (目前沒支撐 或 前兩日高 > 目前支撐)
-      // 防止重複加入一樣的數值
+      // A. 創新高：加入新支撐
       if (!isNaN(refHigh) && cur.close > refHigh) {
+        // 如果目前沒支撐，或者股價突破了比現有支撐更高的高點
         if (isNaN(currentSupport) || refHigh > currentSupport) {
-            bullStack.push(refHigh); // 推入新支撐
-            currentSupport = refHigh; // 更新當前參考
+            bullStack.push(refHigh); // 推入堆疊
+            currentSupport = refHigh;
             
-            // 標記
             if (bullTrend === 0) {
                 bullTrend = 1;
                 markers.push({ time, position: 'aboveBar', color: '#DAA520', shape: 'arrowUp', text: '1' });
@@ -65,22 +62,22 @@
                 bullTrend = 2;
                 markers.push({ time, position: 'aboveBar', color: '#CC0000', shape: 'arrowUp', size: 2 });
             }
-            bullBrokenCount = 0; // 重置跌破計數
+            bullBrokenCount = 0;
         }
       } 
       
-      // B. 檢查跌破
+      // B. 跌破確認
       if (!isNaN(currentSupport)) {
         if (cur.close < currentSupport) {
             bullBrokenCount++;
-            // 跌破滿 3 天 -> 移除當前支撐，退守前一個
             if (bullBrokenCount >= 3) {
-                bullStack.pop(); // 移除最上面的
+                // 跌破三天 -> 移除第一道防線 (Pop)
+                bullStack.pop(); 
                 bullBrokenCount = 0; 
-                bullTrend = 0; // 趨勢暫時重置(或看你定義)
+                bullTrend = 0; 
             }
         } else {
-            bullBrokenCount = 0; // 守住了
+            bullBrokenCount = 0;
         }
       }
 
@@ -88,10 +85,10 @@
       // 2. 空頭邏輯
       // ======================================
 
-      // A. 創新低：增加新的壓力
+      // A. 創新低：加入新壓力
       if (!isNaN(refLow) && cur.close < refLow) {
         if (isNaN(currentResist) || refLow < currentResist) {
-            bearStack.push(refLow); // 推入新壓力
+            bearStack.push(refLow);
             currentResist = refLow;
             
             if (bearTrend === 0) {
@@ -105,13 +102,12 @@
         }
       }
 
-      // B. 檢查突破
+      // B. 突破確認
       if (!isNaN(currentResist)) {
         if (cur.close > currentResist) {
             bearBrokenCount++;
-            // 突破滿 3 天 -> 移除當前壓力，退守前一個
             if (bearBrokenCount >= 3) {
-                bearStack.pop();
+                bearStack.pop(); // 移除第一道壓力
                 bearBrokenCount = 0;
                 bearTrend = 0;
             }
@@ -121,15 +117,18 @@
       }
     }
 
-    // 回傳最後一根 K 棒當下有效的支撐與壓力
-    // 這裡我們只取堆疊最上面 (最後加入) 的那個值給畫圖用
-    const finalSupport = bullStack.length > 0 ? bullStack[bullStack.length - 1] : NaN;
-    const finalResist = bearStack.length > 0 ? bearStack[bearStack.length - 1] : NaN;
+    // ⭐ 回傳最後狀態的「兩層」關卡
+    const lenBull = bullStack.length;
+    const lenBear = bearStack.length;
 
     return { 
       markers, 
-      currentBullSupport: finalSupport, 
-      currentBearResist: finalResist 
+      // S1: 最新的支撐, S2: 次新的支撐
+      bullS1: lenBull > 0 ? bullStack[lenBull - 1] : NaN,
+      bullS2: lenBull > 1 ? bullStack[lenBull - 2] : NaN,
+      // R1: 最新的壓力, R2: 次新的壓力
+      bearR1: lenBear > 0 ? bearStack[lenBear - 1] : NaN,
+      bearR2: lenBear > 1 ? bearStack[lenBear - 2] : NaN
     };
   };
 
