@@ -4,13 +4,11 @@
 
   const Strat = {};
 
-  // 取得前兩日的高點 (用 NaN 代表無資料)
   function getRefHigh(data, index) {
     if (index < 2) return NaN;
     return Math.max(data[index - 1].high, data[index - 2].high);
   }
 
-  // 取得前兩日的低點
   function getRefLow(data, index) {
     if (index < 2) return NaN;
     return Math.min(data[index - 1].low, data[index - 2].low);
@@ -91,7 +89,6 @@
       }
     }
 
-    // ⭐ 只回傳最新的支撐壓力值
     return { 
       markers, 
       currentBullSupport: bullSupport, 
