@@ -1,126 +1,100 @@
-// js/strategy3day.js
+// [js/strategy3day.js]
 (function (global) {
   "use strict";
 
   const Strat = {};
 
-  // 取得包含自己在內的過去 N 天最高/最低
-  // 演算法需求：今日收盤價 > 三日K棒(含今日)的高點
-  // 這其實等於：今日收盤價 > 前兩日的高點 (因為若大於前兩日高點，且是紅K，通常就是三日最高)
+  // 取得前兩日的高點 (用 NaN 代表無資料)
   function getRefHigh(data, index) {
-    if (index < 2) return NaN; // ⭐ 修正：回傳 NaN 而不是 Infinity
-    // 取前兩日 (i-1, i-2) 的最高點做比較基準
+    if (index < 2) return NaN;
     return Math.max(data[index - 1].high, data[index - 2].high);
   }
 
+  // 取得前兩日的低點
   function getRefLow(data, index) {
-    if (index < 2) return NaN; // ⭐ 修正：回傳 NaN 而不是 Infinity
+    if (index < 2) return NaN;
     return Math.min(data[index - 1].low, data[index - 2].low);
   }
 
   Strat.calculate = function (data) {
     const markers = [];
-    const bullLine = []; // 紅色支撐線數據
-    const bearLine = []; // 綠色壓力線數據
+    
+    // 狀態變數
+    let bullTrend = 0; 
+    let bullSupport = NaN; // 預設 NaN
+    let bullBrokenCount = 0; 
 
-    // --- 多頭狀態變數 ---
-    let bullTrend = 0; // 0:無, 1:第一次(黃), 2:第二次+(紅)
-    let bullSupport = NaN; // ⭐ 預設 NaN，確保線條斷開
-    let bullBrokenCount = 0; // 跌破天數計數
-
-    // --- 空頭狀態變數 ---
-    let bearTrend = 0; // 0:無, 1:第一次(黑), 2:第二次+(綠)
-    let bearResist = NaN; // ⭐ 預設 NaN
-    let bearBrokenCount = 0; // 突破天數計數
+    let bearTrend = 0;
+    let bearResist = NaN; // 預設 NaN
+    let bearBrokenCount = 0; 
 
     for (let i = 0; i < data.length; i++) {
       const cur = data[i];
       const time = cur.time;
 
-      // 前兩根略過，填入 NaN
-      if (i < 2) {
-        bullLine.push({ time, value: NaN });
-        bearLine.push({ time, value: NaN });
-        continue;
-      }
+      // 前兩根略過
+      if (i < 2) continue;
 
-      const refHigh = getRefHigh(data, i); // 前兩日高
-      const refLow = getRefLow(data, i);   // 前兩日低
+      const refHigh = getRefHigh(data, i);
+      const refLow = getRefLow(data, i);
 
       // ======================================
-      // 1. 多頭邏輯 (三日高點)
+      // 1. 多頭邏輯
       // ======================================
-      
-      // 條件：收盤價 > 三日高 (即大於前兩日高)
       if (!isNaN(refHigh) && cur.close > refHigh) {
-        // 只要創新高，空頭結構直接破壞 (視策略而定，這裡先重置空頭)
-        // bearTrend = 0; bearResist = NaN; 
-
+        // 創新高
         if (bullTrend === 0) {
-          // 第一次
           bullTrend = 1;
-          markers.push({ time, position: 'aboveBar', color: '#DAA520', shape: 'arrowUp', text: '1' }); // 金黃色
+          markers.push({ time, position: 'aboveBar', color: '#DAA520', shape: 'arrowUp', text: '1' });
         } else {
-          // 第二次以上 (連續上攻)
           bullTrend = 2;
-          markers.push({ time, position: 'aboveBar', color: '#CC0000', shape: 'arrowUp', size: 2 }); // 紅色大箭頭
+          markers.push({ time, position: 'aboveBar', color: '#CC0000', shape: 'arrowUp', size: 2 });
         }
-        
-        // 更新支撐線：依規則「以前三日K棒高點畫一條線」
-        // 當下創新高，這裡定義「前三日」為包含今天的最高點，或昨天的前三日高？
-        // 依照移動停利邏輯，通常是上移到新的防守點。
-        // 這裡設定為：前兩日的高點 (Breakout point) 作為支撐
+        // 更新支撐為前兩日高點
         bullSupport = refHigh; 
-        bullBrokenCount = 0; // 重置跌破計數
+        bullBrokenCount = 0; 
 
       } else {
-        // 沒有創新高，檢查是否跌破支撐
+        // 沒創新高，檢查是否跌破
         if (!isNaN(bullSupport)) {
           if (cur.close < bullSupport) {
             bullBrokenCount++;
-            
-            // ⭐ 修正重點：滿 3 天就刪除 (原本是 >3)
+            // 跌破滿 3 天，刪除支撐 (變回 NaN)
             if (bullBrokenCount >= 3) {
-              // 跌破三天 -> 刪除線
-              bullSupport = NaN; // ⭐ 關鍵：使用 NaN 斷開
-              bullTrend = 0;
+              bullSupport = NaN;
+              bullTrend = 0;      
               bullBrokenCount = 0;
             }
           } else {
-            // 雖然沒創新高，但也沒跌破，或者跌破後站回 -> 重置跌破計數
             bullBrokenCount = 0;
           }
         }
       }
-      bullLine.push({ time, value: bullSupport });
 
       // ======================================
-      // 2. 空頭邏輯 (三日低點)
+      // 2. 空頭邏輯
       // ======================================
-
       if (!isNaN(refLow) && cur.close < refLow) {
         // 創新低
         if (bearTrend === 0) {
           bearTrend = 1;
-          markers.push({ time, position: 'belowBar', color: '#000000', shape: 'arrowDown', text: '1' }); // 黑色
+          markers.push({ time, position: 'belowBar', color: '#000000', shape: 'arrowDown', text: '1' });
         } else {
           bearTrend = 2;
-          markers.push({ time, position: 'belowBar', color: '#008000', shape: 'arrowDown', size: 2 }); // 綠色大箭頭
+          markers.push({ time, position: 'belowBar', color: '#008000', shape: 'arrowDown', size: 2 });
         }
-
-        // 更新壓力線：前兩日低點
+        // 更新壓力為前兩日低點
         bearResist = refLow;
         bearBrokenCount = 0;
 
       } else {
-        // 沒創新低，檢查是否突破壓力
+        // 沒創新低，檢查是否突破
         if (!isNaN(bearResist)) {
           if (cur.close > bearResist) {
             bearBrokenCount++;
-            
-            // ⭐ 修正重點：滿 3 天就刪除
+            // 突破滿 3 天，刪除壓力 (變回 NaN)
             if (bearBrokenCount >= 3) {
-              bearResist = NaN; // ⭐ 關鍵：使用 NaN
+              bearResist = NaN;
               bearTrend = 0;
               bearBrokenCount = 0;
             }
@@ -129,10 +103,15 @@
           }
         }
       }
-      bearLine.push({ time, value: bearResist });
     }
 
-    return { markers, bullLine, bearLine };
+    // ⭐ 重點修改：不回傳整條線陣列，只回傳「最後一根 K 棒當下的支撐壓力值」
+    // 這樣 chart.js 就只會畫出一條最新的水平線
+    return { 
+      markers, 
+      currentBullSupport: bullSupport, 
+      currentBearResist: bearResist 
+    };
   };
 
   global.Strategy3Day = Strat;
