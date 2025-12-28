@@ -23,11 +23,6 @@
   let indAutoL1, indAutoL2;       
   let macdL1, macdL2, macdHist;   
 
-  // ===== Cache =====
-  let maCache = { ma5: [], ma10: [], ma20: [] };
-  let bbCache = { u: [], m: [], l: [] };
-  let cacheReady = false;
-  
   // ===== 三日戰法 PriceLine (水平線) =====
   let activeBullPriceLine = null;
   let activeBearPriceLine = null;
@@ -40,7 +35,6 @@
       rightPriceScale: { 
         autoScale: true, 
         visible: true,
-        // 增加邊距，避免 K 線貼頂貼底
         scaleMargins: { top: 0.1, bottom: 0.1 }
       },
       leftPriceScale:  { visible: false },
@@ -58,11 +52,6 @@
   }
 
   function init() {
-    cacheReady = false;
-    maCache = { ma5: [], ma10: [], ma20: [] };
-    bbCache = { u: [], m: [], l: [] };
-    
-    // 清空 PriceLine 參照
     activeBullPriceLine = null;
     activeBearPriceLine = null;
 
@@ -74,7 +63,7 @@
       
     chart = fixedChart(document.getElementById("chart"), 420);
 
-    // ✅ K 線 (這是主角，只有它決定縮放比例)
+    // ✅ K 線
     candle = chart.addCandlestickSeries({
       upColor: "#ff0000", downColor: "#00aa00",
       borderUpColor: "#ff0000", borderDownColor: "#00aa00",
@@ -83,33 +72,32 @@
     });
 
     // ✅ 均線 (設定 autoscaleInfoProvider: null)
-    // 這樣即使隱藏或數據有問題，也不會讓 K 線消失或變形
     const maOpt = { 
         lineWidth: 1, 
         visible: false, 
         priceScaleId: "right",
-        autoscaleInfoProvider: () => null // ⭐ 關鍵：不影響縮放
+        autoscaleInfoProvider: () => null 
     };
     ma5 = chart.addLineSeries({ color:"#f00", ...maOpt });
     ma10 = chart.addLineSeries({ color:"#0a0", ...maOpt });
     ma20 = chart.addLineSeries({ color:"#00f", ...maOpt });
 
-    // ✅ 布林通道 (設定 autoscaleInfoProvider: null)
+    // ✅ 布林通道
     const bbOpt = { 
         visible: false, 
         priceScaleId: "right",
-        autoscaleInfoProvider: () => null // ⭐ 關鍵
+        autoscaleInfoProvider: () => null 
     };
     bbU = chart.addLineSeries({ color:"#ffa500", ...bbOpt });
     bbM = chart.addLineSeries({ color:"#0066cc", ...bbOpt });
     bbL = chart.addLineSeries({ color:"#008800", ...bbOpt });
 
-    // ✅ 型態線 (同上)
+    // ✅ 型態線
     const patternOpt = {
         lineWidth: 1,
         visible: false,
         priceScaleId: "right",
-        autoscaleInfoProvider: () => null // ⭐ 關鍵
+        autoscaleInfoProvider: () => null 
     };
     resLine = chart.addLineSeries({ color:"#dd4444", ...patternOpt });
     supLine = chart.addLineSeries({ color:"#44aa44", ...patternOpt });
@@ -152,48 +140,56 @@
     const visibleBars = opt.visibleBars || 40;
     const indType = opt.indicatorType;
 
-    // ===== 1. 計算 Cache (均線/布林) =====
-    if (!cacheReady) {
-      const closes = shown.map(c => c.close);
-
-      maCache.ma5  = U.sma(closes, 5).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
-      maCache.ma10 = U.sma(closes,10).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
-      maCache.ma20 = U.sma(closes,20).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
-
-      bbCache.u = shown.map((c,i)=>(indicators.BB.upper[i]!=null?{time:c.time,value:indicators.BB.upper[i]}:null)).filter(Boolean);
-      bbCache.m = shown.map((c,i)=>(indicators.BB.mid[i]!=null?{time:c.time,value:indicators.BB.mid[i]}:null)).filter(Boolean);
-      bbCache.l = shown.map((c,i)=>(indicators.BB.lower[i]!=null?{time:c.time,value:indicators.BB.lower[i]}:null)).filter(Boolean);
-
-      cacheReady = true;
-    }
-
-    // ===== 2. K線與成交量 =====
+    // ===== 1. K線與成交量 =====
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // ===== 3. 設定均線資料 (永遠設定數據，只切換 visible) =====
-    // ⭐ 修正重點：不管 showMA 是 true/false，都把數據塞進去
-    // 因為我們已經設定了 autoscaleInfoProvider: null，所以這些數據不會影響 K 線縮放
-    // 這樣做可以防止圖表崩潰
-    ma5.setData(maCache.ma5);
-    ma10.setData(maCache.ma10);
-    ma20.setData(maCache.ma20);
+    // ===== 2. 計算並更新均線 (移除 Cache，每次都重算) =====
+    // 這裡改用 shown 裡的收盤價來即時計算，或者你也可以用 indicators 傳進來的資料
+    // 但為了確保資料長度跟 shown 完全同步，這裡重新 mapping 一次最保險
     
-    // 只切換顯示狀態
+    // 注意：這裡假設 indicators 已經是包含所有資料的陣列
+    // 我們需要根據 shown 的長度來截取 indicators，或者重新計算
+    // 最簡單的方式：直接拿 indicators (因為 indicators 是全部算好的)，根據 shown 的時間點來對應
+    
+    // 但為了避免 index 對不上的問題 (shown 可能是 data 的子集)，
+    // 我們重新對照 shown 的 close 進行計算，或是直接讀取 indicators 對應的 index。
+    // 由於 main.js 裡的 indicators 是全域算好的，我們直接用 index 對應最快。
+    
+    // 但因為 shown 是一個切片 (slice)，原本 indicators 是對應原始 data 的 index。
+    // 這裡最穩的做法：直接針對 shown 裡的數據做 SMA 計算 (雖然會浪費一點效能，但保證準確)
+    const closes = shown.map(c => c.close);
+
+    // 準備均線數據
+    const ma5Data = U.sma(closes, 5).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+    const ma10Data = U.sma(closes, 10).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+    const ma20Data = U.sma(closes, 20).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+
+    // 永遠設定數據 (setData)，只切換 visible
+    ma5.setData(ma5Data);
+    ma10.setData(ma10Data);
+    ma20.setData(ma20Data);
+    
     ma5.applyOptions({ visible: !!opt.showMA });
     ma10.applyOptions({ visible: !!opt.showMA });
     ma20.applyOptions({ visible: !!opt.showMA });
 
-    // ===== 4. 設定布林資料 (同上) =====
-    bbU.setData(bbCache.u);
-    bbM.setData(bbCache.m);
-    bbL.setData(bbCache.l);
+    // ===== 3. 計算並更新布林 (使用 indicators 裡的數據，需對應正確 index) =====
+    // 因為 shown 是從 data[0] 到 data[currentIndex]，所以 index 是一樣的
+    // 我們可以直接用 map 產生數據
+    const bbUData = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
+    const bbMData = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
+    const bbLData = shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)).filter(Boolean);
+    
+    bbU.setData(bbUData);
+    bbM.setData(bbMData);
+    bbL.setData(bbLData);
     
     bbU.applyOptions({ visible: !!opt.showBB });
     bbM.applyOptions({ visible: !!opt.showBB });
     bbL.applyOptions({ visible: !!opt.showBB });
 
-    // ===== 5. 型態線 (清空舊的) =====
+    // ===== 4. 型態線 (清空舊的) =====
     [resLine,supLine,trendUp,trendDn,triUp,triLow,wLine1,wLine2,wNeck].forEach(s=>{
       s.setData([]);
       s.applyOptions({ visible:false });
@@ -236,7 +232,7 @@
     }
 
     // ===========================================
-    // ⭐⭐ 三日戰法 PriceLine (水平線) ⭐⭐
+    // ⭐ 三日戰法 PriceLine (水平線)
     // ===========================================
     
     // A. 先移除舊的線
