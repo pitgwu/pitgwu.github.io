@@ -37,8 +37,13 @@
       height,
       layout: { background: { color: "#fff" }, textColor: "#222" },
 
-      // ✅ 正確控制價格刻度：不要用 chart.applyOptions({priceScale...})
-      rightPriceScale: { autoScale: true, visible: true },
+      // ✅ 正確控制價格刻度
+      rightPriceScale: { 
+        autoScale: true, 
+        visible: true,
+        // 確保 K 線不會貼頂或貼底
+        scaleMargins: { top: 0.1, bottom: 0.1 }
+      },
       leftPriceScale:  { visible: false },
 
       timeScale: {
@@ -49,7 +54,7 @@
         fixRightEdge: true,
         rightBarStaysOnScroll: true,   // ✅ 關鍵：不要顯示盤前 / 盤後空白
       },
-	  
+      
       handleScroll: false,
       handleScale: false,
     });
@@ -67,7 +72,7 @@
       volChart.remove();
       indChart.remove();
     }
-	  
+      
     chart = fixedChart(document.getElementById("chart"), 420);
 
     // ✅ K 線：固定用 right scale
@@ -81,17 +86,17 @@
       priceScaleId: "right"
     });
 
-    // ✅ 均線：也固定用 right scale（避免跟 K 線不同 scale 對不準）
+    // ✅ 均線
     ma5 = chart.addLineSeries({ color:"#f00", lineWidth:1, visible:false, priceScaleId: "right" });
     ma10 = chart.addLineSeries({ color:"#0a0", lineWidth:1, visible:false, priceScaleId: "right" });
     ma20 = chart.addLineSeries({ color:"#00f", lineWidth:1, visible:false, priceScaleId: "right" });
 
-    // ✅ 布林通道：同樣用 right scale
+    // ✅ 布林通道
     bbU = chart.addLineSeries({ color:"#ffa500", visible:false, priceScaleId: "right" });
     bbM = chart.addLineSeries({ color:"#0066cc", visible:false, priceScaleId: "right" });
     bbL = chart.addLineSeries({ color:"#008800", visible:false, priceScaleId: "right" });
 
-    // 型態線：全部同 right scale，避免干擾/錯位
+    // 型態線
     resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, visible:false, priceScaleId: "right" });
     supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, visible:false, priceScaleId: "right" });
 
@@ -105,35 +110,32 @@
     wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
     wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
 
-    // 紅色支撐線 (階梯線)
+    // ⭐ 紅色支撐線 (修正版)
     stratBullLine = chart.addLineSeries({ 
       color: '#ff0000', 
       lineWidth: 2, 
-      // lineType: 1,  <-- ❌ 移除這行 (不要階梯線)
-      // 預設就是 lineType: 0 (Simple Line)，它會直接連線，不會有垂直的轉折
+      lineType: 0, // 0 = Simple Line (非階梯線)
       visible: false,
       priceScaleId: "right",
       // ⭐ 關鍵：告訴圖表「不要」參考這條線來縮放，以 K 線為主
-      autoscaleInfoProvider: () => null,  // 忽略縮放
-	  // ⭐ 新增：讓線條更乾淨，只顯示線本身
-      crosshairMarkerVisible: false, // 滑鼠移過去不要出現圓點
-      lastValueVisible: false,       // 不要顯示右側Y軸的標籤
-      priceLineVisible: false        // 不要顯示水平價格線
+      autoscaleInfoProvider: () => null, 
+      // ⭐ 讓線條更乾淨
+      crosshairMarkerVisible: false, 
+      lastValueVisible: false,       
+      priceLineVisible: false        
     });
   
-    // 綠色壓力線 (階梯線)
+    // ⭐ 綠色壓力線 (修正版)
     stratBearLine = chart.addLineSeries({ 
       color: '#00aa00', 
       lineWidth: 2, 
-      // lineType: 1,  <-- ❌ 移除這行 (不要階梯線)
-      // 預設就是 lineType: 0 (Simple Line)，它會直接連線，不會有垂直的轉折
+      lineType: 0, 
       visible: false,
       priceScaleId: "right",
-      // ⭐ 關鍵：告訴圖表「不要」參考這條線來縮放
       autoscaleInfoProvider: () => null, // 忽略縮放
-	  crosshairMarkerVisible: false, // 滑鼠移過去不要出現圓點
-      lastValueVisible: false,       // 不要顯示右側Y軸的標籤
-      priceLineVisible: false        // 不要顯示水平價格線
+      crosshairMarkerVisible: false,
+      lastValueVisible: false,
+      priceLineVisible: false 
     });
 
     /* ===== 成交量 ===== */
@@ -151,10 +153,10 @@
     macdL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
     macdL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
     macdHist = indChart.addHistogramSeries({});
-	
-	// 🔒 強制穩定主價格刻度（避免第一次 MA toggle 清空 scale）
+    
+    // 🔒 強制穩定主價格刻度
     chart.timeScale().fitContent();
-	chart.priceScale("right").applyOptions({ autoScale: true });
+    chart.priceScale("right").applyOptions({ autoScale: true });
   }
 
   function setLineDataSafe(series, points, visible) {
@@ -163,7 +165,7 @@
   }
 
   function update(shown, indicators, opt) {
-	shown = shown.filter(c => c.time != null);
+    shown = shown.filter(c => c.time != null);
     if (shown.length < 2) return;
     if (!shown || !shown.length) return;
 
@@ -174,31 +176,14 @@
     if (!cacheReady) {
       const closes = shown.map(c => c.close);
 
-      maCache.ma5  = U.sma(closes, 5)
-        .map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null)
-        .filter(Boolean);
+      maCache.ma5  = U.sma(closes, 5).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+      maCache.ma10 = U.sma(closes,10).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+      maCache.ma20 = U.sma(closes,20).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
 
-      maCache.ma10 = U.sma(closes,10)
-        .map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null)
-        .filter(Boolean);
+      bbCache.u = shown.map((c,i)=>(indicators.BB.upper[i]!=null?{time:c.time,value:indicators.BB.upper[i]}:null)).filter(Boolean);
+      bbCache.m = shown.map((c,i)=>(indicators.BB.mid[i]!=null?{time:c.time,value:indicators.BB.mid[i]}:null)).filter(Boolean);
+      bbCache.l = shown.map((c,i)=>(indicators.BB.lower[i]!=null?{time:c.time,value:indicators.BB.lower[i]}:null)).filter(Boolean);
 
-      maCache.ma20 = U.sma(closes,20)
-        .map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null)
-        .filter(Boolean);
-
-      bbCache.u = shown.map((c,i)=>(
-        indicators.BB.upper[i]!=null?{time:c.time,value:indicators.BB.upper[i]}:null
-      )).filter(Boolean);
-
-      bbCache.m = shown.map((c,i)=>(
-        indicators.BB.mid[i]!=null?{time:c.time,value:indicators.BB.mid[i]}:null
-      )).filter(Boolean);
-
-      bbCache.l = shown.map((c,i)=>(
-        indicators.BB.lower[i]!=null?{time:c.time,value:indicators.BB.lower[i]}:null
-      )).filter(Boolean);
-
-      // 🔒 永久寫入 series（一次）
       ma5.setData(maCache.ma5);
       ma10.setData(maCache.ma10);
       ma20.setData(maCache.ma20);
@@ -216,36 +201,22 @@
 
     // ===== 均線 =====
     if (opt.showMA) {
-      const closes = shown.map(c => c.close);
-
-      const ma5Pts = U.sma(closes, 5)
-        .map((v,i)=> (v != null ? { time: shown[i].time, value: v } : null))
-        .filter(Boolean);
-
-      const ma10Pts = U.sma(closes, 10)
-        .map((v,i)=> (v != null ? { time: shown[i].time, value: v } : null))
-        .filter(Boolean);
-
-      const ma20Pts = U.sma(closes, 20)
-        .map((v,i)=> (v != null ? { time: shown[i].time, value: v } : null))
-        .filter(Boolean);
-
-      setLineDataSafe(ma5, ma5Pts, true);
-      setLineDataSafe(ma10, ma10Pts, true);
-      setLineDataSafe(ma20, ma20Pts, true);
+      setLineDataSafe(ma5, maCache.ma5, true);
+      setLineDataSafe(ma10, maCache.ma10, true);
+      setLineDataSafe(ma20, maCache.ma20, true);
     } else {
-      // ✅ OFF 時不要碰 candle / scale，只隱藏均線即可
       ma5.applyOptions({ visible:false });
       ma10.applyOptions({ visible:false });
       ma20.applyOptions({ visible:false });
     }
 
-    // ===== 布林通道（避免前段 undefined/NaN 汙染）=====
+    // ===== 布林通道 =====
     if (opt.showBB) {
+      // 這裡如果只是 toggle，不需要重算，直接 toggle visible 即可 (優化效能)
+      // 但為了保險起見，維持原邏輯重新 setData 也無妨
       const u = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
       const m = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
       const l = shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)).filter(Boolean);
-
       setLineDataSafe(bbU, u, true);
       setLineDataSafe(bbM, m, true);
       setLineDataSafe(bbL, l, true);
@@ -262,7 +233,6 @@
     });
 
     if (opt.showMA) {
-      // 支撐壓力
       if (global.SupportResistance?.findLines) {
         const SR = global.SupportResistance.findLines(shown, 20);
         const t = shown[shown.length - 1].time;
@@ -270,65 +240,38 @@
         if (SR[1]) { supLine.setData([{ time:t, value:SR[1].price }]); supLine.applyOptions({ visible:true }); }
       }
     }
-	
-    // 趨勢線
+    
     if (opt.trendlines) {
       const { upLines, downLines } = opt.trendlines;
       if (upLines?.length) {
         const u = upLines.at(-1);
-        trendUp.setData([
-          { time: shown[u.p1.index].time, value: u.p1.price },
-          { time: shown[u.p2.index].time, value: u.p2.price },
-        ]);
+        trendUp.setData([{ time: shown[u.p1.index].time, value: u.p1.price }, { time: shown[u.p2.index].time, value: u.p2.price }]);
         trendUp.applyOptions({ visible:true });
       }
       if (downLines?.length) {
         const d = downLines.at(-1);
-        trendDn.setData([
-          { time: shown[d.p1.index].time, value: d.p1.price },
-          { time: shown[d.p2.index].time, value: d.p2.price },
-        ]);
+        trendDn.setData([{ time: shown[d.p1.index].time, value: d.p1.price }, { time: shown[d.p2.index].time, value: d.p2.price }]);
         trendDn.applyOptions({ visible:true });
       }
-	} 
+    }
 
-    // 三角
     if (opt.triangle) {
-      triUp.setData([
-        { time: shown[opt.triangle.upperLine.p1.index].time, value: opt.triangle.upperLine.p1.price },
-        { time: shown[opt.triangle.upperLine.p2.index].time, value: opt.triangle.upperLine.p2.price },
-      ]);
-      triLow.setData([
-        { time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price },
-        { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price },
-      ]);
+      triUp.setData([{ time: shown[opt.triangle.upperLine.p1.index].time, value: opt.triangle.upperLine.p1.price }, { time: shown[opt.triangle.upperLine.p2.index].time, value: opt.triangle.upperLine.p2.price }]);
+      triLow.setData([{ time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price }, { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price }]);
       triUp.applyOptions({ visible:true });
       triLow.applyOptions({ visible:true });
     }
 
-    // W 底
     if (opt.wPattern) {
       const W = opt.wPattern;
-      wLine1.setData([
-        { time: shown[W.p1.index].time, value: W.p1.price },
-        { time: shown[W.p2.index].time, value: W.p2.price },
-      ]);
-      wLine2.setData([
-        { time: shown[W.p3.index].time, value: W.p3.price },
-        { time: shown[W.p4.index].time, value: W.p4.price },
-      ]);
-      wNeck.setData([
-        { time: shown[W.p1.index].time, value: W.neck },
-        { time: shown[shown.length - 1].time, value: W.neck },
-      ]);
-      wLine1.applyOptions({ visible:true });
-      wLine2.applyOptions({ visible:true });
-      wNeck.applyOptions({ visible:true });
+      wLine1.setData([{ time: shown[W.p1.index].time, value: W.p1.price }, { time: shown[W.p2.index].time, value: W.p2.price }]);
+      wLine2.setData([{ time: shown[W.p3.index].time, value: W.p3.price }, { time: shown[W.p4.index].time, value: W.p4.price }]);
+      wNeck.setData([{ time: shown[W.p1.index].time, value: W.neck }, { time: shown[shown.length - 1].time, value: W.neck }]);
+      wLine1.applyOptions({ visible:true }); wLine2.applyOptions({ visible:true }); wNeck.applyOptions({ visible:true });
     }
 
-    // ⭐ 處理三日戰法
+    // ⭐ 三日戰法數據更新
     if (opt.strat3Day) {
-        // 合併標記
         candle.setMarkers(opt.strat3Day.markers || []);
         setLineDataSafe(stratBullLine, opt.strat3Day.bullLine, true);
         setLineDataSafe(stratBearLine, opt.strat3Day.bearLine, true);
@@ -358,8 +301,6 @@
       })));
     }
 
-    // ✅ 每次 update 都 setVisibleRange（toggle 時 shown.length 不變，但 series/scale 變了）
-    // ✅ 關鍵：強制只顯示你給的 5 分 K（09:00 起）
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
