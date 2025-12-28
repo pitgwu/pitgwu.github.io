@@ -18,7 +18,7 @@
   let triUp, triLow;
   let wLine1, wLine2, wNeck;
 
-  // ⭐ 三日戰法 (雙重支撐/壓力) - 改用四條獨立的 LineSeries
+  // ⭐ 三日戰法 (雙重支撐/壓力) - 四條獨立線
   let bullLine1, bullLine2;
   let bearLine1, bearLine2;
 
@@ -39,6 +39,7 @@
       rightPriceScale: { 
         autoScale: true, 
         visible: true,
+        // 增加邊距，避免 K 線貼頂貼底
         scaleMargins: { top: 0.1, bottom: 0.1 }
       },
       leftPriceScale:  { visible: false },
@@ -60,7 +61,7 @@
       
     chart = fixedChart(document.getElementById("chart"), 420);
 
-    // 1. K 線
+    // 1. K 線 (主角)
     candle = chart.addCandlestickSeries({
       upColor: "#ff0000", downColor: "#00aa00",
       borderUpColor: "#ff0000", borderDownColor: "#00aa00",
@@ -68,11 +69,12 @@
       priceScaleId: "right"
     });
 
-    // 2. 輔助線設定：強制忽略縮放 (解決 K 線壓縮問題)
+    // 2. 輔助線設定：強制忽略縮放 (解決 K 線壓縮的關鍵)
     const noScaleOpt = {
         lineWidth: 1,
         visible: false,
         priceScaleId: "right",
+        // ⭐ 絕對關鍵：告訴圖表不要參考這些線的數值
         autoscaleInfoProvider: () => null 
     };
 
@@ -98,10 +100,10 @@
     wNeck  = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScaleOpt));
 
     // ⭐ 3. 三日戰法線 (雙重支撐/壓力)
-    // 樣式設定：粗線、實線、不顯示標籤
+    // 我們使用 LineSeries 畫水平線，因為它比 PriceLine 更容易控制縮放
     const stratOpt = {
         lineWidth: 2,
-        lineStyle: 0, 
+        lineStyle: 0, // 實線
         visible: false,
         priceScaleId: "right",
         autoscaleInfoProvider: () => null, // 關鍵：不影響縮放
@@ -110,12 +112,13 @@
         priceLineVisible: false
     };
     
-    // 定義四條線：支撐1, 支撐2, 壓力1, 壓力2
-    bullLine1 = chart.addLineSeries(Object.assign({ color: '#ff0000' }, stratOpt)); // S1 (最新)
-    bullLine2 = chart.addLineSeries(Object.assign({ color: '#ff6666', lineStyle: 2 }, stratOpt)); // S2 (虛線區隔)
+    // S1 (實線), S2 (虛線)
+    bullLine1 = chart.addLineSeries(Object.assign({ color: '#ff0000' }, stratOpt)); 
+    bullLine2 = chart.addLineSeries(Object.assign({ color: '#ff6666', lineStyle: 2 }, stratOpt)); 
     
-    bearLine1 = chart.addLineSeries(Object.assign({ color: '#00aa00' }, stratOpt)); // R1 (最新)
-    bearLine2 = chart.addLineSeries(Object.assign({ color: '#66cc66', lineStyle: 2 }, stratOpt)); // R2 (虛線區隔)
+    // R1 (實線), R2 (虛線)
+    bearLine1 = chart.addLineSeries(Object.assign({ color: '#00aa00' }, stratOpt)); 
+    bearLine2 = chart.addLineSeries(Object.assign({ color: '#66cc66', lineStyle: 2 }, stratOpt)); 
 
     /* 副圖 */
     volChart = fixedChart(document.getElementById("volume"), 100);
@@ -172,7 +175,7 @@
     bbM.setData(m); bbM.applyOptions({ visible: !!opt.showBB });
     bbL.setData(l); bbL.applyOptions({ visible: !!opt.showBB });
 
-    // 5. 型態線 (清空)
+    // 5. 型態線
     [resLine,supLine,trendUp,trendDn,triUp,triLow,wLine1,wLine2,wNeck].forEach(s=>{
       s.setData([]); s.applyOptions({ visible:false });
     });
@@ -204,6 +207,7 @@
                 ]);
                 lineSeries.applyOptions({ visible: true });
             } else {
+                // ⭐ 絕對清空，防止 K 線縮小
                 lineSeries.setData([]);
                 lineSeries.applyOptions({ visible: false });
             }

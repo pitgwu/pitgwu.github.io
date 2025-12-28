@@ -19,15 +19,14 @@
   Strat.calculate = function (data) {
     const markers = [];
     
-    // 使用堆疊 (Stack) 來記憶所有突破過的關卡
-    // 陣列尾端 (End) 是最新的關卡
+    // 使用堆疊 (Stack) 記憶關卡
+    // 陣列尾端 = 最新的關卡
     const bullStack = []; 
     let bullBrokenCount = 0; 
 
     const bearStack = [];
     let bearBrokenCount = 0; 
 
-    // 狀態標記
     let bullTrend = 0; 
     let bearTrend = 0;
 
@@ -40,7 +39,7 @@
       const refHigh = getRefHigh(data, i);
       const refLow = getRefLow(data, i);
 
-      // 取出堆疊最上層 (當前生效的)
+      // 取得當前生效的支撐 (S1) 與 壓力 (R1)
       let currentSupport = bullStack.length > 0 ? bullStack[bullStack.length - 1] : NaN;
       let currentResist = bearStack.length > 0 ? bearStack[bearStack.length - 1] : NaN;
 
@@ -50,9 +49,9 @@
       
       // A. 創新高：加入新支撐
       if (!isNaN(refHigh) && cur.close > refHigh) {
-        // 如果目前沒支撐，或者股價突破了比現有支撐更高的高點
+        // 如果目前沒支撐，或突破了比現有支撐更高的高點，就堆疊上去
         if (isNaN(currentSupport) || refHigh > currentSupport) {
-            bullStack.push(refHigh); // 推入堆疊
+            bullStack.push(refHigh); // Push S1
             currentSupport = refHigh;
             
             if (bullTrend === 0) {
@@ -70,8 +69,9 @@
       if (!isNaN(currentSupport)) {
         if (cur.close < currentSupport) {
             bullBrokenCount++;
+            // 跌破滿 3 天 -> 移除最上面的支撐 (Pop S1)
+            // 原本的 S2 會自動遞補成為新的 S1
             if (bullBrokenCount >= 3) {
-                // 跌破三天 -> 移除第一道防線 (Pop)
                 bullStack.pop(); 
                 bullBrokenCount = 0; 
                 bullTrend = 0; 
@@ -88,7 +88,7 @@
       // A. 創新低：加入新壓力
       if (!isNaN(refLow) && cur.close < refLow) {
         if (isNaN(currentResist) || refLow < currentResist) {
-            bearStack.push(refLow);
+            bearStack.push(refLow); // Push R1
             currentResist = refLow;
             
             if (bearTrend === 0) {
@@ -107,7 +107,7 @@
         if (cur.close > currentResist) {
             bearBrokenCount++;
             if (bearBrokenCount >= 3) {
-                bearStack.pop(); // 移除第一道壓力
+                bearStack.pop(); // Pop R1
                 bearBrokenCount = 0;
                 bearTrend = 0;
             }
@@ -117,16 +117,17 @@
       }
     }
 
-    // ⭐ 回傳最後狀態的「兩層」關卡
+    // ⭐ 回傳堆疊中最後兩筆資料 (S1, S2)
     const lenBull = bullStack.length;
     const lenBear = bearStack.length;
 
     return { 
       markers, 
-      // S1: 最新的支撐, S2: 次新的支撐
+      // S1: 最新 (Stack Top)
       bullS1: lenBull > 0 ? bullStack[lenBull - 1] : NaN,
+      // S2: 次新 (Stack Top - 1)
       bullS2: lenBull > 1 ? bullStack[lenBull - 2] : NaN,
-      // R1: 最新的壓力, R2: 次新的壓力
+      
       bearR1: lenBear > 0 ? bearStack[lenBear - 1] : NaN,
       bearR2: lenBear > 1 ? bearStack[lenBear - 2] : NaN
     };
