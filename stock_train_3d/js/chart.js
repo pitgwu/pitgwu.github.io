@@ -23,13 +23,7 @@
   let indAutoL1, indAutoL2;       // KD / RSI
   let macdL1, macdL2, macdHist;   // MACD
 
-  // ===== Cache (確保均線不重算) =====
-  let maCache = { ma5: [], ma10: [], ma20: [] };
-  let bbCache = { u: [], m: [], l: [] };
-  let cacheReady = false;
-  
-  // ===== 三日支撐／壓力線 (改用 PriceLine 變數) =====
-  // 舊的 stratBullLine / stratBearLine 移除，改用這兩個變數
+  // ===== 三日支撐／壓力線 (PriceLine 參照) =====
   let activeBullPriceLine = null;
   let activeBearPriceLine = null;
 
@@ -43,6 +37,7 @@
       rightPriceScale: { 
         autoScale: true, 
         visible: true,
+        // 增加上下邊距，避免 K 線貼底或貼頂
         scaleMargins: { top: 0.1, bottom: 0.1 }
       },
       leftPriceScale:  { visible: false },
@@ -62,12 +57,7 @@
   }
 
   function init() {
-
-    cacheReady = false;
-    maCache = { ma5: [], ma10: [], ma20: [] };
-    bbCache = { u: [], m: [], l: [] };
-    
-    // 重置 PriceLine 參照
+    // 清空 PriceLine 參照
     activeBullPriceLine = null;
     activeBearPriceLine = null;
 
@@ -81,12 +71,9 @@
 
     // ✅ K 線
     candle = chart.addCandlestickSeries({
-      upColor: "#ff0000",
-      downColor: "#00aa00",
-      borderUpColor: "#ff0000",
-      borderDownColor: "#00aa00",
-      wickUpColor: "#ff0000",
-      wickDownColor: "#00aa00",
+      upColor: "#ff0000", downColor: "#00aa00",
+      borderUpColor: "#ff0000", borderDownColor: "#00aa00",
+      wickUpColor: "#ff0000", wickDownColor: "#00aa00",
       priceScaleId: "right"
     });
 
@@ -103,18 +90,13 @@
     // 型態線
     resLine = chart.addLineSeries({ color:"#dd4444", lineWidth:1, visible:false, priceScaleId: "right" });
     supLine = chart.addLineSeries({ color:"#44aa44", lineWidth:1, visible:false, priceScaleId: "right" });
-
     trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, visible:false, priceScaleId: "right" });
     trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, visible:false, priceScaleId: "right" });
-
     triUp  = chart.addLineSeries({ color:"#aa6600", lineWidth:1, visible:false, priceScaleId: "right" });
     triLow = chart.addLineSeries({ color:"#5588ff", lineWidth:1, visible:false, priceScaleId: "right" });
-
     wLine1 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
     wLine2 = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
     wNeck  = chart.addLineSeries({ color:"#cc00cc", lineWidth:1, visible:false, priceScaleId: "right" });
-
-    // ⭐ 注意：這裡不再建立 stratBullLine / stratBearLine (改用 PriceLine 機制)
 
     /* ===== 成交量 ===== */
     volChart = fixedChart(document.getElementById("volume"), 100);
@@ -127,7 +109,6 @@
 
     indAutoL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
     indAutoL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
-
     macdL1 = indChart.addLineSeries({ lineWidth: 2, color: "#1f77b4" });
     macdL2 = indChart.addLineSeries({ lineWidth: 2, color: "#aa00aa" });
     macdHist = indChart.addHistogramSeries({});
@@ -148,47 +129,43 @@
     const visibleBars = opt.visibleBars || 40;
     const indType = opt.indicatorType;
 
-    // ===== 1. 計算 Cache (均線/布林) =====
-    // 這裡我們把資料算好存起來，確保資料一定是對的
-    if (!cacheReady) {
-      const closes = shown.map(c => c.close);
-
-      maCache.ma5  = U.sma(closes, 5).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
-      maCache.ma10 = U.sma(closes,10).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
-      maCache.ma20 = U.sma(closes,20).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
-
-      bbCache.u = shown.map((c,i)=>(indicators.BB.upper[i]!=null?{time:c.time,value:indicators.BB.upper[i]}:null)).filter(Boolean);
-      bbCache.m = shown.map((c,i)=>(indicators.BB.mid[i]!=null?{time:c.time,value:indicators.BB.mid[i]}:null)).filter(Boolean);
-      bbCache.l = shown.map((c,i)=>(indicators.BB.lower[i]!=null?{time:c.time,value:indicators.BB.lower[i]}:null)).filter(Boolean);
-
-      // 寫入 Series
-      ma5.setData(maCache.ma5);
-      ma10.setData(maCache.ma10);
-      ma20.setData(maCache.ma20);
-
-      bbU.setData(bbCache.u);
-      bbM.setData(bbCache.m);
-      bbL.setData(bbCache.l);
-
-      cacheReady = true;
-    }
-
-    // ===== 2. K線與成交量 =====
+    // ===== 1. K線與成交量 =====
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // ===== 3. 控制均線顯示 =====
-    // 直接操作 visible 屬性，最穩定的做法
-    ma5.applyOptions({ visible: !!opt.showMA });
-    ma10.applyOptions({ visible: !!opt.showMA });
-    ma20.applyOptions({ visible: !!opt.showMA });
+    // ===== 2. 即時計算均線 (移除 Cache 邏輯，修復不更新問題) =====
+    const closes = shown.map(c => c.close);
 
-    // ===== 4. 控制布林顯示 =====
-    bbU.applyOptions({ visible: !!opt.showBB });
-    bbM.applyOptions({ visible: !!opt.showBB });
-    bbL.applyOptions({ visible: !!opt.showBB });
+    if (opt.showMA) {
+      const ma5Pts = U.sma(closes, 5).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+      const ma10Pts = U.sma(closes, 10).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+      const ma20Pts = U.sma(closes, 20).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
+      
+      setLineDataSafe(ma5, ma5Pts, true);
+      setLineDataSafe(ma10, ma10Pts, true);
+      setLineDataSafe(ma20, ma20Pts, true);
+    } else {
+      ma5.applyOptions({ visible:false }); 
+      ma10.applyOptions({ visible:false }); 
+      ma20.applyOptions({ visible:false });
+    }
 
-    // ===== 5. 型態線 (清空舊的) =====
+    // ===== 3. 即時計算布林 =====
+    if (opt.showBB) {
+      const u = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
+      const m = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
+      const l = shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)).filter(Boolean);
+      
+      setLineDataSafe(bbU, u, true);
+      setLineDataSafe(bbM, m, true);
+      setLineDataSafe(bbL, l, true);
+    } else {
+      bbU.applyOptions({ visible:false }); 
+      bbM.applyOptions({ visible:false }); 
+      bbL.applyOptions({ visible:false });
+    }
+
+    // ===== 4. 型態線 (清空舊的) =====
     [resLine,supLine,trendUp,trendDn,triUp,triLow,wLine1,wLine2,wNeck].forEach(s=>{
       s.setData([]);
       s.applyOptions({ visible:false });
@@ -203,7 +180,7 @@
       }
     }
     
-    // (省略: Trendline, Triangle, WPattern 的繪圖邏輯，保持原本的即可)
+    // (趨勢線/三角/W底 保持不變)
     if (opt.trendlines) {
       const { upLines, downLines } = opt.trendlines;
       if (upLines?.length) {
@@ -217,14 +194,11 @@
         trendDn.applyOptions({ visible:true });
       }
     }
-
     if (opt.triangle) {
       triUp.setData([{ time: shown[opt.triangle.upperLine.p1.index].time, value: opt.triangle.upperLine.p1.price }, { time: shown[opt.triangle.upperLine.p2.index].time, value: opt.triangle.upperLine.p2.price }]);
       triLow.setData([{ time: shown[opt.triangle.lowerLine.p1.index].time, value: opt.triangle.lowerLine.p1.price }, { time: shown[opt.triangle.lowerLine.p2.index].time, value: opt.triangle.lowerLine.p2.price }]);
-      triUp.applyOptions({ visible:true });
-      triLow.applyOptions({ visible:true });
+      triUp.applyOptions({ visible:true }); triLow.applyOptions({ visible:true });
     }
-
     if (opt.wPattern) {
       const W = opt.wPattern;
       wLine1.setData([{ time: shown[W.p1.index].time, value: W.p1.price }, { time: shown[W.p2.index].time, value: W.p2.price }]);
@@ -234,10 +208,10 @@
     }
 
     // ===========================================
-    // ⭐⭐ 6. 核心修正：三日戰法 PriceLine ⭐⭐
+    // ⭐⭐ 核心修正：三日戰法 PriceLine ⭐⭐
     // ===========================================
     
-    // A. 先移除舊的線 (不管開關有沒有開，先清乾淨)
+    // A. 先移除舊的線
     if (activeBullPriceLine) {
         candle.removePriceLine(activeBullPriceLine);
         activeBullPriceLine = null;
@@ -249,26 +223,26 @@
     
     candle.setMarkers([]); // 清空標記
 
-    // B. 如果開關打開，且有資料，就畫新的「死板水平線」
+    // B. 如果開關打開，且有資料
     if (opt.strat3Day) {
         candle.setMarkers(opt.strat3Day.markers || []);
         
         const bullPrice = opt.strat3Day.currentBullSupport;
         const bearPrice = opt.strat3Day.currentBearResist;
 
-        // 畫上最新的紅色支撐線 (如果是有效的數值)
-        if (!isNaN(bullPrice)) {
+        // ⭐ 嚴格檢查：必須是數字 且 大於 0 (防止 0 造成壓縮)
+        if (!isNaN(bullPrice) && bullPrice > 0) {
             activeBullPriceLine = candle.createPriceLine({
                 price: bullPrice,
                 color: '#ff0000',
                 lineWidth: 2,
-                lineStyle: 0, // 0 = 實線 (Solid)
-                axisLabelVisible: false, // 不要在右邊顯示標籤
+                lineStyle: 0, // 實線
+                axisLabelVisible: false,
             });
         }
 
-        // 畫上最新的綠色壓力線
-        if (!isNaN(bearPrice)) {
+        // ⭐ 嚴格檢查：必須是數字 且 大於 0
+        if (!isNaN(bearPrice) && bearPrice > 0) {
             activeBearPriceLine = candle.createPriceLine({
                 price: bearPrice,
                 color: '#00aa00',
@@ -278,8 +252,6 @@
             });
         }
     }
-    // ===========================================
-
 
     // ===== 指標區 =====
     indAutoL1.setData([]); indAutoL2.setData([]);
