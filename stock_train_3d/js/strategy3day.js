@@ -8,13 +8,13 @@
   // 演算法需求：今日收盤價 > 三日K棒(含今日)的高點
   // 這其實等於：今日收盤價 > 前兩日的高點 (因為若大於前兩日高點，且是紅K，通常就是三日最高)
   function getRefHigh(data, index) {
-    if (index < 2) return null; // 修正：回傳 null 而不是 Infinity
+    if (index < 2) return NaN; // 修正：回傳 NaN 而不是 Infinity
     // 取前兩日 (i-1, i-2) 的最高點做比較基準
     return Math.max(data[index - 1].high, data[index - 2].high);
   }
 
   function getRefLow(data, index) {
-    if (index < 2) return null; // 修正：回傳 null 而不是 Infinity
+    if (index < 2) return NaN; // 修正：回傳 NaN 而不是 Infinity
     return Math.min(data[index - 1].low, data[index - 2].low);
   }
 
@@ -25,12 +25,12 @@
 
     // --- 多頭狀態變數 ---
     let bullTrend = 0; // 0:無, 1:第一次(黃), 2:第二次+(紅)
-    let bullSupport = null; // 紅色支撐線數值
+    let bullSupport = NaN; // 紅色支撐線數值
     let bullBrokenCount = 0; // 跌破天數計數
 
     // --- 空頭狀態變數 ---
     let bearTrend = 0; // 0:無, 1:第一次(黑), 2:第二次+(綠)
-    let bearResist = null; // 綠色壓力線數值
+    let bearResist = NaN; // 綠色壓力線數值
     let bearBrokenCount = 0; // 突破天數計數
 
     for (let i = 0; i < data.length; i++) {
@@ -39,8 +39,8 @@
 
       // 前兩根略過
       if (i < 2) {
-        bullLine.push({ time, value: null });
-        bearLine.push({ time, value: null });
+        bullLine.push({ time, value: NaN });
+        bearLine.push({ time, value: NaN });
         continue;
       }
 
@@ -54,7 +54,7 @@
       // 條件：收盤價 > 三日高 (即大於前兩日高)
       if (cur.close > refHigh) {
         // 只要創新高，空頭結構直接破壞 (視策略而定，這裡先重置空頭)
-        // bearTrend = 0; bearResist = null; 
+        // bearTrend = 0; bearResist = NaN; 
 
         if (bullTrend === 0) {
           // 第一次
@@ -75,14 +75,14 @@
 
       } else {
         // 沒有創新高，檢查是否跌破支撐
-        if (bullSupport !== null) {
+        if (bullSupport !== NaN) {
           if (cur.close < bullSupport) {
             bullBrokenCount++;
 			
 			// ⭐ 修正重點：滿 3 天就刪除 (原本是 >3)
             if (bullBrokenCount >= 3) {
               // 跌破三天 -> 刪除線
-              bullSupport = null;
+              bullSupport = NaN;
               bullTrend = 0;
               bullBrokenCount = 0;
             }
@@ -114,13 +114,13 @@
 
       } else {
         // 沒創新低，檢查是否突破壓力
-        if (bearResist !== null) {
+        if (bearResist !== NaN) {
           if (cur.close > bearResist) {
             bearBrokenCount++;
 			
 			// ⭐ 修正重點：滿 3 天就刪除
             if (bearBrokenCount >= 3) {
-              bearResist = null;
+              bearResist = NaN;
               bearTrend = 0;
               bearBrokenCount = 0;
             }
