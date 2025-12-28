@@ -25,13 +25,11 @@
   let indAutoL1, indAutoL2;       
   let macdL1, macdL2, macdHist;   
 
-  // 輔助：清洗數據，確保 value 是有效數字
+  // 輔助：清洗數據
   function cleanData(data) {
-    // filter out null/undefined items first, then check value
     return data.filter(d => d && d.time != null && Number.isFinite(d.value));
   }
 
-  // 輔助：建立圖表
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
       width: el.clientWidth,
@@ -61,7 +59,7 @@
       
     chart = fixedChart(document.getElementById("chart"), 420);
 
-    // 1. K 線 (主角)
+    // 1. K 線
     candle = chart.addCandlestickSeries({
       upColor: "#ff0000", downColor: "#00aa00",
       borderUpColor: "#ff0000", borderDownColor: "#00aa00",
@@ -69,12 +67,12 @@
       priceScaleId: "right"
     });
 
-    // 2. 定義「輔助線」設定：強制忽略縮放
+    // 2. 定義「完全忽略縮放」的設定
     const noScaleOpt = {
         lineWidth: 1,
         visible: false,
         priceScaleId: "right",
-        // ⭐ 關鍵：告訴圖表不要參考這些線來計算 Y 軸
+        // ⭐ 絕對關鍵：告訴圖表不要參考這些線的數值
         autoscaleInfoProvider: () => null 
     };
 
@@ -99,17 +97,15 @@
     wLine2 = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScaleOpt));
     wNeck  = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScaleOpt));
 
-    // 3. 三日戰法線 (LineSeries，加上忽略縮放設定)
-    const stratOpt = {
+    // 3. 三日戰法線
+    // 使用 LineSeries 繪製水平線，並套用 noScaleOpt
+    const stratOpt = Object.assign({}, noScaleOpt, {
         lineWidth: 2,
-        lineStyle: 0, // 實線
-        visible: false,
-        priceScaleId: "right",
-        autoscaleInfoProvider: () => null, // ⭐ 關鍵：絕對不要影響縮放
+        lineStyle: 0,
         crosshairMarkerVisible: false,
         lastValueVisible: false,
         priceLineVisible: false
-    };
+    });
     stratBullLine = chart.addLineSeries(Object.assign({ color: '#ff0000' }, stratOpt));
     stratBearLine = chart.addLineSeries(Object.assign({ color: '#00aa00' }, stratOpt));
 
@@ -131,7 +127,6 @@
   }
 
   function update(shown, indicators, opt) {
-    // filter out null/undefined items
     shown = shown.filter(c => c && c.time != null);
     if (!shown || shown.length < 2) return;
 
@@ -143,14 +138,14 @@
     // 1. K線
     candle.setData(shown);
 
-    // 2. 成交量 (檢查數值)
+    // 2. 成交量
     const volData = shown.map(c => ({ 
         time: c.time, 
         value: (c.volume != null && Number.isFinite(c.volume)) ? c.volume : 0 
     }));
     volSeries.setData(volData);
 
-    // 3. 均線 (使用 cleanData)
+    // 3. 均線
     const closes = shown.map(c => c.close);
     const ma5Data = cleanData(U.sma(closes, 5).map((v,i)=>({ time: shown[i].time, value: v })));
     const ma10Data = cleanData(U.sma(closes, 10).map((v,i)=>({ time: shown[i].time, value: v })));
@@ -160,7 +155,7 @@
     ma10.setData(ma10Data); ma10.applyOptions({ visible: !!opt.showMA });
     ma20.setData(ma20Data); ma20.applyOptions({ visible: !!opt.showMA });
 
-    // 4. 布林通道 (使用 cleanData)
+    // 4. 布林
     const u = cleanData(shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)));
     const m = cleanData(shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)));
     const l = cleanData(shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)));
@@ -189,40 +184,40 @@
         const bullPrice = opt.strat3Day.currentBullSupport;
         const bearPrice = opt.strat3Day.currentBearResist;
 
-        // 畫紅色支撐線
-        // 加強檢查：必須是有效數字且大於 0
-        if (Number.isFinite(bullPrice) && bullPrice > 0) {
+        // 紅色支撐線：嚴格檢查
+        // ⭐ 必須 > 1 (避免 0 值壓縮) 且必須是有限數值
+        if (Number.isFinite(bullPrice) && bullPrice > 1) {
             stratBullLine.setData([
                 { time: startTime, value: bullPrice },
                 { time: endTime, value: bullPrice }
             ]);
             stratBullLine.applyOptions({ visible: true });
         } else {
-            // ⭐ 關鍵修正：無效時徹底清空數據，防止影響縮放
+            // ⭐ 絕對清空，傳入空陣列，這是解決 K 線縮小的核心
             stratBullLine.setData([]); 
             stratBullLine.applyOptions({ visible: false });
         }
 
-        // 畫綠色壓力線
-        if (Number.isFinite(bearPrice) && bearPrice > 0) {
+        // 綠色壓力線：嚴格檢查
+        if (Number.isFinite(bearPrice) && bearPrice > 1) {
             stratBearLine.setData([
                 { time: startTime, value: bearPrice },
                 { time: endTime, value: bearPrice }
             ]);
             stratBearLine.applyOptions({ visible: true });
         } else {
-            // ⭐ 關鍵修正：徹底清空
+            // ⭐ 絕對清空
             stratBearLine.setData([]);
             stratBearLine.applyOptions({ visible: false });
         }
 
     } else {
-        // 關閉功能時，徹底清空數據
+        // 功能關閉時，清空數據
         stratBullLine.setData([]); stratBullLine.applyOptions({ visible: false });
         stratBearLine.setData([]); stratBearLine.applyOptions({ visible: false });
     }
 
-    // 指標區 (使用 cleanData)
+    // 指標區
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
     if (indType === "kd") {
