@@ -32,16 +32,12 @@
       width: el.clientWidth,
       height,
       layout: { background: { color: "#fff" }, textColor: "#222" },
-
-      // ✅ 正確控制價格刻度
       rightPriceScale: { 
         autoScale: true, 
         visible: true,
-        // 增加上下邊距，避免 K 線貼底或貼頂
         scaleMargins: { top: 0.1, bottom: 0.1 }
       },
       leftPriceScale:  { visible: false },
-
       timeScale: {
         timeVisible: true,          
         secondsVisible: false,
@@ -50,14 +46,12 @@
         fixRightEdge: true,
         rightBarStaysOnScroll: true,   
       },
-      
       handleScroll: false,
       handleScale: false,
     });
   }
 
   function init() {
-    // 清空 PriceLine 參照
     activeBullPriceLine = null;
     activeBearPriceLine = null;
 
@@ -77,7 +71,7 @@
       priceScaleId: "right"
     });
 
-    // ✅ 均線 (Line Series)
+    // ✅ 均線
     ma5 = chart.addLineSeries({ color:"#f00", lineWidth:1, visible:false, priceScaleId: "right" });
     ma10 = chart.addLineSeries({ color:"#0a0", lineWidth:1, visible:false, priceScaleId: "right" });
     ma20 = chart.addLineSeries({ color:"#00f", lineWidth:1, visible:false, priceScaleId: "right" });
@@ -133,7 +127,7 @@
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // ===== 2. 即時計算均線 (移除 Cache 邏輯，修復不更新問題) =====
+    // ===== 2. 均線邏輯 (修正重點) =====
     const closes = shown.map(c => c.close);
 
     if (opt.showMA) {
@@ -145,12 +139,13 @@
       setLineDataSafe(ma10, ma10Pts, true);
       setLineDataSafe(ma20, ma20Pts, true);
     } else {
-      ma5.applyOptions({ visible:false }); 
-      ma10.applyOptions({ visible:false }); 
-      ma20.applyOptions({ visible:false });
+      // ⭐ 修正：關閉時清空數據，避免干擾刻度計算
+      ma5.setData([]); ma5.applyOptions({ visible:false }); 
+      ma10.setData([]); ma10.applyOptions({ visible:false }); 
+      ma20.setData([]); ma20.applyOptions({ visible:false });
     }
 
-    // ===== 3. 即時計算布林 =====
+    // ===== 3. 布林通道 (修正重點) =====
     if (opt.showBB) {
       const u = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
       const m = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
@@ -160,9 +155,10 @@
       setLineDataSafe(bbM, m, true);
       setLineDataSafe(bbL, l, true);
     } else {
-      bbU.applyOptions({ visible:false }); 
-      bbM.applyOptions({ visible:false }); 
-      bbL.applyOptions({ visible:false });
+      // ⭐ 修正：關閉時清空數據
+      bbU.setData([]); bbU.applyOptions({ visible:false }); 
+      bbM.setData([]); bbM.applyOptions({ visible:false }); 
+      bbL.setData([]); bbL.applyOptions({ visible:false });
     }
 
     // ===== 4. 型態線 (清空舊的) =====
@@ -180,7 +176,7 @@
       }
     }
     
-    // (趨勢線/三角/W底 保持不變)
+    // (Trendline/Triangle/WPattern)
     if (opt.trendlines) {
       const { upLines, downLines } = opt.trendlines;
       if (upLines?.length) {
@@ -208,7 +204,7 @@
     }
 
     // ===========================================
-    // ⭐⭐ 核心修正：三日戰法 PriceLine ⭐⭐
+    // ⭐⭐ 核心：三日戰法 PriceLine ⭐⭐
     // ===========================================
     
     // A. 先移除舊的線
@@ -223,25 +219,25 @@
     
     candle.setMarkers([]); // 清空標記
 
-    // B. 如果開關打開，且有資料
+    // B. 如果開關打開
     if (opt.strat3Day) {
         candle.setMarkers(opt.strat3Day.markers || []);
         
         const bullPrice = opt.strat3Day.currentBullSupport;
         const bearPrice = opt.strat3Day.currentBearResist;
 
-        // ⭐ 嚴格檢查：必須是數字 且 大於 0 (防止 0 造成壓縮)
+        // 畫上最新的紅色支撐線 (必須 > 0)
         if (!isNaN(bullPrice) && bullPrice > 0) {
             activeBullPriceLine = candle.createPriceLine({
                 price: bullPrice,
                 color: '#ff0000',
                 lineWidth: 2,
-                lineStyle: 0, // 實線
+                lineStyle: 0, 
                 axisLabelVisible: false,
             });
         }
 
-        // ⭐ 嚴格檢查：必須是數字 且 大於 0
+        // 畫上最新的綠色壓力線 (必須 > 0)
         if (!isNaN(bearPrice) && bearPrice > 0) {
             activeBearPriceLine = candle.createPriceLine({
                 price: bearPrice,
