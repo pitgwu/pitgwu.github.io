@@ -1,5 +1,4 @@
 // js/chart.js
-
 (function (global) {
   "use strict";
 
@@ -13,7 +12,7 @@
   let ma5, ma10, ma20;
   let bbU, bbM, bbL;
 
-  // 型態線 Series (這些是短暫出現的，可以清空)
+  // 型態線 Series
   let resLine, supLine;
   let trendUp, trendDn;
   let triUp, triLow;
@@ -23,10 +22,11 @@
   let indAutoL1, indAutoL2;       
   let macdL1, macdL2, macdHist;   
 
-  // ===== 三日戰法 PriceLine =====
+  // ===== 三日戰法 (水平線) =====
   let activeBullPriceLine = null;
   let activeBearPriceLine = null;
 
+  // 輔助：建立圖表
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
       width: el.clientWidth,
@@ -51,6 +51,7 @@
     });
   }
 
+  // 初始化
   function init() {
     activeBullPriceLine = null;
     activeBearPriceLine = null;
@@ -63,7 +64,7 @@
       
     chart = fixedChart(document.getElementById("chart"), 420);
 
-    // ✅ K 線
+    // K 線
     candle = chart.addCandlestickSeries({
       upColor: "#ff0000", downColor: "#00aa00",
       borderUpColor: "#ff0000", borderDownColor: "#00aa00",
@@ -71,46 +72,36 @@
       priceScaleId: "right"
     });
 
-    // ✅ 均線 (設定 autoscaleInfoProvider: null)
-    // 這樣即使數值有變，也不會影響 K 線縮放
-    const maOpt = { 
-        lineWidth: 1, 
-        visible: false, 
-        priceScaleId: "right",
-        autoscaleInfoProvider: () => null 
-    };
-    ma5 = chart.addLineSeries({ color:"#f00", ...maOpt });
-    ma10 = chart.addLineSeries({ color:"#0a0", ...maOpt });
-    ma20 = chart.addLineSeries({ color:"#00f", ...maOpt });
-
-    // ✅ 布林通道
-    const bbOpt = { 
-        visible: false, 
-        priceScaleId: "right",
-        autoscaleInfoProvider: () => null 
-    };
-    bbU = chart.addLineSeries({ color:"#ffa500", ...bbOpt });
-    bbM = chart.addLineSeries({ color:"#0066cc", ...bbOpt });
-    bbL = chart.addLineSeries({ color:"#008800", ...bbOpt });
-
-    // ✅ 型態線 (短暫出現)
-    const patternOpt = {
+    // 通用設定：忽略縮放
+    const noScale = {
         lineWidth: 1,
         visible: false,
         priceScaleId: "right",
         autoscaleInfoProvider: () => null 
     };
-    resLine = chart.addLineSeries({ color:"#dd4444", ...patternOpt });
-    supLine = chart.addLineSeries({ color:"#44aa44", ...patternOpt });
-    trendUp = chart.addLineSeries({ color:"#00aa88", lineWidth:2, visible:false, priceScaleId: "right", autoscaleInfoProvider: () => null });
-    trendDn = chart.addLineSeries({ color:"#aa0044", lineWidth:2, visible:false, priceScaleId: "right", autoscaleInfoProvider: () => null });
-    triUp  = chart.addLineSeries({ color:"#aa6600", ...patternOpt });
-    triLow = chart.addLineSeries({ color:"#5588ff", ...patternOpt });
-    wLine1 = chart.addLineSeries({ color:"#cc00cc", ...patternOpt });
-    wLine2 = chart.addLineSeries({ color:"#cc00cc", ...patternOpt });
-    wNeck  = chart.addLineSeries({ color:"#cc00cc", ...patternOpt });
 
-    /* ===== 副圖 ===== */
+    // 均線
+    ma5 = chart.addLineSeries(Object.assign({ color:"#f00" }, noScale));
+    ma10 = chart.addLineSeries(Object.assign({ color:"#0a0" }, noScale));
+    ma20 = chart.addLineSeries(Object.assign({ color:"#00f" }, noScale));
+
+    // 布林
+    bbU = chart.addLineSeries(Object.assign({ color:"#ffa500" }, noScale));
+    bbM = chart.addLineSeries(Object.assign({ color:"#0066cc" }, noScale));
+    bbL = chart.addLineSeries(Object.assign({ color:"#008800" }, noScale));
+
+    // 型態線
+    resLine = chart.addLineSeries(Object.assign({ color:"#dd4444" }, noScale));
+    supLine = chart.addLineSeries(Object.assign({ color:"#44aa44" }, noScale));
+    trendUp = chart.addLineSeries(Object.assign({ color:"#00aa88", lineWidth:2 }, noScale));
+    trendDn = chart.addLineSeries(Object.assign({ color:"#aa0044", lineWidth:2 }, noScale));
+    triUp  = chart.addLineSeries(Object.assign({ color:"#aa6600" }, noScale));
+    triLow = chart.addLineSeries(Object.assign({ color:"#5588ff" }, noScale));
+    wLine1 = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScale));
+    wLine2 = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScale));
+    wNeck  = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScale));
+
+    /* 副圖 */
     volChart = fixedChart(document.getElementById("volume"), 100);
     volChart.timeScale().applyOptions({ visible: false });
     volSeries = volChart.addHistogramSeries({ priceFormat: { type: "volume" } });
@@ -138,45 +129,41 @@
 
     const visibleBars = opt.visibleBars || 40;
     const indType = opt.indicatorType;
-
-    // 取得當前畫面最左和最右的時間 (三日線用)
     const startTime = shown[0].time;
     const endTime = shown[shown.length - 1].time;
 
-    // ===== 1. K線與成交量 =====
+    // 1. K線與成交量
     candle.setData(shown);
     volSeries.setData(shown.map(c => ({ time: c.time, value: c.volume })));
 
-    // ===== 2. 均線 (⭐ 修正：永遠塞入數據，只切換 visible) =====
+    // 2. 均線 (永遠塞入數據)
     const closes = shown.map(c => c.close);
     const ma5Pts = U.sma(closes, 5).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
     const ma10Pts = U.sma(closes, 10).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
     const ma20Pts = U.sma(closes, 20).map((v,i)=>v!=null?{ time: shown[i].time, value: v }:null).filter(Boolean);
 
-    // 不管 opt.showMA 是什麼，都把數據塞進去，保持圖表穩定
     ma5.setData(ma5Pts);
     ma10.setData(ma10Pts);
     ma20.setData(ma20Pts);
-
-    // 只控制顯示/隱藏
+    
     ma5.applyOptions({ visible: !!opt.showMA });
     ma10.applyOptions({ visible: !!opt.showMA });
     ma20.applyOptions({ visible: !!opt.showMA });
 
-    // ===== 3. 布林通道 (⭐ 修正：永遠塞入數據) =====
-    const bbUData = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
-    const bbMData = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
-    const bbLData = shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)).filter(Boolean);
+    // 3. 布林通道 (永遠塞入數據)
+    const u = shown.map((c,i)=> (indicators.BB.upper[i] != null ? { time:c.time, value:indicators.BB.upper[i] } : null)).filter(Boolean);
+    const m = shown.map((c,i)=> (indicators.BB.mid[i]   != null ? { time:c.time, value:indicators.BB.mid[i] }   : null)).filter(Boolean);
+    const l = shown.map((c,i)=> (indicators.BB.lower[i] != null ? { time:c.time, value:indicators.BB.lower[i] } : null)).filter(Boolean);
     
-    bbU.setData(bbUData);
-    bbM.setData(bbMData);
-    bbL.setData(bbLData);
+    bbU.setData(u);
+    bbM.setData(m);
+    bbL.setData(l);
     
     bbU.applyOptions({ visible: !!opt.showBB });
     bbM.applyOptions({ visible: !!opt.showBB });
     bbL.applyOptions({ visible: !!opt.showBB });
 
-    // ===== 4. 型態線 (這些可以清空，因為它們不一定每天都有) =====
+    // 4. 型態線 (這部分可以清空)
     [resLine,supLine,trendUp,trendDn,triUp,triLow,wLine1,wLine2,wNeck].forEach(s=>{
       s.setData([]);
       s.applyOptions({ visible:false });
@@ -191,7 +178,6 @@
       }
     }
     
-    // (Trendline/Triangle/WPattern - 保持不變)
     if (opt.trendlines) {
       const { upLines, downLines } = opt.trendlines;
       if (upLines?.length) {
@@ -218,11 +204,7 @@
       wLine1.applyOptions({ visible:true }); wLine2.applyOptions({ visible:true }); wNeck.applyOptions({ visible:true });
     }
 
-    // ===========================================
-    // ⭐⭐ 三日戰法 (水平線繪製) ⭐⭐
-    // ===========================================
-    
-    // 1. 移除舊 PriceLine
+    // 5. 三日戰法 (PriceLine 處理)
     if (activeBullPriceLine) {
         candle.removePriceLine(activeBullPriceLine);
         activeBullPriceLine = null;
@@ -233,37 +215,25 @@
     }
     candle.setMarkers([]); 
 
-    // 2. 如果開關打開
     if (opt.strat3Day) {
         candle.setMarkers(opt.strat3Day.markers || []);
         
         const bullPrice = opt.strat3Day.currentBullSupport;
         const bearPrice = opt.strat3Day.currentBearResist;
 
-        // 畫上最新的紅色支撐線 (必須 > 0)
         if (!isNaN(bullPrice) && bullPrice > 0) {
             activeBullPriceLine = candle.createPriceLine({
-                price: bullPrice,
-                color: '#ff0000',
-                lineWidth: 2,
-                lineStyle: 0, 
-                axisLabelVisible: false,
+                price: bullPrice, color: '#ff0000', lineWidth: 2, lineStyle: 0, axisLabelVisible: false,
             });
         }
-
-        // 畫上最新的綠色壓力線 (必須 > 0)
         if (!isNaN(bearPrice) && bearPrice > 0) {
             activeBearPriceLine = candle.createPriceLine({
-                price: bearPrice,
-                color: '#00aa00',
-                lineWidth: 2,
-                lineStyle: 0,
-                axisLabelVisible: false,
+                price: bearPrice, color: '#00aa00', lineWidth: 2, lineStyle: 0, axisLabelVisible: false,
             });
         }
     }
 
-    // ===== 指標區 =====
+    // 指標區
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
 
@@ -285,11 +255,11 @@
     const start = Math.max(0, shown.length - visibleBars);
     const from = shown[start].time;
     const to   = shown[shown.length - 1].time;
-
     chart.timeScale().setVisibleRange({ from, to });
     volChart.timeScale().setVisibleRange({ from, to });
     indChart.timeScale().setVisibleRange({ from, to });
   }
 
   global.ChartManager = { init, update };
+  console.log("ChartManager loaded successfully."); // 用於確認載入成功
 })(window);
