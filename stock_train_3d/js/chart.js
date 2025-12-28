@@ -8,28 +8,30 @@
   let volChart, volSeries;
   let indChart;
 
-  // ===== 主圖 Series =====
+  // 主圖指標
   let ma5, ma10, ma20;
   let bbU, bbM, bbL;
 
-  // 型態線 Series
+  // 型態線
   let resLine, supLine;
   let trendUp, trendDn;
   let triUp, triLow;
   let wLine1, wLine2, wNeck;
 
-  // ===== 指標 Series =====
+  // 三日戰法 (水平線 - 使用 LineSeries)
+  let stratBullLine, stratBearLine;
+
+  // 副圖指標
   let indAutoL1, indAutoL2;       
   let macdL1, macdL2, macdHist;   
 
-  // ===== 三日戰法 (水平線) =====
-  let stratBullLine, stratBearLine;
-
   // 輔助：清洗數據，確保 value 是有效數字
   function cleanData(data) {
+    // filter out null/undefined items first, then check value
     return data.filter(d => d && d.time != null && Number.isFinite(d.value));
   }
 
+  // 輔助：建立圖表
   function fixedChart(el, height) {
     return LightweightCharts.createChart(el, {
       width: el.clientWidth,
@@ -42,12 +44,8 @@
       },
       leftPriceScale:  { visible: false },
       timeScale: {
-        timeVisible: true,          
-        secondsVisible: false,
-        barSpacing: 6,
-        fixLeftEdge: true,
-        fixRightEdge: true,
-        rightBarStaysOnScroll: true,   
+        timeVisible: true, secondsVisible: false, barSpacing: 6,
+        fixLeftEdge: true, fixRightEdge: true, rightBarStaysOnScroll: true,   
       },
       handleScroll: false,
       handleScale: false,
@@ -63,7 +61,7 @@
       
     chart = fixedChart(document.getElementById("chart"), 420);
 
-    // K 線
+    // 1. K 線 (主角)
     candle = chart.addCandlestickSeries({
       upColor: "#ff0000", downColor: "#00aa00",
       borderUpColor: "#ff0000", borderDownColor: "#00aa00",
@@ -71,11 +69,12 @@
       priceScaleId: "right"
     });
 
-    // 忽略縮放設定
+    // 2. 定義「輔助線」設定：強制忽略縮放
     const noScaleOpt = {
         lineWidth: 1,
         visible: false,
         priceScaleId: "right",
+        // ⭐ 關鍵：告訴圖表不要參考這些線來計算 Y 軸
         autoscaleInfoProvider: () => null 
     };
 
@@ -100,13 +99,13 @@
     wLine2 = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScaleOpt));
     wNeck  = chart.addLineSeries(Object.assign({ color:"#cc00cc" }, noScaleOpt));
 
-    // 三日戰法線
+    // 3. 三日戰法線 (LineSeries，加上忽略縮放設定)
     const stratOpt = {
         lineWidth: 2,
-        lineStyle: 0,
+        lineStyle: 0, // 實線
         visible: false,
         priceScaleId: "right",
-        autoscaleInfoProvider: () => null,
+        autoscaleInfoProvider: () => null, // ⭐ 關鍵：絕對不要影響縮放
         crosshairMarkerVisible: false,
         lastValueVisible: false,
         priceLineVisible: false
@@ -132,7 +131,8 @@
   }
 
   function update(shown, indicators, opt) {
-    shown = shown.filter(c => c.time != null);
+    // filter out null/undefined items
+    shown = shown.filter(c => c && c.time != null);
     if (!shown || shown.length < 2) return;
 
     const visibleBars = opt.visibleBars || 40;
@@ -143,18 +143,15 @@
     // 1. K線
     candle.setData(shown);
 
-    // 2. 成交量 (⭐ 強制檢查數值，若是 null 改為 0，或過濾掉)
+    // 2. 成交量 (檢查數值)
     const volData = shown.map(c => ({ 
         time: c.time, 
-        value: (c.volume != null && !isNaN(c.volume)) ? c.volume : 0 
+        value: (c.volume != null && Number.isFinite(c.volume)) ? c.volume : 0 
     }));
     volSeries.setData(volData);
 
-    // 3. 均線 (使用 cleanData 過濾)
+    // 3. 均線 (使用 cleanData)
     const closes = shown.map(c => c.close);
-    
-    // 即使 showMA 為 false，也計算並填入資料，只控制 visible
-    // 這裡用 cleanData 確保沒有 null 混入
     const ma5Data = cleanData(U.sma(closes, 5).map((v,i)=>({ time: shown[i].time, value: v })));
     const ma10Data = cleanData(U.sma(closes, 10).map((v,i)=>({ time: shown[i].time, value: v })));
     const ma20Data = cleanData(U.sma(closes, 20).map((v,i)=>({ time: shown[i].time, value: v })));
@@ -172,11 +169,10 @@
     bbM.setData(m); bbM.applyOptions({ visible: !!opt.showBB });
     bbL.setData(l); bbL.applyOptions({ visible: !!opt.showBB });
 
-    // 5. 型態線 (這部分清空是安全的)
+    // 5. 型態線 (清空)
     [resLine,supLine,trendUp,trendDn,triUp,triLow,wLine1,wLine2,wNeck].forEach(s=>{
       s.setData([]); s.applyOptions({ visible:false });
     });
-
     if (opt.showMA && global.SupportResistance?.findLines) { /* ...略... */ }
     if (opt.trendlines) { /* ...略... */ }
     if (opt.triangle) { /* ...略... */ }
@@ -193,7 +189,8 @@
         const bullPrice = opt.strat3Day.currentBullSupport;
         const bearPrice = opt.strat3Day.currentBearResist;
 
-        // 加強檢查：必須是有限數值 (Number.isFinite) 且 > 0
+        // 畫紅色支撐線
+        // 加強檢查：必須是有效數字且大於 0
         if (Number.isFinite(bullPrice) && bullPrice > 0) {
             stratBullLine.setData([
                 { time: startTime, value: bullPrice },
@@ -201,9 +198,12 @@
             ]);
             stratBullLine.applyOptions({ visible: true });
         } else {
+            // ⭐ 關鍵修正：無效時徹底清空數據，防止影響縮放
+            stratBullLine.setData([]); 
             stratBullLine.applyOptions({ visible: false });
         }
 
+        // 畫綠色壓力線
         if (Number.isFinite(bearPrice) && bearPrice > 0) {
             stratBearLine.setData([
                 { time: startTime, value: bearPrice },
@@ -211,18 +211,20 @@
             ]);
             stratBearLine.applyOptions({ visible: true });
         } else {
+            // ⭐ 關鍵修正：徹底清空
+            stratBearLine.setData([]);
             stratBearLine.applyOptions({ visible: false });
         }
 
     } else {
-        stratBullLine.applyOptions({ visible: false });
-        stratBearLine.applyOptions({ visible: false });
+        // 關閉功能時，徹底清空數據
+        stratBullLine.setData([]); stratBullLine.applyOptions({ visible: false });
+        stratBearLine.setData([]); stratBearLine.applyOptions({ visible: false });
     }
 
-    // 指標區 (強力清洗)
+    // 指標區 (使用 cleanData)
     indAutoL1.setData([]); indAutoL2.setData([]);
     macdL1.setData([]); macdL2.setData([]); macdHist.setData([]);
-
     if (indType === "kd") {
       indAutoL1.setData(cleanData(shown.map((c,i)=>({time:c.time,value:indicators.K[i]}))));
       indAutoL2.setData(cleanData(shown.map((c,i)=>({time:c.time,value:indicators.D[i]}))));
