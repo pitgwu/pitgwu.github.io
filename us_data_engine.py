@@ -6,7 +6,8 @@ import json
 import os
 import datetime
 import time
-from io import StringIO  # 新增: 用於消除 Pandas 警告
+import re
+from io import StringIO
 
 # ==========================================
 # 0. 設定與目錄準備
@@ -25,17 +26,15 @@ print(f"📂 目標資料夾: {TARGET_DIR}")
 print(f"📅 處理日期: {DATE_STR}")
 
 # ==========================================
-# 1. 靜態觀察名單 (核心權值股)
+# 1. 靜態觀察名單
 # ==========================================
 STATIC_TICKERS = {
-    # 指數
     "^DJI": {"Name": "Dow Jones", "Theme": "道瓊"},
     "^GSPC": {"Name": "S&P 500", "Theme": "標普"},
     "^IXIC": {"Name": "Nasdaq", "Theme": "那指"},
     "^SOX": {"Name": "PHLX Semi", "Theme": "費半"},
     "^VIX": {"Name": "VIX", "Theme": "恐慌"},
     "BTC-USD": {"Name": "Bitcoin", "Theme": "加密幣"},
-    # 巨頭
     "NVDA": {"Name": "NVIDIA", "Theme": "AI"},
     "MSFT": {"Name": "Microsoft", "Theme": "軟體"},
     "AAPL": {"Name": "Apple", "Theme": "消費電"},
@@ -53,7 +52,75 @@ STATIC_TICKERS = {
 ALL_TICKER_INFO = STATIC_TICKERS.copy()
 
 # ==========================================
-# 2. 動態市場掃描 (Web Scraping)
+# 2. CNN 恐懼貪婪指數 (雙重抓取機制)
+# ==========================================
+def fetch_fear_and_greed():
+    print("正在抓取 CNN Fear & Greed 指數...")
+    
+    # 偽裝成完整瀏覽器
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://edition.cnn.com/markets/fear-and-greed",
+        "Origin": "https://edition.cnn.com",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+
+    result = None
+
+    # --- 方法 A: 嘗試官方 API ---
+    try:
+        url_api = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        resp = requests.get(url_api, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            latest = data['fear_and_greed']
+            score = int(latest['score'])
+            rating = latest['rating']
+            # 校正 Rating 大小寫
+            rating = rating.capitalize() if rating else "Neutral"
+            
+            result = {"score": score, "rating": rating, "timestamp": latest['timestamp']}
+            print(f"✅ [API] 成功抓取 CNN 指數: {score} ({rating})")
+    except Exception as e:
+        print(f"⚠️ [API] 抓取失敗，切換至網頁爬蟲模式... ({e})")
+
+    # --- 方法 B: 如果 API 失敗，嘗試爬網頁原始碼 (Regex) ---
+    if result is None:
+        try:
+            url_web = "https://edition.cnn.com/markets/fear-and-greed"
+            resp = requests.get(url_web, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                # 在 HTML 中尋找 "score":45 這樣的字串
+                html = resp.text
+                # 尋找類似 "fear_and_greed":{"score":45.321,"rating":"fear" 這樣的結構
+                match_score = re.search(r'"score":([\d\.]+)', html)
+                match_rating = re.search(r'"rating":"([a-zA-Z\s]+)"', html)
+                
+                if match_score:
+                    score = int(float(match_score.group(1)))
+                    rating = match_rating.group(1).capitalize() if match_rating else "Neutral"
+                    result = {"score": score, "rating": rating, "timestamp": datetime.datetime.now().isoformat()}
+                    print(f"✅ [Web] 成功爬取 CNN 指數: {score} ({rating})")
+                else:
+                    print("❌ [Web] 未能在網頁中找到分數數據")
+        except Exception as e:
+            print(f"❌ [Web] 爬蟲也失敗: {e}")
+
+    # --- 存檔 ---
+    filepath = os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json")
+    
+    if result:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=4)
+    else:
+        # 真的全失敗，寫入錯誤標記，不要寫 50，以免誤導
+        print("❌ CNN 指數完全獲取失敗，使用 N/A 標記")
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump({"score": 0, "rating": "Data Unavailable", "timestamp": ""}, f)
+
+# ==========================================
+# 3. 動態市場掃描 (Web Scraping)
 # ==========================================
 def get_market_screeners():
     print("🔍 正在爬取 Yahoo 網頁熱門榜 (Web Scraping)...")
@@ -65,7 +132,6 @@ def get_market_screeners():
     
     found_tickers = []
     
-    # 偽裝瀏覽器 Header
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
@@ -74,8 +140,6 @@ def get_market_screeners():
         try:
             print(f"   -> 正在讀取: {url} ...")
             r = requests.get(url, headers=headers, timeout=10)
-            
-            # 【修正點】使用 StringIO 包裝 HTML 字串，消除 FutureWarning
             dfs = pd.read_html(StringIO(r.text))
             
             if len(dfs) > 0:
@@ -101,7 +165,6 @@ def get_market_screeners():
         except Exception as e:
             print(f"      ⚠️ 爬取失敗: {e}")
 
-    # 保底清單
     if not found_tickers:
         print("⚠️ 爬蟲失敗，使用備用熱門清單")
         backup_list = ["PLTR", "SOFI", "MARA", "RIOT", "DKNG", "UBER", "HOOD", "OPEN", "LCID", "RIVN", "AMD", "F", "BAC", "T", "INTC"]
@@ -113,27 +176,6 @@ def get_market_screeners():
     dynamic_list = list(set(found_tickers))
     print(f"✅ 掃描完成！共鎖定 {len(dynamic_list)} 檔活躍股票。")
     return dynamic_list
-
-def fetch_fear_and_greed():
-    print("正在抓取 CNN Fear & Greed 指數...")
-    try:
-        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            latest = data['fear_and_greed']
-            result = {"score": int(latest['score']), "rating": latest['rating'], "timestamp": latest['timestamp']}
-            filepath = os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json")
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(result, f, ensure_ascii=False, indent=4)
-            print(f"✅ CNN 指數已存檔")
-            return
-    except: pass
-    
-    filepath = os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json")
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump({"score": 50, "rating": "Neutral", "timestamp": ""}, f)
 
 def fetch_and_process_data():
     fetch_fear_and_greed()
@@ -182,10 +224,8 @@ def fetch_and_process_data():
                 if closes.empty: continue
                 
                 current_price = closes.iloc[-1]
-                
-                # 【新增】過濾掉股價 < 1 美元的水餃股 (Penny Stocks)
-                if current_price < 1.0:
-                    continue
+                # 過濾水餃股
+                if current_price < 1.0: continue
 
                 current_vol = 0 if volumes.empty else volumes.iloc[-1]
                 
