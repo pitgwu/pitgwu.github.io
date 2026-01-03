@@ -2,9 +2,8 @@ name: Daily US Stock Market Report
 
 on:
   schedule:
-    # 每天 UTC 時間 21:30 (台灣 05:30)
-    - cron: '30 21 * * *'
-  workflow_dispatch:
+    - cron: '30 21 * * *' # 台灣時間 05:30
+  workflow_dispatch:      # 允許手動執行
 
 permissions:
   contents: write
@@ -27,19 +26,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas yfinance requests jinja2
 
-      # 執行 Data Engine (會自動產生 us_stock_dashboard/YYYY/MM 資料夾與檔案)
+      # 1. 執行程式 (會產生 ./us_stock_dashboard 資料夾)
       - name: Run Data Engine
         run: python us_data_engine.py
 
-      # 執行 Report Generator (會產生 HTML 與 Redirect 頁面)
       - name: Run Report Generator
         run: python us_report_generator.py
 
-      # 發布 us_stock_dashboard 資料夾到 gh-pages
+      # 2. 【關鍵修正】整理發布資料夾結構
+      # 我們建立一個 public 資料夾，把 us_stock_dashboard 整個搬進去
+      # 這樣發布後，網址就會包含 /us_stock_dashboard/ 這層路徑
+      - name: Prepare Publish Directory
+        run: |
+          mkdir public
+          mv us_stock_dashboard public/
+          
+          # 建立 .nojekyll 防止 GitHub 忽略底線檔案
+          touch public/.nojekyll
+          
+          # 除錯：列出檔案結構確認
+          echo "📂 Listing public directory structure:"
+          ls -R public
+
+      # 3. 發布 public 資料夾
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./us_stock_dashboard
+          publish_dir: ./public   # 發布這個資料夾
           publish_branch: gh-pages
-          commit_message: "Auto-update market report for ${{ steps.date.outputs.date }}"
+          commit_message: "Auto-update market report for ${{ github.sha }}"
