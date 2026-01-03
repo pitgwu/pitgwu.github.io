@@ -36,23 +36,17 @@ jobs:
       # 2. 【關鍵修正】整理發布資料夾結構
       # 我們建立一個 public 資料夾，把 us_stock_dashboard 整個搬進去
       # 這樣發布後，網址就會包含 /us_stock_dashboard/ 這層路徑
-      - name: Prepare Publish Directory
+      - name: commit
         run: |
-          mkdir public
-          mv us_stock_dashboard public/
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # 1. 強制加入 data, performance  資料夾下的所有變動 (包含子資料夾與新檔案)
+          git add us_stock_dashboard/\*
           
-          # 建立 .nojekyll 防止 GitHub 忽略底線檔案
-          touch public/.nojekyll
-          
-          # 除錯：列出檔案結構確認
-          echo "📂 Listing public directory structure:"
-          ls -R public
-
-      # 3. 發布 public 資料夾
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public   # 發布這個資料夾
-          publish_branch: gh-pages
-          commit_message: "Auto-update market report for ${{ github.sha }}"
+          # 2. 檢查是否有東西可以 commit (避免因為沒資料更新而報錯)
+          if git diff --cached --quiet; then
+            echo "沒有偵測到任何 CSV 檔案變動，跳過提交。"
+          else
+            git commit -m "📈 自動更新數據庫: $(date +'%Y-%m-%d %H:%M')"
+            git push
+          fi
