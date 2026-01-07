@@ -20,16 +20,26 @@ if not os.path.exists(TARGET_DIR):
     exit()
 
 INDICES_TICKERS = ["^DJI", "^GSPC", "^IXIC", "^SOX", "^VIX"]
+COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"] # ✨ [新增] 定義原物料清單
 WATCHLIST_TICKERS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", "TSM", "BTC-USD", "COIN"]
 
+# ==========================================
+# 1. 資料讀取函式
+# ==========================================
 def load_sentiment_data():
     filepath = os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json")
     if os.path.exists(filepath):
         with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
     return {"score": 50, "rating": "N/A"}
 
+def load_ai_data():
+    filepath = os.path.join(TARGET_DIR, f"ai_report_{DATE_STR}.json")
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
+    return []
+
 # ==========================================
-# 1. 熱力圖資料生成 (Finviz Style)
+# 2. 熱力圖資料生成 (Finviz Style - Python處理)
 # ==========================================
 def generate_treemap_data(df):
     exclude = INDICES_TICKERS + ['BTC-USD']
@@ -45,50 +55,54 @@ def generate_treemap_data(df):
     df_clean['Sector'] = df_clean['Sector'].fillna('Other')
     df_clean['Industry'] = df_clean['Industry'].fillna('Other')
 
-    # 取成交額前 100 大
+    # 取成交額前 100 大且大於 0
     df_top = df_clean[df_clean['Daily_Amount_B'] > 0].sort_values(by='Daily_Amount_B', ascending=False).head(100)
     
     data = []
     
+    # 第一層：Sector
     for sector, sector_group in df_top.groupby('Sector'):
         industry_children = []
         
+        # 第二層：Industry
         for industry, industry_group in sector_group.groupby('Industry'):
             stock_children = []
             
+            # 第三層：Stock
             for _, row in industry_group.iterrows():
                 chg = row['Daily_Chg%']
-                # 顏色邏輯 (Finviz)
+                # 顏色邏輯 (Finviz 風格)
                 if chg >= 3.0:   color = "#006400" # 深綠
                 elif chg >= 1.0: color = "#228B22"
                 elif chg >= 0.0: color = "#4CAF50"
                 elif chg <= -3.0: color = "#8B0000" # 深紅
                 elif chg <= -1.0: color = "#CC0000"
                 else:             color = "#F44336"
-                if abs(chg) < 0.1: color = "#444444"
+                if abs(chg) < 0.1: color = "#444444" # 平盤
 
                 stock_children.append({
                     "name": row['Code'],
-                    "company": row['Name'], # 傳遞公司全名
-                    # value 陣列: [面積, 漲跌幅, RVOL]
+                    "company": row['Name'], # 公司全名
+                    # value 陣列: [面積(成交額), 漲跌幅, RVOL]
                     "value": [
                         float(row['Daily_Amount_B']), 
                         float(row['Daily_Chg%']), 
                         float(row['RVOL'])
                     ],
-                    "itemStyle": {"color": color}
+                    "itemStyle": {"color": color},
+                    "label": {"show": True, "formatter": "{b}\n{c}%"} 
                 })
             
             industry_children.append({
                 "name": industry,
                 "children": stock_children,
-                "itemStyle": {"borderColor": "#555", "borderWidth": 1}
+                "itemStyle": {"borderColor": "#555", "borderWidth": 1, "gapWidth": 1}
             })
         
         data.append({
             "name": sector,
             "children": industry_children,
-            "itemStyle": {"borderColor": "#000", "borderWidth": 2}
+            "itemStyle": {"borderColor": "#000", "borderWidth": 2, "gapWidth": 2}
         })
     
     return json.dumps(data)
@@ -98,31 +112,30 @@ def generate_heatmap_script(treemap_data):
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script>
         var chartDom = document.getElementById('heatmap-chart');
-        var myChart = echarts.init(chartDom, 'dark'); // 嘗試深色主題
+        var myChart = echarts.init(chartDom, 'dark');
         var rawData = {treemap_data};
 
         var option = {{
-            backgroundColor: '#161b22', // 背景色
+            backgroundColor: '#161b22',
             title: {{ 
-                text: '🔥 美股全市場熱力圖 (Finviz Style)', 
+                text: '🔥 美股全市場熱力圖 (Sector > Industry > Stock)', 
                 left: 'center', 
                 top: 10,
                 textStyle: {{ color: '#fff', fontSize: 20 }} 
             }},
             tooltip: {{
-                // 【修復】強制深色背景，確保白字可見
-                backgroundColor: 'rgba(50,50,50,0.9)',
+                backgroundColor: 'rgba(50,50,50,0.95)', // 強制深色背景
                 borderColor: '#777',
                 textStyle: {{ color: '#fff' }},
                 formatter: function (info) {{
                     var value = info.value;
                     // 如果是個股 (value 是陣列)
                     if (Array.isArray(value) && value.length >= 3) {{
-                        var companyName = info.data.company || ""; // 獲取公司全名
+                        var companyName = info.data.company || "";
                         return [
                             '<div style="border-bottom: 1px solid #777; padding-bottom: 5px; margin-bottom: 5px;">',
                             '<span style="font-size:18px; font-weight:bold; color:#fff;">' + info.name + '</span>',
-                            '<span style="font-size:14px; color:#ddd; margin-left:10px;">' + companyName + '</span>',
+                            '<span style="font-size:13px; color:#ccc; margin-left:10px;">' + companyName + '</span>',
                             '</div>',
                             '成交額: <span style="color:#ffd700; font-weight:bold">$' + value[0].toFixed(2) + ' B</span>',
                             '漲跌幅: <span style="color:' + (value[1] > 0 ? '#4CAF50' : '#FF5252') + '; font-weight:bold">' + (value[1] > 0 ? '+' : '') + value[1].toFixed(2) + '%</span>',
@@ -148,18 +161,12 @@ def generate_heatmap_script(treemap_data):
                     visualDimension: 0, 
                     breadcrumb: {{ show: true, height: 30, itemStyle: {{ textStyle: {{ lineHeight: 30 }} }} }},
                     
-                    // 【修復】標籤格式化
                     label: {{
                         show: true,
                         formatter: function(params) {{
                             var arr = params.value;
-                            // 如果是板塊 (沒有 value 陣列)，顯示名稱
                             if (!Array.isArray(arr)) return params.name;
-                            
-                            // 如果格子太小，只顯示代號
                             if (arr[0] < 0.5) return params.name; 
-                            
-                            // 顯示 代號 + 漲跌幅
                             return params.name + '\\n' + (arr[1] > 0 ? '+' : '') + arr[1].toFixed(2) + '%';
                         }},
                         fontSize: 13,
@@ -193,8 +200,36 @@ def generate_heatmap_script(treemap_data):
     """
 
 # ==========================================
-# 2. 其他 HTML 生成函式 (維持原樣)
+# 3. HTML 生成函式 (AI, Gauge, Tables)
 # ==========================================
+def generate_ai_section_html(ai_data):
+    if not ai_data: return ""
+    cards_html = ""
+    for item in ai_data:
+        analysis = item.get('analysis', {})
+        color = "#4CAF50" if item['chg'] > 0 else "#FF5252"
+        cards_html += f"""
+        <div class="ai-card">
+            <div class="ai-header" style="border-left: 4px solid {color};">
+                <span class="ai-symbol">{item['symbol']}</span>
+                <span class="ai-name">{item['name']}</span>
+                <span class="ai-chg" style="color: {color}">{item['chg']:+.2f}%</span>
+            </div>
+            <div class="ai-body">
+                <p><strong>🏭 產業地位：</strong>{analysis.get('position', 'N/A')}</p>
+                <p><strong>🚀 上漲利多：</strong>{analysis.get('catalyst', 'N/A')}</p>
+                <p><strong>⚡ 動能分析：</strong>{analysis.get('momentum', 'N/A')}</p>
+                <p><strong>🔗 台股連動：</strong><span style="color: #ffd700;">{analysis.get('taiwan_link', 'N/A')}</span></p>
+            </div>
+        </div>
+        """
+    return f"""
+    <div class="section">
+        <h2 class="section-title" style="border-left: none; padding-left: 0;">🤖 Gemini AI 焦點股解讀 (Top 10)</h2>
+        <div class="ai-container">{cards_html}</div>
+    </div>
+    """
+
 def generate_gauge_html(sentiment):
     score = sentiment.get('score', 50)
     rating = sentiment.get('rating', 'Neutral').upper()
@@ -346,6 +381,25 @@ def generate_indices_html(df):
     </div>
     """
 
+def generate_commodities_html(df):
+    """ 生成原物料報價區塊 """
+    mask = df['Code'].isin(COMMODITY_TICKERS)
+    df_cmd = df[mask].copy()
+    
+    # 依照我們定義的順序排序
+    df_cmd['Code'] = pd.Categorical(df_cmd['Code'], categories=COMMODITY_TICKERS, ordered=True)
+    df_cmd = df_cmd.sort_values('Code')
+    
+    # 使用 watchlist 風格的表格
+    html_table = style_dataframe(df_cmd, "tbl_commodities", "Daily", is_watchlist=True)
+    
+    return f"""
+    <div class="section" style="border: 2px solid #e67e22; background: #0d1319;">
+        <h2 class="section-title" style="border-left: none; padding-left: 0; color: #e67e22;">🧱 關鍵原物料 (Commodities)</h2>
+        {html_table}
+    </div>
+    """
+
 def generate_watchlist_html(df):
     mask = df['Code'].isin(WATCHLIST_TICKERS)
     df_watch = df[mask].copy()
@@ -366,15 +420,18 @@ def create_current_link(path):
 
 def generate_html_report():
     sentiment = load_sentiment_data()
+    ai_data = load_ai_data()
+    
+    # 計算美股收盤日期 (假設 T-1)
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    us_close_date = datetime.datetime.now() - datetime.timedelta(days=1)
+    us_close_str = us_close_date.strftime("%Y/%m/%d")
 
     try:
         df_daily = pd.read_csv(os.path.join(TARGET_DIR, f"rank_daily_{DATE_STR}.csv"))
-        if 'Sector' not in df_daily.columns: df_daily['Sector'] = 'Other'
-        else: df_daily['Sector'] = df_daily['Sector'].fillna('Other')
-        
-        if 'Industry' not in df_daily.columns: df_daily['Industry'] = 'Other'
-        else: df_daily['Industry'] = df_daily['Industry'].fillna('Other')
+        for col in ['Sector', 'Industry']:
+            if col not in df_daily.columns: df_daily[col] = 'Other'
+            df_daily[col] = df_daily[col].fillna('Other')
             
         try: df_weekly = pd.read_csv(os.path.join(TARGET_DIR, f"rank_weekly_{DATE_STR}.csv"))
         except: df_weekly = pd.DataFrame()
@@ -383,17 +440,22 @@ def generate_html_report():
     except Exception as e:
         print(f"❌ 讀取 CSV 失敗: {e}"); return
 
+    # 生成各組件
     html_gauge = generate_gauge_html(sentiment)
+    html_ai = generate_ai_section_html(ai_data)
     treemap_json = generate_treemap_data(df_daily)
     html_heatmap_script = generate_heatmap_script(treemap_json)
     html_heatmap_div = '<div class="section" style="padding: 0;"><div id="heatmap-chart" style="width: 100%; height: 600px;"></div></div>'
-
+    
     html_indices = generate_indices_html(df_daily)
+    html_commodities = generate_commodities_html(df_daily)  # 已生成，需放入樣板
     html_watchlist = generate_watchlist_html(df_daily)
+    
     html_daily = generate_section_html(df_daily, 'Daily', '📅 當日戰況', True)
     html_weekly = generate_section_html(df_weekly, 'Weekly', '🗓️ 本週戰況', False)
     html_monthly = generate_section_html(df_monthly, 'Monthly', '📊 本月戰況', False)
 
+    # 【修正標題與排版】
     full_html = f"""
     <!DOCTYPE html>
     <html>
@@ -414,11 +476,34 @@ def generate_html_report():
             td {{ padding: 10px 8px; border-bottom: 1px solid #30363d; color: #c9d1d9; }}
             td:nth-child(1) {{ color: #888; width: 40px; text-align: center; }}
             td:nth-child(2) {{ font-weight: bold; color: #fff; }}
+            
+            /* AI Card CSS */
+            .ai-container {{ display: flex; gap: 20px; flex-wrap: wrap; }}
+            .ai-card {{ 
+                flex: 1; min-width: 300px; 
+                background: #21262d; border-radius: 8px; padding: 15px; 
+                border: 1px solid #30363d; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            }}
+            .ai-header {{ display: flex; align-items: center; gap: 10px; padding-left: 10px; margin-bottom: 15px; background: #161b22; padding: 10px; border-radius: 4px; }}
+            .ai-symbol {{ font-size: 1.4em; font-weight: bold; color: #fff; }}
+            .ai-name {{ font-size: 0.9em; color: #aaa; flex-grow: 1; }}
+            .ai-chg {{ font-weight: bold; font-size: 1.1em; }}
+            
+            .ai-body p {{ margin: 8px 0; font-size: 0.95em; line-height: 1.5; color: #d0d0d0; display: flex; }}
+            .ai-body strong {{ 
+                color: #a5d6ff; 
+                display: inline-block; 
+                min-width: 110px; 
+                white-space: nowrap; 
+            }}
+
             .tab-container {{ display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }}
             .tab-button {{ background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 10px 24px; cursor: pointer; border-radius: 6px; }}
             .tab-button.active {{ background: #1f6feb; color: #fff; border-color: #1f6feb; }}
             .tab-content {{ animation: fadeIn 0.3s; }}
             @keyframes fadeIn {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
+            
+            /* Gauge CSS (維持不變) */
             .gauge-wrapper {{ width: 300px; height: 150px; margin: 0 auto; position: relative; overflow: hidden; }}
             .gauge-arch {{ width: 300px; height: 150px; border-radius: 150px 150px 0 0; background: conic-gradient(from 180deg, #FF5252 0deg 36deg, #FF8A65 36deg 72deg, #ffd700 72deg 108deg, #66BB6A 108deg 144deg, #2E7D32 144deg 180deg); }}
             .gauge-arch-mask {{ width: 240px; height: 120px; background: #161b22; border-radius: 120px 120px 0 0; position: absolute; bottom: 0; left: 30px; }}
@@ -430,20 +515,30 @@ def generate_html_report():
     </head>
     <body>
         <header>
-            <h1>美股資金流向戰情日報</h1>
+            <h1>美股資金流向戰情日報 <span style="font-size: 0.6em; color: #aaa;">(美股收盤: {us_close_str})</span></h1>
             <div class="timestamp">更新時間: {now_str} (UTC+8)</div>
         </header>
+        
         {html_gauge}
+        {html_ai}
         {html_heatmap_div}
-        {html_indices}
+        
+        <div class="row">
+            <div class="col">{html_indices}</div>
+            <div class="col">{html_commodities}</div>
+        </div>
+        
         {html_watchlist}
+        
         <div class="tab-container">
             <button class="tab-button active" onclick="openTab('Daily')">📅 當日戰況</button>
             <button class="tab-button" onclick="openTab('Weekly')">🗓️ 本週戰況</button>
             <button class="tab-button" onclick="openTab('Monthly')">📊 本月戰況</button>
         </div>
         {html_daily} {html_weekly} {html_monthly}
+        
         {html_heatmap_script}
+        
         <script>
             function openTab(name) {{
                 var contents = document.getElementsByClassName("tab-content");
