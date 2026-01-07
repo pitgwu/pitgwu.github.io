@@ -1,0 +1,148 @@
+import pandas as pd
+import datetime
+import json
+import os
+
+# ==========================================
+# 0. 設定與路徑
+# ==========================================
+NOW = datetime.datetime.now()
+DATE_STR = NOW.strftime("%Y%m%d")
+TITLE_DATE = NOW.strftime("%Y/%m/%d")
+
+YYYY = NOW.strftime("%Y")
+MM = NOW.strftime("%m")
+BASE_DIR = "tw_stock_dashboard"
+TARGET_DIR = os.path.join(BASE_DIR, YYYY, MM)
+
+INDICES = ["^TWII", "^TWOII", "^VIXTWN", "^VIX", "^DJI", "^GSPC", "^SOX"]
+COMMODITIES = ["GC=F", "SI=F", "HG=F", "CL=F"]
+WATCHLIST = ["2330.TW", "2317.TW", "2454.TW", "2382.TW", "2881.TW", "2603.TW", "3661.TW"]
+
+# 50 檔高價股清單
+HIGH_PRICE_CODES = [
+    "5274.TWO", "6669.TW", "3661.TW", "7769.TWO", "6515.TW", "2059.TW", "3008.TW", "3443.TW", "3653.TW", "6510.TWO",
+    "6223.TWO", "3131.TWO", "3529.TWO", "2330.TW", "8299.TWO", "2383.TW", "2454.TW", "3665.TW", "6805.TW", "3017.TW",
+    "3533.TW", "5269.TW", "6442.TW", "6781.TW", "2345.TW", "2308.TW", "6409.TW", "2404.TW", "7734.TWO", "1590.TW",
+    "3324.TW", "8210.TW", "4749.TWO", "2360.TW", "7750.TWO", "5536.TWO", "3491.TWO", "1519.TW", "6944.TWO", "6739.TWO",
+    "7751.TWO", "3293.TWO", "7805.TWO", "6640.TWO", "5289.TWO", "4583.TW", "2368.TW", "3081.TWO", "4966.TWO", "7728.TWO"
+]
+
+def style_table(df, table_id, period_col='Daily_Chg%', is_watchlist=False):
+    if df.empty: return "<p style='color:#666'>無數據</p>"
+    
+    if 'Rank' not in df.columns:
+        df = df.copy()
+        df.reset_index(drop=True, inplace=True)
+        df.index += 1
+        df['Rank'] = df.index
+
+    # ✨ 這裡會直接顯示 Yahoo 的細部產業名稱
+    col_map = {
+        'Rank': '排名', 'Code': '代號', 'Name': '名稱', 'Close': '股價', 
+        'Daily_Chg%': '日漲跌', 'Daily_Amount_B': '成交額(億)', 'Sector': '產業分類'
+    }
+    
+    cols = ['Rank', 'Code', 'Name', 'Sector', 'Close', period_col, 'Daily_Amount_B']
+    cols = [c for c in cols if c in df.columns]
+    
+    df_show = df[cols].rename(columns=col_map)
+    display_chg_col = col_map.get(period_col, '日漲跌')
+
+    def color_chg(val):
+        try:
+            val = float(val)
+            color = '#ff5252' if val > 0 else '#4caf50' if val < 0 else '#ccc'
+            return f'color: {color}; font-weight: bold;'
+        except: return ''
+    
+    # 格式化顯示 (兩位小數)
+    format_dict = {'股價': "{:,.2f}", display_chg_col: "{:+.2f}%", '成交額(億)': "{:.2f}"}
+    
+    styler = df_show.style.format(format_dict).map(color_chg, subset=[display_chg_col])
+    if is_watchlist: styler = styler.set_properties(**{'font-size': '1.05em', 'border-bottom': '1px solid #444'})
+    styler = styler.hide(axis='index')
+    
+    return styler.to_html(table_id=table_id, table_attributes='class="sortable"')
+
+def generate_html_report():
+    csv_path = os.path.join(TARGET_DIR, f"rank_all_{DATE_STR}.csv")
+    if not os.path.exists(csv_path):
+        print(f"❌ 找不到 CSV: {csv_path}")
+        return
+
+    # 強力讀取，避免 BOM 問題
+    try: df = pd.read_csv(csv_path, encoding='utf-8-sig')
+    except: df = pd.read_csv(csv_path) 
+    
+    df.columns = df.columns.str.strip().str.replace('\ufeff', '')
+
+    # 讀取情緒
+    try:
+        with open(os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json"), "r") as f: sentiment = json.load(f)
+    except: sentiment = {"score": 50, "rating": "N/A"}
+    
+    # Gauge HTML
+    score = sentiment['score']
+    rating_color = "#FF5252" if score < 25 else "#FF8A65" if score < 45 else "#ffd700" if score < 55 else "#66BB6A" if score < 75 else "#2E7D32"
+    deg = (score / 100 * 180) - 90
+    
+    html_gauge = f"""
+    <div class="section gauge-container" style="text-align: center;">
+        <h2 class="section-title">⚡ 市場情緒儀表板</h2>
+        <div class="gauge-wrapper" style="width: 300px; height: 150px; margin: 0 auto; position: relative; overflow: hidden;">
+            <div style="width: 300px; height: 150px; border-radius: 150px 150px 0 0; background: conic-gradient(from 180deg, #FF5252 0deg 36deg, #FF8A65 36deg 72deg, #ffd700 72deg 108deg, #66BB6A 108deg 144deg, #2E7D32 144deg 180deg);"></div>
+            <div style="width: 240px; height: 120px; background: #161b22; border-radius: 120px 120px 0 0; position: absolute; bottom: 0; left: 30px;"></div>
+            <div style="width: 4px; height: 130px; background: #fff; position: absolute; bottom: 0; left: 50%; margin-left: -2px; transform: rotate({deg}deg); transform-origin: bottom center;"></div>
+        </div>
+        <div style="font-size: 3em; font-weight: bold; color: {rating_color};">{score}</div>
+        <div style="color: #aaa;">{sentiment['rating']}</div>
+    </div>
+    """
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 生成各表格
+    df_high = df[df['Code'].isin(HIGH_PRICE_CODES)].sort_values('Close', ascending=False)
+    # 補齊 50 檔
+    miss = [c for c in HIGH_PRICE_CODES if c not in df_high['Code'].tolist()]
+    if miss: df_high = pd.concat([df_high, pd.DataFrame([{'Code':c, 'Name':'N/A', 'Close':0, 'Daily_Chg%':0, 'Daily_Amount_B':0, 'Sector':'待更新'} for c in miss])])
+    
+    html_indices = style_table(df[df['Code'].isin(INDICES)], "tbl_idx", is_watchlist=True)
+    html_comm = style_table(df[df['Code'].isin(COMMODITIES)], "tbl_comm", is_watchlist=True)
+    html_watch = style_table(df[df['Code'].isin(WATCHLIST)], "tbl_watch", is_watchlist=True)
+    html_high = style_table(df_high, "tbl_high")
+    
+    # Top 200 排行榜
+    df_stocks = df[~df['Code'].str.contains(r'\^|=F')].copy()
+    html_amt = style_table(df_stocks.sort_values('Daily_Amount_B', ascending=False).head(200), "tbl_amt")
+    html_bull = style_table(df_stocks.sort_values('Daily_Chg%', ascending=False).head(200), "tbl_bull")
+
+    full_html = f"""
+    <!DOCTYPE html><html><head><meta charset="utf-8"><title>台股戰情日報 {DATE_STR}</title>
+    <style>
+        body{{background:#0e1117;color:#ddd;font-family:'Segoe UI',sans-serif;padding:20px}} 
+        header{{text-align:center;margin-bottom:30px;border-bottom:1px solid #333}}
+        .section{{background:#161b22;padding:20px;margin-bottom:20px;border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,0.3)}}
+        .section-title{{color:#ffd700;border-left:5px solid #ffd700;padding-left:10px}}
+        table{{width:100%;border-collapse:collapse}} th,td{{padding:10px;border-bottom:1px solid #333;text-align:left}}
+        .row{{display:flex;gap:20px;flex-wrap:wrap}} .col{{flex:1;min-width:400px}}
+    </style></head><body>
+    <header><h1>台股戰情日報 <span style="font-size:0.6em;color:#aaa">({TITLE_DATE})</span></h1><div>更新: {now_str}</div></header>
+    {html_gauge}
+    <div class="row"><div class="col"><div class="section"><h2 class="section-title">核心指數 & VIX</h2>{html_indices}</div></div>
+    <div class="col"><div class="section"><h2 class="section-title">關鍵原物料</h2>{html_comm}</div></div></div>
+    <div class="section"><h2 class="section-title">👀 台股權值重點觀察</h2>{html_watch}</div>
+    <div class="section"><h2 class="section-title">🏆 50 檔高價股追蹤 (含興櫃)</h2>{html_high}</div>
+    <div class="row">
+        <div class="col"><div class="section"><h2 class="section-title">💰 資金重心 Top 200</h2>{html_amt}</div></div>
+        <div class="col"><div class="section"><h2 class="section-title">🚀 強勢飆股 Top 200 (漲幅)</h2>{html_bull}</div></div>
+    </div>
+    </body></html>
+    """
+    
+    with open(os.path.join(TARGET_DIR, f"tw_dashboard_{DATE_STR}.html"), "w", encoding="utf-8") as f: f.write(full_html)
+    print(f"✅ 台股報表生成完畢: {os.path.join(TARGET_DIR, f'tw_dashboard_{DATE_STR}.html')}")
+
+if __name__ == "__main__":
+    generate_html_report()
