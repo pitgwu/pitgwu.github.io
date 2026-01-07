@@ -1,0 +1,54 @@
+name: Daily TW Stock Market Report
+
+on:
+  push:                        # ✨ 新增：只要有 code push 就會跑 (測試用)
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 7 * * 1-5'     # 1. 排程觸發：台灣時間週一至週五 15:00 (即 UTC 07:00)
+  workflow_dispatch:          # 手動執行按鈕
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.3'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas yfinance requests jinja2 lxml
+
+      # 1. 執行程式 (會產生 ./us_stock_dashboard 資料夾)
+      - name: Run Data Engine
+        run: python tw_data_engine.py
+
+      - name: Run Report Generator
+        run: python tw_report_generator.py
+
+      # 2. 【關鍵修正】整理發布資料夾結構
+      # 我們建立一個 public 資料夾，把 us_stock_dashboard 整個搬進去
+      # 這樣發布後，網址就會包含 /us_stock_dashboard/ 這層路徑
+      - name: commit
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # 1. 強制加入 data, performance  資料夾下的所有變動 (包含子資料夾與新檔案)
+          git add tw_stock_dashboard/\*
+          
+          # 2. 檢查是否有東西可以 commit (避免因為沒資料更新而報錯)
+          if git diff --cached --quiet; then
+            echo "沒有偵測到任何 CSV 檔案變動，跳過提交。"
+          else
+            git commit -m "📈 自動更新數據庫: $(date +'%Y-%m-%d %H:%M')"
+            git push
+          fi
