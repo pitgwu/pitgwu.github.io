@@ -7,10 +7,22 @@ import os
 # ==========================================
 # 0. 設定與路徑
 # ==========================================
-NOW = datetime.datetime.now()
-YYYY = NOW.strftime("%Y")
-MM = NOW.strftime("%m")
-DATE_STR = NOW.strftime("%Y%m%d")
+# 系統時間 (用於讀取 Data Engine 產生的檔案)
+NOW_SYS = datetime.datetime.now()
+DATE_STR = NOW_SYS.strftime("%Y%m%d")
+
+# 定義時區
+TZ_UTC = datetime.timezone.utc
+TZ_TW = datetime.timezone(datetime.timedelta(hours=8))
+
+# ✨ [修正] 計算美股日期 (US Eastern Time 約為 UTC-5)
+# 這樣無論台灣是早上(看昨收)或晚上(看即時)，都能對應到正確的美國日期
+now_utc = datetime.datetime.now(TZ_UTC)
+us_date = now_utc - datetime.timedelta(hours=5)
+US_DATE_STR = us_date.strftime("%Y/%m/%d")
+
+YYYY = NOW_SYS.strftime("%Y")
+MM = NOW_SYS.strftime("%m")
 
 BASE_DIR = "us_stock_dashboard"
 TARGET_DIR = os.path.join(BASE_DIR, YYYY, MM)
@@ -20,7 +32,7 @@ if not os.path.exists(TARGET_DIR):
     exit()
 
 INDICES_TICKERS = ["^DJI", "^GSPC", "^IXIC", "^SOX", "^VIX"]
-COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"] # ✨ [新增] 定義原物料清單
+COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"]
 WATCHLIST_TICKERS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", "TSM", "BTC-USD", "COIN"]
 
 # ==========================================
@@ -39,16 +51,15 @@ def load_ai_data():
     return []
 
 # ==========================================
-# 2. 熱力圖資料生成 (Finviz Style - Python處理)
+# 2. 熱力圖資料生成
 # ==========================================
 def generate_treemap_data(df):
     exclude = INDICES_TICKERS + ['BTC-USD']
     df_clean = df[~df['Code'].isin(exclude)].copy()
     
     # 數值轉型與補值
-    df_clean['Daily_Amount_B'] = pd.to_numeric(df_clean['Daily_Amount_B'], errors='coerce').fillna(0)
-    df_clean['Daily_Chg%'] = pd.to_numeric(df_clean['Daily_Chg%'], errors='coerce').fillna(0)
-    df_clean['RVOL'] = pd.to_numeric(df_clean['RVOL'], errors='coerce').fillna(0)
+    for col in ['Daily_Amount_B', 'Daily_Chg%', 'RVOL']:
+        df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
     
     if 'Sector' not in df_clean.columns: df_clean['Sector'] = 'Other'
     if 'Industry' not in df_clean.columns: df_clean['Industry'] = 'Other'
@@ -59,52 +70,37 @@ def generate_treemap_data(df):
     df_top = df_clean[df_clean['Daily_Amount_B'] > 0].sort_values(by='Daily_Amount_B', ascending=False).head(100)
     
     data = []
-    
-    # 第一層：Sector
     for sector, sector_group in df_top.groupby('Sector'):
         industry_children = []
-        
-        # 第二層：Industry
         for industry, industry_group in sector_group.groupby('Industry'):
             stock_children = []
-            
-            # 第三層：Stock
             for _, row in industry_group.iterrows():
                 chg = row['Daily_Chg%']
-                # 顏色邏輯 (Finviz 風格)
-                if chg >= 3.0:   color = "#006400" # 深綠
+                if chg >= 3.0:   color = "#006400"
                 elif chg >= 1.0: color = "#228B22"
                 elif chg >= 0.0: color = "#4CAF50"
-                elif chg <= -3.0: color = "#8B0000" # 深紅
+                elif chg <= -3.0: color = "#8B0000"
                 elif chg <= -1.0: color = "#CC0000"
                 else:             color = "#F44336"
-                if abs(chg) < 0.1: color = "#444444" # 平盤
+                if abs(chg) < 0.1: color = "#444444"
 
                 stock_children.append({
                     "name": row['Code'],
-                    "company": row['Name'], # 公司全名
-                    # value 陣列: [面積(成交額), 漲跌幅, RVOL]
-                    "value": [
-                        float(row['Daily_Amount_B']), 
-                        float(row['Daily_Chg%']), 
-                        float(row['RVOL'])
-                    ],
+                    "company": row['Name'],
+                    "value": [float(row['Daily_Amount_B']), float(row['Daily_Chg%']), float(row['RVOL'])],
                     "itemStyle": {"color": color},
                     "label": {"show": True, "formatter": "{b}\n{c}%"} 
                 })
-            
             industry_children.append({
                 "name": industry,
                 "children": stock_children,
                 "itemStyle": {"borderColor": "#555", "borderWidth": 1, "gapWidth": 1}
             })
-        
         data.append({
             "name": sector,
             "children": industry_children,
             "itemStyle": {"borderColor": "#000", "borderWidth": 2, "gapWidth": 2}
         })
-    
     return json.dumps(data)
 
 def generate_heatmap_script(treemap_data):
@@ -114,53 +110,37 @@ def generate_heatmap_script(treemap_data):
         var chartDom = document.getElementById('heatmap-chart');
         var myChart = echarts.init(chartDom, 'dark');
         var rawData = {treemap_data};
-
         var option = {{
             backgroundColor: '#161b22',
-            title: {{ 
-                text: '🔥 美股全市場熱力圖 (Sector > Industry > Stock)', 
-                left: 'center', 
-                top: 10,
-                textStyle: {{ color: '#fff', fontSize: 20 }} 
-            }},
+            title: {{ text: '🔥 美股全市場熱力圖', left: 'center', top: 10, textStyle: {{ color: '#fff', fontSize: 20 }} }},
             tooltip: {{
-                backgroundColor: 'rgba(50,50,50,0.95)', // 強制深色背景
+                backgroundColor: 'rgba(50,50,50,0.95)',
                 borderColor: '#777',
                 textStyle: {{ color: '#fff' }},
                 formatter: function (info) {{
                     var value = info.value;
-                    // 如果是個股 (value 是陣列)
                     if (Array.isArray(value) && value.length >= 3) {{
-                        var companyName = info.data.company || "";
                         return [
                             '<div style="border-bottom: 1px solid #777; padding-bottom: 5px; margin-bottom: 5px;">',
                             '<span style="font-size:18px; font-weight:bold; color:#fff;">' + info.name + '</span>',
-                            '<span style="font-size:13px; color:#ccc; margin-left:10px;">' + companyName + '</span>',
+                            '<span style="font-size:13px; color:#ccc; margin-left:10px;">' + (info.data.company || "") + '</span>',
                             '</div>',
                             '成交額: <span style="color:#ffd700; font-weight:bold">$' + value[0].toFixed(2) + ' B</span>',
                             '漲跌幅: <span style="color:' + (value[1] > 0 ? '#4CAF50' : '#FF5252') + '; font-weight:bold">' + (value[1] > 0 ? '+' : '') + value[1].toFixed(2) + '%</span>',
                             'RVOL: <span style="color:#fff">' + value[2].toFixed(2) + 'x</span>'
                         ].join('<br>');
-                    }} 
-                    // 如果是板塊
-                    else {{
-                        return '<div style="font-weight:bold; font-size:16px;">' + info.name + '</div>'; 
-                    }}
+                    }} else {{ return '<div style="font-weight:bold; font-size:16px;">' + info.name + '</div>'; }}
                 }}
             }},
             series: [
                 {{
                     name: 'US Market',
                     type: 'treemap',
-                    roam: false, // 禁止縮放
+                    roam: false,
                     nodeClick: 'zoomToNode',
-                    width: '95%',
-                    height: '85%',
-                    top: 60,
-                    bottom: 20,
+                    width: '95%', height: '85%', top: 60, bottom: 20,
                     visualDimension: 0, 
                     breadcrumb: {{ show: true, height: 30, itemStyle: {{ textStyle: {{ lineHeight: 30 }} }} }},
-                    
                     label: {{
                         show: true,
                         formatter: function(params) {{
@@ -169,38 +149,25 @@ def generate_heatmap_script(treemap_data):
                             if (arr[0] < 0.5) return params.name; 
                             return params.name + '\\n' + (arr[1] > 0 ? '+' : '') + arr[1].toFixed(2) + '%';
                         }},
-                        fontSize: 13,
-                        fontWeight: 'bold',
-                        color: '#fff'
+                        fontSize: 13, fontWeight: 'bold', color: '#fff'
                     }},
-                    
                     levels: [
                         {{ itemStyle: {{ borderColor: '#000', borderWidth: 0, gapWidth: 1 }} }},
-                        {{ 
-                            itemStyle: {{ borderColor: '#000', borderWidth: 3, gapWidth: 3 }},
-                            upperLabel: {{ show: true, height: 30, color: '#eee', backgroundColor: '#222', fontWeight: 'bold' }}
-                        }},
-                        {{ 
-                            itemStyle: {{ borderColor: '#444', borderWidth: 1, gapWidth: 1 }},
-                            upperLabel: {{ show: true, height: 20, backgroundColor: 'rgba(0,0,0,0.3)', color: '#ccc', fontSize: 11 }}
-                        }},
-                        {{ 
-                            itemStyle: {{ borderColor: '#222', borderWidth: 1, gapWidth: 0 }},
-                            label: {{ position: 'inside' }}
-                        }}
+                        {{ itemStyle: {{ borderColor: '#000', borderWidth: 3, gapWidth: 3 }}, upperLabel: {{ show: true, height: 30, color: '#eee', backgroundColor: '#222', fontWeight: 'bold' }} }},
+                        {{ itemStyle: {{ borderColor: '#444', borderWidth: 1, gapWidth: 1 }}, upperLabel: {{ show: true, height: 20, backgroundColor: 'rgba(0,0,0,0.3)', color: '#ccc', fontSize: 11 }} }},
+                        {{ itemStyle: {{ borderColor: '#222', borderWidth: 1, gapWidth: 0 }}, label: {{ position: 'inside' }} }}
                     ],
                     data: rawData
                 }}
             ]
         }};
-
         option && myChart.setOption(option);
         window.addEventListener('resize', function() {{ myChart.resize(); }});
     </script>
     """
 
 # ==========================================
-# 3. HTML 生成函式 (AI, Gauge, Tables)
+# 3. HTML 生成函式
 # ==========================================
 def generate_ai_section_html(ai_data):
     if not ai_data: return ""
@@ -239,7 +206,7 @@ def generate_gauge_html(sentiment):
     for key, val in color_map.items():
         if key in rating: text_color = val; break
 
-    html = f"""
+    return f"""
     <div class="section gauge-container" style="text-align: center; position: relative; padding-bottom: 20px;">
         <h2 class="section-title" style="border-left: none; padding-left: 0;">⚡ 市場情緒儀表板 (Fear & Greed)</h2>
         <div class="gauge-wrapper">
@@ -259,12 +226,11 @@ def generate_gauge_html(sentiment):
         </div>
     </div>
     """
-    return html
 
 def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=False):
     if df.empty: return "<p style='color:#666'>無數據</p>"
     col_map = {
-        'Rank': '排名', 'Code': '代號', 'Name': '公司名稱', 'Theme': '題材', 'Sector': '族群', 'Industry': '細分產業',
+        'Rank': '排名', 'Code': '代號', 'Name': '公司名稱', 'Sector': '族群', 'Industry': '細分產業',
         'Close': '收盤價', 'RVOL': '相對量能',
         'Daily_Chg%': '漲跌幅', 'Daily_Amount_B': '成交額(B)', 'Volume': '成交量',
         'Weekly_Chg%': '漲跌幅', 'Weekly_Amount_B': '成交額(B)',
@@ -373,30 +339,22 @@ def generate_indices_html(df):
     df_idx = df[mask].copy()
     df_idx['Code'] = pd.Categorical(df_idx['Code'], categories=INDICES_TICKERS, ordered=True)
     df_idx = df_idx.sort_values('Code')
-    html_table = style_dataframe(df_idx, "tbl_indices", "Daily", is_watchlist=True)
     return f"""
     <div class="section" style="border: 2px solid #a3b18a; background: #0d1319;">
         <h2 class="section-title" style="border-left: none; padding-left: 0; color: #a3b18a;">📉 市場核心指數 (Major Indices)</h2>
-        {html_table}
+        {style_dataframe(df_idx, "tbl_indices", "Daily", is_watchlist=True)}
     </div>
     """
 
 def generate_commodities_html(df):
-    """ 生成原物料報價區塊 """
     mask = df['Code'].isin(COMMODITY_TICKERS)
     df_cmd = df[mask].copy()
-    
-    # 依照我們定義的順序排序
     df_cmd['Code'] = pd.Categorical(df_cmd['Code'], categories=COMMODITY_TICKERS, ordered=True)
     df_cmd = df_cmd.sort_values('Code')
-    
-    # 使用 watchlist 風格的表格
-    html_table = style_dataframe(df_cmd, "tbl_commodities", "Daily", is_watchlist=True)
-    
     return f"""
     <div class="section" style="border: 2px solid #e67e22; background: #0d1319;">
         <h2 class="section-title" style="border-left: none; padding-left: 0; color: #e67e22;">🧱 關鍵原物料 (Commodities)</h2>
-        {html_table}
+        {style_dataframe(df_cmd, "tbl_commodities", "Daily", is_watchlist=True)}
     </div>
     """
 
@@ -406,11 +364,10 @@ def generate_watchlist_html(df):
     df_watch['Code'] = pd.Categorical(df_watch['Code'], categories=WATCHLIST_TICKERS, ordered=True)
     df_watch = df_watch.sort_values('Code')
     df_watch = add_rank_column(df_watch)
-    html_table = style_dataframe(df_watch, "tbl_watchlist", "Daily", is_watchlist=True)
     return f"""
     <div class="section" style="border: 2px solid #4db8ff; background: #0d1319;">
         <h2 class="section-title" style="border-left: none; padding-left: 0; color: #4db8ff;">👀 美股重點觀察股 (Key Watchlist)</h2>
-        {html_table}
+        {style_dataframe(df_watch, "tbl_watchlist", "Daily", is_watchlist=True)}
     </div>
     """
 
@@ -422,10 +379,9 @@ def generate_html_report():
     sentiment = load_sentiment_data()
     ai_data = load_ai_data()
     
-    # 計算美股收盤日期 (假設 T-1)
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    us_close_date = datetime.datetime.now() - datetime.timedelta(days=1)
-    us_close_str = us_close_date.strftime("%Y/%m/%d")
+    # ✨ [修正] 更新時間：使用台灣時間 (UTC+8)
+    now_tw = datetime.datetime.now(TZ_TW)
+    now_str = now_tw.strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         df_daily = pd.read_csv(os.path.join(TARGET_DIR, f"rank_daily_{DATE_STR}.csv"))
@@ -448,14 +404,13 @@ def generate_html_report():
     html_heatmap_div = '<div class="section" style="padding: 0;"><div id="heatmap-chart" style="width: 100%; height: 600px;"></div></div>'
     
     html_indices = generate_indices_html(df_daily)
-    html_commodities = generate_commodities_html(df_daily)  # 已生成，需放入樣板
+    html_commodities = generate_commodities_html(df_daily)
     html_watchlist = generate_watchlist_html(df_daily)
     
     html_daily = generate_section_html(df_daily, 'Daily', '📅 當日戰況', True)
     html_weekly = generate_section_html(df_weekly, 'Weekly', '🗓️ 本週戰況', False)
     html_monthly = generate_section_html(df_monthly, 'Monthly', '📊 本月戰況', False)
 
-    # 【修正標題與排版】
     full_html = f"""
     <!DOCTYPE html>
     <html>
@@ -488,14 +443,8 @@ def generate_html_report():
             .ai-symbol {{ font-size: 1.4em; font-weight: bold; color: #fff; }}
             .ai-name {{ font-size: 0.9em; color: #aaa; flex-grow: 1; }}
             .ai-chg {{ font-weight: bold; font-size: 1.1em; }}
-            
             .ai-body p {{ margin: 8px 0; font-size: 0.95em; line-height: 1.5; color: #d0d0d0; display: flex; }}
-            .ai-body strong {{ 
-                color: #a5d6ff; 
-                display: inline-block; 
-                min-width: 110px; 
-                white-space: nowrap; 
-            }}
+            .ai-body strong {{ color: #a5d6ff; display: inline-block; min-width: 110px; white-space: nowrap; }}
 
             .tab-container {{ display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }}
             .tab-button {{ background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 10px 24px; cursor: pointer; border-radius: 6px; }}
@@ -515,7 +464,7 @@ def generate_html_report():
     </head>
     <body>
         <header>
-            <h1>美股資金流向戰情日報 <span style="font-size: 0.6em; color: #aaa;">(美股收盤: {us_close_str})</span></h1>
+            <h1>美股資金流向戰情日報 <span style="font-size: 0.6em; color: #aaa;">(美股收盤: {US_DATE_STR})</span></h1>
             <div class="timestamp">更新時間: {now_str} (UTC+8)</div>
         </header>
         
