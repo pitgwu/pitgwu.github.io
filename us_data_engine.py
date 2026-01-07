@@ -9,8 +9,8 @@ import time
 import re
 from io import StringIO
 # ✨ 引入 Google 官方最新 SDK
-from google import genai
-from google.genai import types
+#from google import genai
+#from google.genai import types
 
 # ==========================================
 # 0. 全域設定與目錄準備
