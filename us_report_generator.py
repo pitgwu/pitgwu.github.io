@@ -33,7 +33,7 @@ if not os.path.exists(TARGET_DIR):
 
 INDICES_TICKERS = ["^DJI", "^GSPC", "^IXIC", "^SOX", "^VIX"]
 COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"]
-WATCHLIST_TICKERS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", "TSM", "BTC-USD", "COIN"]
+WATCHLIST_TICKERS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", "TSM", "AMD", "MU", "QCOM", "TXN", "AMAT", "LRCX", "SMCI", "ORCL", "CRWV", "PLTR", "LLY", "NFLX", "XOM", "BTC-USD", "COIN"]
 
 # ==========================================
 # 1. 資料讀取函式

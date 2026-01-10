@@ -65,6 +65,42 @@ STATIC_TICKERS = {
     "AVGO": {"Name": "Broadcom", "Theme": "Technology"},
     "SMCI": {"Name": "Super Micro", "Theme": "Technology"},
     "COIN": {"Name": "Coinbase", "Theme": "Financial"},
+
+    # --- Semiconductors ---
+    "TSM":  {"Name": "TSMC", "Theme": "Foundry"},
+    "AVGO": {"Name": "Broadcom", "Theme": "Networking / ASIC"},
+    "AMD":  {"Name": "AMD", "Theme": "CPU / GPU"},
+    "INTC": {"Name": "Intel", "Theme": "Semiconductors"},
+    "MU":   {"Name": "Micron", "Theme": "Memory"},
+    "QCOM": {"Name": "Qualcomm", "Theme": "Mobile Chipsets"},
+    "TXN":  {"Name": "Texas Inst", "Theme": "Analog IC"},
+    "AMAT": {"Name": "Applied Mat", "Theme": "Semiconductor Equipment"},
+    "LRCX": {"Name": "Lam Research", "Theme": "Semiconductor Equipment"},
+    "SMCI": {"Name": "Super Micro", "Theme": "Servers"},
+
+    # --- Software / Cybersecurity / Finance ---
+    "ORCL": {"Name": "Oracle", "Theme": "Database"},
+    "CRWV": {"Name": "CoreWeave", "Theme": "Cloud Computing"},
+    "ADBE": {"Name": "Adobe", "Theme": "Creative Software"},
+    "CRM":  {"Name": "Salesforce", "Theme": "CRM"},
+    "CRWD": {"Name": "CrowdStrike", "Theme": "Cybersecurity"},
+    "PLTR": {"Name": "Palantir", "Theme": "Big Data / AI"},
+    "PANW": {"Name": "Palo Alto", "Theme": "Cybersecurity"},
+    "JPM":  {"Name": "JPMorgan", "Theme": "Leading Bank"},
+    "V":    {"Name": "Visa", "Theme": "Payments"},
+    "MA":   {"Name": "Mastercard", "Theme": "Payments"},
+    "PYPL": {"Name": "PayPal", "Theme": "Payments"},
+    "COIN": {"Name": "Coinbase", "Theme": "Crypto Exchange"},
+    "MSTR": {"Name": "MicroStrategy", "Theme": "Bitcoin Holdings"},
+
+    # --- Traditional / Consumer / Others ---
+    "WMT":  {"Name": "Walmart", "Theme": "Retail Leader"},
+    "COST": {"Name": "Costco", "Theme": "Wholesale Retail"},
+    "LLY":  {"Name": "Eli Lilly", "Theme": "Weight-Loss Drugs"},
+    "JNJ":  {"Name": "J&J", "Theme": "Healthcare"},
+    "NFLX": {"Name": "Netflix", "Theme": "Streaming"},
+    "DIS":  {"Name": "Disney", "Theme": "Entertainment"},
+    "XOM":  {"Name": "Exxon Mobil", "Theme": "Oil & Gas"},
 }
 
 # 初始化全域資訊字典
