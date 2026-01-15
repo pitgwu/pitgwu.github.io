@@ -3,11 +3,12 @@ import datetime
 import numpy as np
 import json
 import os
+import shutil
 
 # ==========================================
 # 0. 設定與路徑
 # ==========================================
-# 系統時間 (用於讀取 Data Engine 產生的檔案)
+# 系統時間
 NOW_SYS = datetime.datetime.now()
 DATE_STR = NOW_SYS.strftime("%Y%m%d")
 
@@ -15,8 +16,7 @@ DATE_STR = NOW_SYS.strftime("%Y%m%d")
 TZ_UTC = datetime.timezone.utc
 TZ_TW = datetime.timezone(datetime.timedelta(hours=8))
 
-# ✨ [修正] 計算美股日期 (US Eastern Time 約為 UTC-5)
-# 這樣無論台灣是早上(看昨收)或晚上(看即時)，都能對應到正確的美國日期
+# 計算美股日期 (US Eastern Time 約為 UTC-5)
 now_utc = datetime.datetime.now(TZ_UTC)
 us_date = now_utc - datetime.timedelta(hours=5)
 US_DATE_STR = us_date.strftime("%Y/%m/%d")
@@ -28,12 +28,36 @@ BASE_DIR = "us_stock_dashboard"
 TARGET_DIR = os.path.join(BASE_DIR, YYYY, MM)
 
 if not os.path.exists(TARGET_DIR):
-    print(f"❌ 目錄不存在: {TARGET_DIR}，請先執行 data_engine.py")
+    print(f"❌ 目錄不存在: {TARGET_DIR}，請先執行 us_data_engine.py")
     exit()
 
 INDICES_TICKERS = ["^DJI", "^GSPC", "^IXIC", "^SOX", "^VIX"]
 COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"]
-WATCHLIST_TICKERS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", "TSM", "AMD", "MU", "QCOM", "TXN", "AMAT", "LRCX", "SMCI", "ORCL", "CRWV", "PLTR", "LLY", "NFLX", "XOM", "BTC-USD", "COIN"]
+
+# ✨ [關鍵修正] 完整 24 檔重點觀察股
+WATCHLIST_TICKERS = [
+    "NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", 
+    "TSM", "AMD", "MU", "QCOM", "TXN", "AMAT", "LRCX", "SMCI", 
+    "ORCL", "CRWV", "PLTR", "LLY", "NFLX", "XOM", "BTC-USD", "COIN"
+]
+
+# TradingView 代號對照表
+TV_MAPPING = {
+    # 指數
+    "^DJI": "DJ-DJI",
+    "^GSPC": "SP-SPX",
+    "^IXIC": "TVC-IXIC",
+    "^SOX": "PHLX-SOX",
+    "^VIX": "CBOE-VIX",
+    # 原物料 (期貨連續月)
+    "GC=F": "COMEX-GC1!",    # 黃金
+    "SI=F": "COMEX-SI1!",    # 白銀
+    "HG=F": "COMEX-HG1!",    # 銅
+    "HRC=F": "CME-HRC1!",    # 熱軋鋼
+    "CL=F": "NYMEX-CL1!",    # 原油
+    # 加密貨幣
+    "BTC-USD": "CRYPTO-BTCUSD"
+}
 
 # ==========================================
 # 1. 資料讀取函式
@@ -57,7 +81,6 @@ def generate_treemap_data(df):
     exclude = INDICES_TICKERS + ['BTC-USD']
     df_clean = df[~df['Code'].isin(exclude)].copy()
     
-    # 數值轉型與補值
     for col in ['Daily_Amount_B', 'Daily_Chg%', 'RVOL']:
         df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
     
@@ -66,7 +89,6 @@ def generate_treemap_data(df):
     df_clean['Sector'] = df_clean['Sector'].fillna('Other')
     df_clean['Industry'] = df_clean['Industry'].fillna('Other')
 
-    # 取成交額前 100 大且大於 0
     df_top = df_clean[df_clean['Daily_Amount_B'] > 0].sort_values(by='Daily_Amount_B', ascending=False).head(100)
     
     data = []
@@ -250,6 +272,16 @@ def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=
     display_amt_col = col_map.get(bar_col)
     display_rvol_col = '相對量能' if sort_by_rvol else None
 
+    # TradingView 超連結生成
+    def make_tv_link(code):
+        code_str = str(code)
+        tv_symbol = code_str # 預設使用代號本身
+        if code_str in TV_MAPPING:
+            tv_symbol = TV_MAPPING[code_str]
+        return f'<a href="https://www.tradingview.com/symbols/{tv_symbol}/" target="_blank" style="color: #82cfff; text-decoration: none; font-weight: bold;">{code_str}</a>'
+
+    df_show['代號'] = df_show['代號'].apply(make_tv_link)
+
     def color_change(val):
         if isinstance(val, str): val = float(val.strip('%'))
         if pd.isna(val): return 'color: #888;'
@@ -361,6 +393,7 @@ def generate_commodities_html(df):
 def generate_watchlist_html(df):
     mask = df['Code'].isin(WATCHLIST_TICKERS)
     df_watch = df[mask].copy()
+    # 確保按照 WATCHLIST_TICKERS 的順序排序，而不是亂跳
     df_watch['Code'] = pd.Categorical(df_watch['Code'], categories=WATCHLIST_TICKERS, ordered=True)
     df_watch = df_watch.sort_values('Code')
     df_watch = add_rank_column(df_watch)
@@ -379,7 +412,7 @@ def generate_html_report():
     sentiment = load_sentiment_data()
     ai_data = load_ai_data()
     
-    # ✨ [修正] 更新時間：使用台灣時間 (UTC+8)
+    # 更新時間 (UTC+8)
     now_tw = datetime.datetime.now(TZ_TW)
     now_str = now_tw.strftime("%Y-%m-%d %H:%M:%S")
 
