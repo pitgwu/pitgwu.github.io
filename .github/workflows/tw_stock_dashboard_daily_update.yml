@@ -1,0 +1,64 @@
+name: TW Stock Daily Update & Report
+
+on:
+  schedule:
+    # 台灣時間 09:05, 10:05, 11:05, 12:05, 13:05, 13:35 (週一至週五)
+    # Cron 語法: 分 時 日 月 週 (UTC)
+    - cron: '5 1 * * 1-5'
+    - cron: '5 2 * * 1-5'
+    - cron: '5 3 * * 1-5'
+    - cron: '5 4 * * 1-5'
+    - cron: '5 5 * * 1-5'
+    - cron: '35 5 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    # 設定環境變數 (從 Secrets 讀取)
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+      TZ: 'Asia/Taipei' # 設定時區 (雖主要影響 log 顯示)
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.3'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas yfinance requests sqlalchemy psycopg2-binary plotly tqdm lxml
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: 1. Run Daily Pipeline (Basic)
+        # 執行基礎資料更新 (清單 + 股價)
+        run: python daily_pipeline_basic.py
+
+      - name: 2. Generate Daily Report
+        # 產生 HTML 報表
+        run: python generate_tw_daily_report_supabase.py
+
+      - name: 3. Deploy Report to GitHub Pages
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # 1. 強制加入 data, performance  資料夾下的所有變動 (包含子資料夾與新檔案)
+          git add tw_stock_dashboard/\*
+          
+          # 2. 檢查是否有東西可以 commit (避免因為沒資料更新而報錯)
+          if git diff --cached --quiet; then
+            echo "沒有偵測到任何 CSV 檔案變動，跳過提交。"
+          else
+            git commit -m "📈 自動更新數據庫: $(date +'%Y-%m-%d %H:%M')"
+            git push
+          fi
