@@ -19,11 +19,16 @@
             /* 表頭樣式與排序指標 */
             th { 
                 background: #252525; padding: 12px; text-align: left; color: #aaa; font-weight: 600; 
-                position: sticky; top: 0; cursor: pointer; user-select: none;
+                position: sticky; top: 0; cursor: pointer; user-select: none; transition: background 0.2s;
             }
             th:hover { background: #333; color: var(--accent); }
-            th::after { content: ' ⇅'; font-size: 0.8em; opacity: 0.3; }
             
+            /* 排序箭頭 */
+            th.sort-asc::after { content: ' ▲'; color: var(--accent); }
+            th.sort-desc::after { content: ' ▼'; color: var(--accent); }
+            th::after { content: ' ⇅'; font-size: 0.8em; opacity: 0.2; margin-left: 5px; }
+            th.sort-asc::after, th.sort-desc::after { opacity: 1; }
+
             td { border-bottom: 1px solid #2a2a2a; padding: 10px 12px; vertical-align: middle; }
             tr:hover { background: #2c2c2c; }
             
@@ -37,63 +42,62 @@
             .vol-tag { color: #ffa726; font-size: 0.8rem; }
         </style>
         <script>
-            function sortTable(n) {
-                var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
-                table = document.getElementById("stockTable");
-                switching = true;
-                dir = "asc"; 
-                while (switching) {
-                    switching = false;
-                    rows = table.rows;
-                    for (i = 1; i < (rows.length - 1); i++) {
-                        shouldSwitch = false;
-                        x = rows[i].getElementsByTagName("TD")[n];
-                        y = rows[i + 1].getElementsByTagName("TD")[n];
+            document.addEventListener('DOMContentLoaded', function() {
+                const table = document.getElementById("stockTable");
+                const headers = table.querySelectorAll("th");
+                const tbody = table.querySelector("tbody");
+
+                headers.forEach((header, index) => {
+                    header.addEventListener("click", () => {
+                        const rows = Array.from(tbody.querySelectorAll("tr"));
+                        const isAsc = header.classList.contains("sort-asc");
                         
-                        // 清洗數據以便排序 (移除 %, , x, 🔥 等非數字字符)
-                        var xVal = x.innerText.replace(/[%,,🔥x]/g, "").trim();
-                        var yVal = y.innerText.replace(/[%,,🔥x]/g, "").trim();
+                        // 重置所有 header 樣式
+                        headers.forEach(h => h.classList.remove("sort-asc", "sort-desc"));
                         
-                        // 嘗試轉為數字
-                        var xNum = parseFloat(xVal);
-                        var yNum = parseFloat(yVal);
+                        // 設定當前 header 樣式
+                        header.classList.toggle("sort-asc", !isAsc);
+                        header.classList.toggle("sort-desc", isAsc);
                         
-                        // 若非數字則視為字串比較
-                        if (isNaN(xNum) || isNaN(yNum)) {
-                            if (dir == "asc") {
-                                if (xVal.toLowerCase() > yVal.toLowerCase()) { shouldSwitch = true; break; }
-                            } else if (dir == "desc") {
-                                if (xVal.toLowerCase() < yVal.toLowerCase()) { shouldSwitch = true; break; }
+                        const direction = isAsc ? -1 : 1;
+
+                        // 執行排序 (記憶體內陣列排序，極速)
+                        rows.sort((rowA, rowB) => {
+                            const cellA = rowA.children[index].innerText;
+                            const cellB = rowB.children[index].innerText;
+                            
+                            // 清洗數據轉為數字
+                            const valA = parseValue(cellA);
+                            const valB = parseValue(cellB);
+
+                            if (typeof valA === 'number' && typeof valB === 'number') {
+                                return (valA - valB) * direction;
+                            } else {
+                                return valA.toString().localeCompare(valB.toString()) * direction;
                             }
-                        } else {
-                            if (dir == "asc") {
-                                if (xNum > yNum) { shouldSwitch = true; break; }
-                            } else if (dir == "desc") {
-                                if (xNum < yNum) { shouldSwitch = true; break; }
-                            }
-                        }
-                    }
-                    if (shouldSwitch) {
-                        rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
-                        switching = true;
-                        switchcount ++;      
-                    } else {
-                        if (switchcount == 0 && dir == "asc") {
-                            dir = "desc";
-                            switching = true;
-                        }
-                    }
-                }
-                // 排序後重新編號 No.
-                reindexRows();
+                        });
+
+                        // 一次性將排序好的 rows 放回 tbody (減少 reflow)
+                        tbody.append(...rows);
+
+                        // 重新編號
+                        reindexRows();
+                    });
+                });
+            });
+
+            function parseValue(str) {
+                // 移除 %, ,, x, 🔥 等符號
+                const cleanStr = str.replace(/[%,,🔥x]/g, "").trim();
+                const num = parseFloat(cleanStr);
+                return isNaN(num) ? str : num;
             }
 
             function reindexRows() {
-                var table = document.getElementById("stockTable");
-                var rows = table.rows;
-                for (var i = 1; i < rows.length; i++) {
-                    rows[i].getElementsByTagName("TD")[0].innerText = i;
-                }
+                const rows = document.querySelectorAll("#stockTable tbody tr");
+                rows.forEach((row, index) => {
+                    row.children[0].innerText = index + 1;
+                });
             }
         </script>
     </head>
@@ -111,13 +115,13 @@
                     <table id="stockTable">
                         <thead>
                             <tr>
-                                <th width="5%" onclick="sortTable(0)">No.</th>
-                                <th width="15%" onclick="sortTable(1)">代號/名稱</th>
-                                <th width="15%" onclick="sortTable(2)">產業</th>
-                                <th width="15%" onclick="sortTable(3)">收盤</th>
-                                <th width="15%" onclick="sortTable(4)">漲跌幅</th>
-                                <th width="15%" onclick="sortTable(5)">成交量</th>
-                                <th width="20%" onclick="sortTable(6)">量增比</th>
+                                <th width="5%">No.</th>
+                                <th width="15%">代號/名稱</th>
+                                <th width="15%">產業</th>
+                                <th width="15%">收盤</th>
+                                <th width="15%">漲跌幅</th>
+                                <th width="15%">成交量</th>
+                                <th width="20%">量增比</th>
                             </tr>
                         </thead>
                         <tbody>
