@@ -4,6 +4,8 @@ import pandas as pd
 import yfinance as yf
 import re
 import sqlalchemy
+import time
+import random
 from io import StringIO
 from datetime import datetime
 from sqlalchemy import create_engine, text
@@ -27,6 +29,7 @@ HEADERS = {
 # 2. 通用工具函式
 # ===========================
 def ensure_primary_key(table_name, unique_cols):
+    """確保資料表有 Primary Key，以便執行 Upsert"""
     try:
         with engine.begin() as conn:
             pk_str = ", ".join([f'"{c}"' for c in unique_cols])
@@ -35,94 +38,154 @@ def ensure_primary_key(table_name, unique_cols):
         pass
 
 def upsert_to_supabase(df, table_name, unique_cols):
+    """
+    使用 PostgreSQL 的 INSERT ON CONFLICT DO UPDATE (Upsert)
+    這是最安全的寫入方式，不會誤刪資料。
+    """
     if df.empty: return
+    
     records = df.to_dict(orient='records')
     metadata = sqlalchemy.MetaData()
+    
     try:
         target_table = sqlalchemy.Table(table_name, metadata, autoload_with=engine)
     except sqlalchemy.exc.NoSuchTableError:
+        # 表格不存在，直接建立
         df.to_sql(table_name, engine, if_exists='replace', index=False)
         ensure_primary_key(table_name, unique_cols)
+        print(f"   ✨ 已建立新表 [{table_name}] 並寫入 {len(records)} 筆")
         return
 
+    # 建立 Upsert 語句
     stmt = insert(target_table).values(records)
+    
+    # 定義衝突時更新的欄位 (排除 Primary Key)
     update_dict = {c.name: c for c in stmt.excluded if c.name not in unique_cols}
-    on_conflict_stmt = stmt.on_conflict_do_update(index_elements=unique_cols, set_=update_dict) if update_dict else stmt.on_conflict_do_nothing(index_elements=unique_cols)
+    
+    if update_dict:
+        on_conflict_stmt = stmt.on_conflict_do_update(index_elements=unique_cols, set_=update_dict)
+    else:
+        on_conflict_stmt = stmt.on_conflict_do_nothing(index_elements=unique_cols)
 
     try:
         with engine.begin() as conn:
             conn.execute(on_conflict_stmt)
     except sqlalchemy.exc.ProgrammingError as e:
         if "there is no unique or exclusion constraint" in str(e):
+            print(f"   ⚠️ [{table_name}] 缺少 Primary Key，嘗試修復...")
             ensure_primary_key(table_name, unique_cols)
             with engine.begin() as conn:
                 conn.execute(on_conflict_stmt)
         else:
             raise e
-    print(f"   ✅ [{table_name}] 更新 {len(records)} 筆")
-
-def simple_upsert(df, table_name, chunk_size=1000):
-    if df.empty: return
-    if 'date' in df.columns:
-        target_dates = df['date'].unique()
-        date_list = "', '".join([str(d) for d in target_dates])
-        with engine.begin() as conn:
-            conn.execute(text(f"DELETE FROM {table_name} WHERE date IN ('{date_list}')"))
-    df.to_sql(table_name, engine, if_exists='append', index=False, chunksize=chunk_size, method='multi')
-    print(f"   ✅ [{table_name}] 寫入 {len(df)} 筆")
+            
+    print(f"   ✅ [{table_name}] Upsert 成功: {len(records)} 筆")
 
 # ===========================
-# 3. 核心功能
+# 3. 模組 A: 股票清單
 # ===========================
+def fetch_market_data_with_retry(url, retries=3):
+    for i in range(retries):
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=45)
+            if res.status_code == 200:
+                res.encoding = 'cp950'
+                return res.text
+        except Exception as e:
+            print(f"      ⚠️ 連線失敗 ({i+1}/{retries}): {e}")
+            time.sleep(random.uniform(3, 5))
+    return None
+
 def sync_stock_info():
     print("\n🚀 [1/2] 更新股票代號與產業分類...")
     all_data = []
     configs = [("上市", 2, ".TW"), ("上櫃", 4, ".TWO"), ("興櫃", 5, ".TWO")]
 
     for market_name, mode, suffix in configs:
+        print(f"   📡 正在抓取 {market_name} ...")
         url = f"https://isin.twse.com.tw/isin/C_public.jsp?strMode={mode}"
+        
+        html_text = fetch_market_data_with_retry(url)
+        if not html_text:
+            print(f"   ❌ {market_name} 下載失敗")
+            continue
+
         try:
-            res = requests.get(url, headers=HEADERS, timeout=30)
-            res.encoding = 'cp950'
-            dfs = pd.read_html(StringIO(res.text), header=0)
+            dfs = pd.read_html(StringIO(html_text), header=0)
             if not dfs: continue
             df = dfs[0]
+            
+            count = 0
             for _, row in df.iterrows():
                 try:
                     raw_str = str(row.iloc[0]).strip()
                     industry = str(row.iloc[4]).strip()
                     parts = re.split(r'[\s\u3000]+', raw_str, maxsplit=1)
+                    
                     if len(parts) >= 2:
                         code = parts[0].strip()
                         name = parts[1].strip()
-                        if re.match(r'^\d{4}$', code):
+                        if re.match(r'^\d{4}$', code): 
                             if industry == 'nan' or not industry: industry = '其他'
-                            all_data.append({'symbol': f"{code}{suffix}", 'name': name, 'industry': industry})
+                            all_data.append({
+                                'symbol': f"{code}{suffix}",
+                                'name': name,
+                                'industry': industry
+                            })
+                            count += 1
                 except: continue
+            print(f"      ✅ 取得 {count} 筆")
+            
         except Exception as e:
-            print(f"   ❌ {market_name} 下載失敗: {e}")
+            print(f"   ❌ {market_name} 解析失敗: {e}")
+        
+        time.sleep(random.uniform(2, 4))
+
+    # 安全閥：如果抓太少，不要覆蓋 DB
+    if len(all_data) < 1500:
+        print(f"\n🛑 [危險] 抓取數量過少 ({len(all_data)} 筆)，跳過更新 stock_info 以保護資料庫。")
+        # 嘗試讀取舊資料繼續跑股價
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("SELECT symbol FROM stock_info"))
+                return [r[0] for r in res]
+        except: return []
 
     if all_data:
         df_info = pd.DataFrame(all_data).drop_duplicates(subset=['symbol'])
+        print(f"   💾 資料完整 ({len(df_info)} 筆)，寫入資料庫...")
+        
+        # stock_info 使用全量替換是安全的
         df_info.to_sql('stock_info', engine, if_exists='replace', index=False)
         ensure_primary_key('stock_info', ['symbol'])
+        
         with engine.begin() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stock_info_symbol ON stock_info (symbol)"))
-        print(f"   ✅ 已更新 {len(df_info)} 檔股票資訊")
+            
+        print(f"   ✅ stock_info 更新完成")
         return df_info['symbol'].tolist()
     else:
         return []
 
+# ===========================
+# 4. 模組 B: 日 K 股價 (修正版)
+# ===========================
 def sync_daily_prices(symbols):
     print("\n🚀 [2/2] 下載最新股價 (yfinance)...")
-    if not symbols: return
+    if not symbols: 
+        print("   ⚠️ 無股票代號，略過更新")
+        return
+
     try:
         chunk_size = 500
         total_inserted = 0
+        
         for i in range(0, len(symbols), chunk_size):
             batch = symbols[i:i+chunk_size]
             print(f"   📡 下載進度 {i}/{len(symbols)}...", end="\r")
+            
             data = yf.download(batch, period="2d", progress=False, threads=True, auto_adjust=False)
+            
             if data.empty: continue
             
             if isinstance(data.columns, pd.MultiIndex):
@@ -132,15 +195,21 @@ def sync_daily_prices(symbols):
                 data = data.reset_index()
             
             data.columns = [str(c).lower() for c in data.columns]
+            
             req_cols = ['date', 'symbol', 'open', 'high', 'low', 'close', 'volume']
             if not set(req_cols).issubset(data.columns): continue
 
             df_upload = data[req_cols].copy()
             df_upload['date'] = pd.to_datetime(df_upload['date']).dt.strftime('%Y-%m-%d')
             df_upload.dropna(inplace=True)
-            simple_upsert(df_upload, 'stock_prices')
+            
+            # 🔥 關鍵修正：改用 Upsert，絕對不要用 simple_upsert (delete+insert)
+            upsert_to_supabase(df_upload, 'stock_prices', ['date', 'symbol'])
+            
             total_inserted += len(df_upload)
-        print(f"\n   ✅ 股價更新完成 (共更新 {total_inserted} 筆)")
+
+        print(f"\n   ✅ 股價更新完成 (共處理 {total_inserted} 筆數據)")
+
     except Exception as e:
         print(f"   ❌ 股價下載錯誤: {e}")
 
@@ -149,20 +218,11 @@ def sync_daily_prices(symbols):
 # ===========================
 if __name__ == "__main__":
     print("="*60)
-    print(f"📅 基礎資料更新 (Basic Pipeline)")
+    print(f"📅 基礎資料更新 (Basic Pipeline - Upsert Fix)")
     print(f"⏰ 時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 
     symbols = sync_stock_info()
-    
-    if not symbols:
-        try:
-            with engine.connect() as conn:
-                res = conn.execute(text("SELECT symbol FROM stock_info"))
-                symbols = [r[0] for r in res]
-        except:
-            print("❌ 無法取得股票代號，程式終止")
-            exit(1)
-
     sync_daily_prices(symbols)
+    
     print("\n🎉 基礎資料更新完成！")
