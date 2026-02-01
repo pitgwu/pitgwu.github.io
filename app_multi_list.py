@@ -28,47 +28,63 @@ engine = get_engine()
 
 WATCHLIST_DIR = "watchlists"
 OLD_WATCHLIST_FILE = "watchlist.txt"
+# 🔥 設定您的 GitHub Repo 網址 (不含 .git)
+GITHUB_REPO_URL = "github.com/pitgwu/pitgwu.github.io" 
 
 # ===========================
-# 2. Git 自動化管理模組 (🔥 修正版)
+# 2. Git 自動化管理模組 (🔥 權限修復版)
 # ===========================
 def init_git_config():
-    """設定 Git 使用者身分 (使用 GitHub Actions Bot)"""
+    """設定 Git 使用者身分"""
     try:
-        # 使用 --local 僅針對此專案設定，不影響環境全域
         subprocess.run(["git", "config", "--local", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
         subprocess.run(["git", "config", "--local", "user.name", "github-actions[bot]"], check=True)
     except Exception as e:
         print(f"Git Config 設定警告: {e}")
 
 def git_commit_and_push(action_msg):
-    """執行 Git 同步 (包含變動檢查機制)"""
+    """執行 Git 同步 (含 Token 認證)"""
     try:
-        # 1. 確保身分已設定
+        # 1. 取得 Token (支援環境變數或 Streamlit Secrets)
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token and hasattr(st, "secrets"):
+            # 嘗試從 Streamlit Secrets 讀取
+            try:
+                token = st.secrets["GITHUB_TOKEN"]
+            except:
+                pass
+        
+        if not token:
+            return False, "❌ 找不到 GITHUB_TOKEN，無法推送至 GitHub。請設定環境變數。"
+
+        # 2. 確保身分已設定
         init_git_config()
 
-        # 2. 加入 watchlists 資料夾下的所有變動
-        # Python subprocess 建議直接指定資料夾，效果等同於 watchlists/*.csv
+        # 3. 設定帶有 Token 的遠端網址 (這是繞過密碼詢問的關鍵)
+        # 格式: https://oauth2:TOKEN@github.com/user/repo.git
+        auth_url = f"https://oauth2:{token}@{GITHUB_REPO_URL}.git"
+        subprocess.run(["git", "remote", "set-url", "origin", auth_url], check=True)
+
+        # 4. 加入 watchlists 資料夾
         subprocess.run(["git", "add", "watchlists/"], check=True)
 
-        # 3. 檢查是否有東西可以 commit (避免空提交報錯)
-        # git diff --cached --quiet: 0=無變動, 1=有變動
+        # 5. 檢查是否有變動
         result = subprocess.run(["git", "diff", "--cached", "--quiet"])
-        
         if result.returncode == 0:
             return True, "沒有偵測到檔案變動，跳過提交。"
         
-        # 4. 提交與推送
+        # 6. 提交與推送
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
         full_msg = f"{action_msg} ({timestamp})"
         
         subprocess.run(["git", "commit", "-m", full_msg], check=True)
-        subprocess.run(["git", "push"], check=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True) # 明確指定 push 到 main
         
         return True, "Git 同步成功！"
         
     except subprocess.CalledProcessError as e:
-        return False, f"Git 操作失敗: {e}"
+        # 捕捉 Git 輸出的錯誤訊息以便除錯
+        return False, f"Git 操作失敗 (Exit {e.returncode})"
     except Exception as e:
         return False, f"未預期的錯誤: {e}"
 
@@ -130,7 +146,6 @@ def create_list(new_name):
     file_path = os.path.join(WATCHLIST_DIR, f"{new_name}.csv")
     if os.path.exists(file_path): return False, "名稱已存在"
     pd.DataFrame(columns=['symbol', 'added_date']).to_csv(file_path, index=False)
-    # 建立新清單也要同步
     git_commit_and_push(f"Create list {new_name}")
     return True, "建立成功"
 
@@ -139,9 +154,6 @@ def rename_list(old_name, new_name):
     new_path = os.path.join(WATCHLIST_DIR, f"{new_name}.csv")
     if os.path.exists(new_path): return False, "新名稱已存在"
     os.rename(old_path, new_path)
-    # 重新命名也要同步 (git add 新檔, git rm 舊檔 - 這裡簡化為 add all)
-    # 因為 os.rename 只是改名，git 會視為 untracked 和 deleted
-    # 我們讓 git_commit_and_push 的 git add watchlists/ 處理
     git_commit_and_push(f"Rename {old_name} to {new_name}") 
     return True, "改名成功"
 
@@ -358,7 +370,7 @@ with col_action:
                 if resolved_code not in current_watchlist_symbols:
                     new_row = {'symbol': resolved_code, 'added_date': datetime.now().strftime('%Y-%m-%d')}
                     watchlist_df = pd.concat([watchlist_df, pd.DataFrame([new_row])], ignore_index=True)
-                    save_list_data(selected_list, watchlist_df)
+                    file_path = save_list_data(selected_list, watchlist_df)
                     success, msg = git_commit_and_push(f"Add {resolved_code} to {selected_list}")
                     if success:
                         st.sidebar.success(f"✅")
@@ -377,7 +389,7 @@ with col_action:
             if not resolved_code: resolved_code = input_code
             if resolved_code in current_watchlist_symbols:
                 watchlist_df = watchlist_df[watchlist_df['symbol'] != resolved_code]
-                save_list_data(selected_list, watchlist_df)
+                file_path = save_list_data(selected_list, watchlist_df)
                 success, msg = git_commit_and_push(f"Del {resolved_code} from {selected_list}")
                 if success:
                     st.sidebar.success(f"🗑️")
