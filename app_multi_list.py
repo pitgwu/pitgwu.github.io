@@ -30,12 +30,56 @@ WATCHLIST_DIR = "watchlists"
 OLD_WATCHLIST_FILE = "watchlist.txt"
 
 # ===========================
-# 2. 檔案系統與 Git 管理
+# 2. Git 自動化管理模組 (🔥 修正版)
+# ===========================
+def init_git_config():
+    """設定 Git 使用者身分 (使用 GitHub Actions Bot)"""
+    try:
+        # 使用 --local 僅針對此專案設定，不影響環境全域
+        subprocess.run(["git", "config", "--local", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "config", "--local", "user.name", "github-actions[bot]"], check=True)
+    except Exception as e:
+        print(f"Git Config 設定警告: {e}")
+
+def git_commit_and_push(action_msg):
+    """執行 Git 同步 (包含變動檢查機制)"""
+    try:
+        # 1. 確保身分已設定
+        init_git_config()
+
+        # 2. 加入 watchlists 資料夾下的所有變動
+        # Python subprocess 建議直接指定資料夾，效果等同於 watchlists/*.csv
+        subprocess.run(["git", "add", "watchlists/"], check=True)
+
+        # 3. 檢查是否有東西可以 commit (避免空提交報錯)
+        # git diff --cached --quiet: 0=無變動, 1=有變動
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        
+        if result.returncode == 0:
+            return True, "沒有偵測到檔案變動，跳過提交。"
+        
+        # 4. 提交與推送
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+        full_msg = f"{action_msg} ({timestamp})"
+        
+        subprocess.run(["git", "commit", "-m", full_msg], check=True)
+        subprocess.run(["git", "push"], check=True)
+        
+        return True, "Git 同步成功！"
+        
+    except subprocess.CalledProcessError as e:
+        return False, f"Git 操作失敗: {e}"
+    except Exception as e:
+        return False, f"未預期的錯誤: {e}"
+
+# ===========================
+# 3. 檔案系統管理
 # ===========================
 def init_filesystem():
     if not os.path.exists(WATCHLIST_DIR):
         os.makedirs(WATCHLIST_DIR)
     
+    # 遷移舊檔
     if os.path.exists(OLD_WATCHLIST_FILE):
         try:
             try:
@@ -86,6 +130,8 @@ def create_list(new_name):
     file_path = os.path.join(WATCHLIST_DIR, f"{new_name}.csv")
     if os.path.exists(file_path): return False, "名稱已存在"
     pd.DataFrame(columns=['symbol', 'added_date']).to_csv(file_path, index=False)
+    # 建立新清單也要同步
+    git_commit_and_push(f"Create list {new_name}")
     return True, "建立成功"
 
 def rename_list(old_name, new_name):
@@ -93,28 +139,24 @@ def rename_list(old_name, new_name):
     new_path = os.path.join(WATCHLIST_DIR, f"{new_name}.csv")
     if os.path.exists(new_path): return False, "新名稱已存在"
     os.rename(old_path, new_path)
+    # 重新命名也要同步 (git add 新檔, git rm 舊檔 - 這裡簡化為 add all)
+    # 因為 os.rename 只是改名，git 會視為 untracked 和 deleted
+    # 我們讓 git_commit_and_push 的 git add watchlists/ 處理
+    git_commit_and_push(f"Rename {old_name} to {new_name}") 
     return True, "改名成功"
 
 def delete_list(list_name):
     file_path = os.path.join(WATCHLIST_DIR, f"{list_name}.csv")
     if os.path.exists(file_path):
         os.remove(file_path)
+        git_commit_and_push(f"Delete list {list_name}")
         return True, "刪除成功"
     return False, "檔案不存在"
-
-def git_commit_and_push(file_path, action_msg):
-    try:
-        subprocess.run(["git", "add", file_path], check=True)
-        subprocess.run(["git", "commit", "-m", f"Watchlist: {action_msg}"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        return True, "Git 同步成功"
-    except Exception as e:
-        return False, f"Git 錯誤: {e}"
 
 init_filesystem()
 
 # ===========================
-# 3. 資料讀取 (分段載入)
+# 4. 資料讀取 (分段載入)
 # ===========================
 @st.cache_data(ttl=3600)
 def get_all_symbols_fast():
@@ -170,7 +212,7 @@ def load_and_process_data():
     return df
 
 # ===========================
-# 4. 指標與繪圖
+# 5. 指標與繪圖
 # ===========================
 def resolve_stock_symbol(input_code, valid_symbols_set):
     code = input_code.strip().upper()
@@ -264,7 +306,7 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
     return fig
 
 # ===========================
-# 5. 主程式 UI
+# 6. 主程式 UI
 # ===========================
 st.title("自選股戰情室")
 st.markdown("---")
@@ -274,7 +316,7 @@ for key in ['ticker_index', 'last_selected_rows', 'last_viewed_symbol', 'last_so
     if key == 'symbol_input' and st.session_state[key] is None:
         st.session_state.symbol_input = ""
 
-# --- 0. 載入智慧搜尋所需的代碼清單 (極速) ---
+# --- 0. 第一階段：極速載入代號表 ---
 valid_symbols_set = get_all_symbols_fast()
 
 # --- 側邊欄 ---
@@ -289,9 +331,7 @@ selected_list = st.sidebar.selectbox("📂 選擇清單", all_lists, index=0)
 watchlist_df = get_list_data(selected_list)
 current_watchlist_symbols = watchlist_df['symbol'].tolist()
 
-# 🔥 優化：將清單表格移到上方，並加入點選連動邏輯
 with st.sidebar.expander(f"📋 查看清單 ({len(current_watchlist_symbols)}檔)", expanded=True):
-    # 使用 on_select="rerun" 來捕獲點選事件
     event = st.dataframe(
         watchlist_df, 
         hide_index=True, 
@@ -299,16 +339,12 @@ with st.sidebar.expander(f"📋 查看清單 ({len(current_watchlist_symbols)}�
         selection_mode="single-row",
         use_container_width=True
     )
-    # 如果有選取，更新 session state 中的 symbol_input
     if len(event.selection.rows) > 0:
         idx = event.selection.rows[0]
         if idx < len(watchlist_df):
             st.session_state.symbol_input = watchlist_df.iloc[idx]['symbol']
 
-# 股票操作區
 col_input, col_action = st.sidebar.columns([1.5, 2])
-
-# 🔥 綁定 key="symbol_input" 實現雙向綁定 (輸入框 <-> 表格點選)
 input_code = col_input.text_input("股票代號", key="symbol_input", placeholder="如: 2330").strip()
 
 with col_action:
@@ -322,8 +358,8 @@ with col_action:
                 if resolved_code not in current_watchlist_symbols:
                     new_row = {'symbol': resolved_code, 'added_date': datetime.now().strftime('%Y-%m-%d')}
                     watchlist_df = pd.concat([watchlist_df, pd.DataFrame([new_row])], ignore_index=True)
-                    file_path = save_list_data(selected_list, watchlist_df)
-                    success, msg = git_commit_and_push(file_path, f"Add {resolved_code} to {selected_list}")
+                    save_list_data(selected_list, watchlist_df)
+                    success, msg = git_commit_and_push(f"Add {resolved_code} to {selected_list}")
                     if success:
                         st.sidebar.success(f"✅")
                         st.rerun()
@@ -341,11 +377,11 @@ with col_action:
             if not resolved_code: resolved_code = input_code
             if resolved_code in current_watchlist_symbols:
                 watchlist_df = watchlist_df[watchlist_df['symbol'] != resolved_code]
-                file_path = save_list_data(selected_list, watchlist_df)
-                success, msg = git_commit_and_push(file_path, f"Del {resolved_code} from {selected_list}")
+                save_list_data(selected_list, watchlist_df)
+                success, msg = git_commit_and_push(f"Del {resolved_code} from {selected_list}")
                 if success:
                     st.sidebar.success(f"🗑️")
-                    st.session_state.symbol_input = "" # 清空輸入框
+                    st.session_state.symbol_input = ""
                     st.rerun()
                 else:
                     st.sidebar.error(msg)
@@ -363,15 +399,14 @@ with col_action:
             else:
                 st.sidebar.error(f"❌ 查無: {input_code}")
 
-# C. 清單管理 Expander
-with st.sidebar.expander("⚙️ 清單管理 (新增/改名/刪除)"):
+with st.sidebar.expander("⚙️ 清單管理"):
     new_list_name = st.text_input("建立新清單").strip()
     if st.button("建立"):
         if new_list_name:
             success, msg = create_list(new_list_name)
             if success: st.rerun()
             else: st.error(msg)
-            
+    
     st.markdown("---")
     rename_new = st.text_input("重新命名目前清單").strip()
     if st.button("改名"):
@@ -379,7 +414,7 @@ with st.sidebar.expander("⚙️ 清單管理 (新增/改名/刪除)"):
             success, msg = rename_list(selected_list, rename_new)
             if success: st.rerun()
             else: st.error(msg)
-            
+    
     st.markdown("---")
     if st.button("⚠️ 刪除此清單", type="primary"):
         if len(all_lists) <= 1:
