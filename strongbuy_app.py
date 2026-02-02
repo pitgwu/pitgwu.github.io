@@ -1,11 +1,13 @@
 import streamlit as st
 import pandas as pd
 import sqlalchemy
+from sqlalchemy import text
 import os
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+import bcrypt  # 需 pip install bcrypt
 
 # ===========================
 # 1. 資料庫連線與設定
@@ -24,7 +26,57 @@ def get_engine():
 engine = get_engine()
 
 # ===========================
-# 2. 資料讀取與預處理
+# 2. 身份驗證模組 (Authentication)
+# ===========================
+def check_login(username, password):
+    """驗證帳號密碼，回傳 (是否成功, 角色)"""
+    try:
+        with engine.connect() as conn:
+            # 根據 username 撈取 hash 和 role
+            result = conn.execute(
+                text("SELECT password_hash, role FROM users WHERE username = :u"),
+                {"u": username}
+            ).fetchone()
+            
+            if result:
+                db_hash = result[0]
+                role = result[1]
+                # 比對密碼
+                if bcrypt.checkpw(password.encode('utf-8'), db_hash.encode('utf-8')):
+                    return True, role
+            
+            return False, None
+    except Exception as e:
+        st.error(f"登入系統錯誤: {e}")
+        return False, None
+
+def login_page():
+    """登入頁面 UI"""
+    st.markdown("<h1 style='text-align: center;'>🔐 尾盤神探 - 系統登入</h1>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("帳號 (Username)")
+            password = st.text_input("密碼 (Password)", type="password")
+            submit = st.form_submit_button("登入", use_container_width=True)
+            
+            if submit:
+                if not username or not password:
+                    st.warning("請輸入帳號與密碼")
+                else:
+                    success, role = check_login(username, password)
+                    if success:
+                        st.session_state['logged_in'] = True
+                        st.session_state['username'] = username
+                        st.session_state['role'] = role
+                        st.success("登入成功！")
+                        st.rerun()
+                    else:
+                        st.error("❌ 帳號或密碼錯誤")
+
+# ===========================
+# 3. 資料讀取與預處理
 # ===========================
 @st.cache_data(ttl=3600)
 def load_and_process_data():
@@ -79,7 +131,7 @@ def load_and_process_data():
     return df
 
 # ===========================
-# 3. 進階指標計算函式
+# 4. 進階指標計算函式
 # ===========================
 def calculate_advanced_indicators_and_score(df_stock, is_single_stock=False):
     """計算指標 (KD, MACD, CDP)"""
@@ -175,129 +227,108 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text):
     return fig
 
 # ===========================
-# 4. Streamlit 主程式
+# 5. Streamlit 主程式邏輯 (封裝)
 # ===========================
-st.title("🏆 尾盤神探 - 動態訊號版")
-st.markdown("---")
+def main_app():
+    # --- 使用者資訊與登出 ---
+    with st.sidebar:
+        st.markdown(f"👤 **{st.session_state['username']}** ({st.session_state['role']})")
+        if st.button("🚪 登出", key="logout_btn"):
+            st.session_state['logged_in'] = False
+            st.session_state['role'] = None
+            st.rerun()
+        st.markdown("---")
 
-for key in ['ticker_index', 'last_selected_rows', 'last_viewed_symbol', 'last_sort_option']:
-    if key not in st.session_state: st.session_state[key] = 0 if 'index' in key else None
+    st.title("🏆 尾盤神探 - 動態訊號版")
+    st.markdown("---")
 
-with st.spinner("載入數據中..."):
-    df_full = load_and_process_data()
+    for key in ['ticker_index', 'last_selected_rows', 'last_viewed_symbol', 'last_sort_option']:
+        if key not in st.session_state: st.session_state[key] = 0 if 'index' in key else None
 
-available_dates = sorted(df_full['date'].dt.date.unique(), reverse=True)
-all_industries = sorted(df_full['industry'].dropna().astype(str).unique().tolist())
+    with st.spinner("載入數據中..."):
+        df_full = load_and_process_data()
 
-# --- 側邊欄 ---
-selected_date = st.sidebar.selectbox("📅 回測日期", available_dates, 0)
-st.sidebar.markdown("---")
-sort_option = st.sidebar.selectbox("🔢 排序方式", ["強勢總分 (高→低)", "漲跌幅 (高→低)", "量比 (高→低)"])
-st.sidebar.markdown("---")
-selected_industries = st.sidebar.multiselect("🏭 產業篩選", options=all_industries, default=[])
+    available_dates = sorted(df_full['date'].dt.date.unique(), reverse=True)
+    all_industries = sorted(df_full['industry'].dropna().astype(str).unique().tolist())
 
-# ===========================
-# 5. 核心運算 (當日切片 + 評分)
-# ===========================
-target_date_ts = pd.Timestamp(selected_date)
-df_day = df_full[df_full['date'] == target_date_ts].copy()
+    # --- 側邊欄參數 ---
+    selected_date = st.sidebar.selectbox("📅 回測日期", available_dates, 0)
+    st.sidebar.markdown("---")
+    sort_option = st.sidebar.selectbox("🔢 排序方式", ["強勢總分 (高→低)", "漲跌幅 (高→低)", "量比 (高→低)"])
+    st.sidebar.markdown("---")
+    selected_industries = st.sidebar.multiselect("🏭 產業篩選", options=all_industries, default=[])
 
-if selected_industries:
-    df_day = df_day[df_day['industry'].isin(selected_industries)]
+    # ===========================
+    # 核心運算
+    # ===========================
+    target_date_ts = pd.Timestamp(selected_date)
+    df_day = df_full[df_full['date'] == target_date_ts].copy()
 
-# --- 計算當日排名 ---
-df_day['rank_1d'] = df_day['pct_change'].rank(ascending=False)
-df_day['rank_5d'] = df_day['pct_change_5d'].rank(ascending=False)
+    if selected_industries:
+        df_day = df_day[df_day['industry'].isin(selected_industries)]
 
-if df_day.empty:
-    st.warning("無資料")
-else:
-    # 預先初始化 list 欄位
+    # --- 計算當日排名 ---
+    df_day['rank_1d'] = df_day['pct_change'].rank(ascending=False)
+    df_day['rank_5d'] = df_day['pct_change_5d'].rank(ascending=False)
+
+    if df_day.empty:
+        st.warning("⚠️ 此日期無交易資料或篩選結果為空")
+        return
+
+    # 初始化欄位
     df_day['signals_str'] = [[] for _ in range(len(df_day))]
-    
-    # 初始化分數
     score = pd.Series(0, index=df_day.index)
 
-    # ==========================================
-    # 🔥 關鍵修改：動態計算各項乖離與數值
-    # ==========================================
-    
-    # 1. 計算均線乖離率 (Bias Percentage)
+    # --- 運算邏輯 ---
     bias_ma5 = ((df_day['close'] - df_day['MA5']) / df_day['MA5']) * 100
     bias_ma20 = ((df_day['close'] - df_day['MA20']) / df_day['MA20']) * 100
     bias_ma60 = ((df_day['close'] - df_day['MA60']) / df_day['MA60']) * 100
     
-    # 2. 計算成交量增幅
     vol_diff_ma5 = ((df_day['volume'] - df_day['Vol_MA5']) / df_day['Vol_MA5']) * 100
     vol_diff_ma10 = ((df_day['volume'] - df_day['Vol_MA10']) / df_day['Vol_MA10']) * 100
-    vol_diff_ma20 = ((df_day['volume'] - df_day['Vol_MA20']) / df_day['Vol_MA20']) * 100
-    vol_diff_prev = ((df_day['volume'] - df_day['prev_volume']) / df_day['prev_volume']) * 100 # 比昨日增減
+    vol_diff_prev = ((df_day['volume'] - df_day['prev_volume']) / df_day['prev_volume']) * 100 
 
-    # 定義動態訊號策略
-    # 格式: (Mask條件, 顯示的文字內容(Series或字串))
-    # 若是 Series，則會自動填入該列對應的數值
-    
     strategies_dynamic = [
-        # --- 均線突破/乖離 (顯示實際 %) ---
         (df_day['close'] > df_day['MA5'], "突破週線 " + bias_ma5.map('{:+.2f}%'.format)),
         (df_day['close'] > df_day['MA20'], "突破月線 " + bias_ma20.map('{:+.2f}%'.format)),
         (df_day['close'] > df_day['MA60'], "突破季線 " + bias_ma60.map('{:+.2f}%'.format)),
-        
-        # --- 漲跌幅 (顯示實際 %) ---
         (df_day['pct_change'] > 3, "今日漲幅 " + df_day['pct_change'].map('{:+.2f}%'.format)),
         (df_day['pct_change_3d'] > 10, "3日漲幅 " + df_day['pct_change_3d'].map('{:+.2f}%'.format)),
         (df_day['pct_change_5d'] > 15, "5日漲幅 " + df_day['pct_change_5d'].map('{:+.2f}%'.format)),
         (df_day['pct_change'] > 9.5, "🔥漲停板"),
-
-        # --- 成交量 (顯示實際 %) ---
         (df_day['volume'] > df_day['Vol_MA5'], "量>5日均 " + vol_diff_ma5.map('{:+.1f}%'.format)),
         (df_day['volume'] > df_day['Vol_MA10'] * 1.3, "量>10日均30% (實" + vol_diff_ma10.map('{:+.1f}%'.format) + ")"),
         (df_day['volume'] > df_day['prev_volume'] * 1.5, "量爆增 (月增" + vol_diff_prev.map('{:+.1f}%'.format) + ")"),
-
-        # --- 型態與連續性 (靜態文字) ---
         ((df_day['close'] - df_day['open']) / df_day['open'] > 0.03, "長紅棒>3%"),
         (df_day['close'] >= df_day['high_3d'], "創3日新高"),
         (df_day['days_above_ma20'] >= 47, "連47日站月線"),
         (df_day['days_above_ma60'] >= 177, "連177日站季線"),
-        
-        # --- 排名 (顯示實際名次) ---
-        (df_day['rank_1d'] <= 10, "單日漲幅第" + df_day['rank_1d'].astype(int).astype(str) + "名"),
-        
-        # --- 排列 ---
+        # 🔥 修復處：先填補空值 999 再轉整數，防止 NaN 錯誤
+        (df_day['rank_1d'] <= 10, "單日漲幅第" + df_day['rank_1d'].fillna(999).astype(int).astype(str) + "名"),
         ((df_day['close'] > df_day['MA5']) & (df_day['MA5'] > df_day['MA10']) & (df_day['MA10'] > df_day['MA20']), "短線多頭排列"),
         ((df_day['close'] > df_day['MA10']) & (df_day['MA10'] > df_day['MA20']) & (df_day['MA20'] > df_day['MA60']), "長線多頭排列"),
     ]
     
-    # 執行所有策略
     for mask, signal_content in strategies_dynamic:
-        # 1. 加分
         score += mask.astype(int)
-        
-        # 2. 記錄觸發的訊號 (處理動態文字)
         if mask.any():
-            # 判斷 signal_content 是固定字串還是 Series
             if isinstance(signal_content, pd.Series):
-                # 取出符合 mask 的字串 series
                 dynamic_texts = signal_content[mask]
-                # 更新到 list 中
                 df_day.loc[mask, 'signals_str'] = df_day.loc[mask].apply(
                     lambda row: (row['signals_str'] + [dynamic_texts[row.name]]) 
                     if row.name in dynamic_texts.index else row['signals_str'], 
                     axis=1
                 )
             else:
-                # 固定字串
                 df_day.loc[mask, 'signals_str'] = df_day.loc[mask, 'signals_str'].apply(lambda x: x + [signal_content])
 
-    # 寫回總分
     df_day['Total_Score'] = score
     df_day['Signal_List'] = df_day['signals_str'].apply(lambda x: ", ".join(x))
 
-    # --- 篩選 ---
+    # --- 篩選與排序 ---
     min_score = st.sidebar.number_input("最低總分門檻", 0, 50, 5)
     results = df_day[df_day['Total_Score'] >= min_score].copy()
 
-    # --- 排序 ---
     if sort_option == "強勢總分 (高→低)":
         results = results.sort_values(by=['Total_Score', 'pct_change', 'symbol'], ascending=[False, False, True])
     elif sort_option == "漲跌幅 (高→低)":
@@ -305,7 +336,7 @@ else:
     else:
         results = results.sort_values(by=['vol_ratio', 'Total_Score'], ascending=[False, False])
 
-    # --- 顯示 ---
+    # --- 顯示結果 ---
     display_df = results[['symbol', 'name', 'industry', 'close', 'pct_change', 'Total_Score', 'Signal_List']].copy()
     display_df = display_df.reset_index(drop=True)
     symbol_list = display_df['symbol'].tolist()
@@ -335,6 +366,12 @@ else:
     if st.session_state.ticker_index >= len(symbol_list): st.session_state.ticker_index = 0
 
     st.markdown("---")
+    
+    # --- 翻頁與圖表 ---
+    if not symbol_list:
+        st.info("請調整篩選條件或日期")
+        return
+
     c1, c2, c_info, c3, c4 = st.columns([1, 1, 4, 1, 1])
     with c1: 
         if st.button("⏮️ 最前"): st.session_state.ticker_index = 0
@@ -357,8 +394,19 @@ else:
     df_chart_source = df_chart_source[df_chart_source['date'] <= target_date_ts]
     
     if len(df_chart_source) < 30:
-        st.error("歷史資料不足")
+        st.error("歷史資料不足，無法繪製技術指標")
     else:
         df_chart_source, _ = calculate_advanced_indicators_and_score(df_chart_source, is_single_stock=True)
         fig = plot_stock_kline(df_chart_source, current_symbol, current_info['name'], current_info['Signal_List'])
         st.plotly_chart(fig, use_container_width=True)
+
+# ===========================
+# 6. 程式進入點 (Entry Point)
+# ===========================
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+if not st.session_state['logged_in']:
+    login_page()
+else:
+    main_app()
