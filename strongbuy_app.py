@@ -26,32 +26,39 @@ def get_engine():
 engine = get_engine()
 
 # ===========================
-# 2. 身份驗證模組 (Authentication)
+# 2. 身份驗證模組 (Patch)
 # ===========================
 def check_login(username, password):
-    """驗證帳號密碼，回傳 (是否成功, 角色)"""
+    """
+    驗證帳號密碼，並檢查 Active 狀態
+    回傳: (is_success, role, message)
+    """
     try:
         with engine.connect() as conn:
-            # 根據 username 撈取 hash 和 role
+            # 修改：多選取 active 欄位
             result = conn.execute(
-                text("SELECT password_hash, role FROM users WHERE username = :u"),
+                text("SELECT password_hash, role, active FROM users WHERE username = :u"),
                 {"u": username}
             ).fetchone()
             
             if result:
-                db_hash = result[0]
-                role = result[1]
-                # 比對密碼
+                db_hash, role, active = result
+                
+                # 1. 比對密碼
                 if bcrypt.checkpw(password.encode('utf-8'), db_hash.encode('utf-8')):
-                    return True, role
+                    # 2. 檢查是否開通
+                    if active == 'yes':
+                        return True, role, "登入成功"
+                    else:
+                        return False, None, "⚠️ 您的帳號尚未開通，請聯繫管理員"
             
-            return False, None
+            return False, None, "❌ 帳號或密碼錯誤"
+            
     except Exception as e:
-        st.error(f"登入系統錯誤: {e}")
-        return False, None
+        return False, None, f"系統錯誤: {e}"
 
 def login_page():
-    """登入頁面 UI"""
+    """登入頁面 UI (Patch)"""
     st.markdown("<h1 style='text-align: center;'>🔐 尾盤神探 - 系統登入</h1>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -65,15 +72,17 @@ def login_page():
                 if not username or not password:
                     st.warning("請輸入帳號與密碼")
                 else:
-                    success, role = check_login(username, password)
+                    # 修改：接收三個回傳值 (success, role, msg)
+                    success, role, msg = check_login(username, password)
+                    
                     if success:
                         st.session_state['logged_in'] = True
                         st.session_state['username'] = username
                         st.session_state['role'] = role
-                        st.success("登入成功！")
+                        st.success(msg)
                         st.rerun()
                     else:
-                        st.error("❌ 帳號或密碼錯誤")
+                        st.error(msg)
 
 # ===========================
 # 3. 資料讀取與預處理
