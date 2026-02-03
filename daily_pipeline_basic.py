@@ -141,10 +141,9 @@ def sync_stock_info():
         
         time.sleep(random.uniform(2, 4))
 
-    # 安全閥：如果抓太少，不要覆蓋 DB
+    # 安全閥：如果抓太少，不要更新 DB
     if len(all_data) < 1500:
         print(f"\n🛑 [危險] 抓取數量過少 ({len(all_data)} 筆)，跳過更新 stock_info 以保護資料庫。")
-        # 嘗試讀取舊資料繼續跑股價
         try:
             with engine.connect() as conn:
                 res = conn.execute(text("SELECT symbol FROM stock_info"))
@@ -153,14 +152,17 @@ def sync_stock_info():
 
     if all_data:
         df_info = pd.DataFrame(all_data).drop_duplicates(subset=['symbol'])
-        print(f"   💾 資料完整 ({len(df_info)} 筆)，寫入資料庫...")
+        print(f"   💾 資料完整 ({len(df_info)} 筆)，寫入資料庫 (Upsert)...")
         
-        # stock_info 使用全量替換是安全的
-        df_info.to_sql('stock_info', engine, if_exists='replace', index=False)
-        ensure_primary_key('stock_info', ['symbol'])
+        # 🔥 修改點：原本用 replace 會導致 DROP TABLE Timeout，現在改用 Upsert
+        # df_info.to_sql('stock_info', engine, if_exists='replace', index=False)
+        upsert_to_supabase(df_info, 'stock_info', ['symbol'])
         
-        with engine.begin() as conn:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stock_info_symbol ON stock_info (symbol)"))
+        # 確保索引存在
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stock_info_symbol ON stock_info (symbol)"))
+        except: pass
             
         print(f"   ✅ stock_info 更新完成")
         return df_info['symbol'].tolist()
@@ -203,7 +205,7 @@ def sync_daily_prices(symbols):
             df_upload['date'] = pd.to_datetime(df_upload['date']).dt.strftime('%Y-%m-%d')
             df_upload.dropna(inplace=True)
             
-            # 🔥 關鍵修正：改用 Upsert，絕對不要用 simple_upsert (delete+insert)
+            # Upsert 寫入
             upsert_to_supabase(df_upload, 'stock_prices', ['date', 'symbol'])
             
             total_inserted += len(df_upload)
@@ -218,7 +220,7 @@ def sync_daily_prices(symbols):
 # ===========================
 if __name__ == "__main__":
     print("="*60)
-    print(f"📅 基礎資料更新 (Basic Pipeline - Upsert Fix)")
+    print(f"📅 基礎資料更新 (Basic Pipeline - No Drop Table)")
     print(f"⏰ 時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 
