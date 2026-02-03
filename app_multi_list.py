@@ -27,7 +27,7 @@ def get_engine():
 engine = get_engine()
 
 # ===========================
-# 2. 身份驗證模組 (簡化版：只登入+檢查Active)
+# 2. 身份驗證模組
 # ===========================
 def check_login(username, password):
     """驗證帳號密碼，並檢查 Active 狀態"""
@@ -40,29 +40,23 @@ def check_login(username, password):
             
             if result:
                 db_hash, role, active = result
-                # 1. 比對密碼
                 if bcrypt.checkpw(password.encode('utf-8'), db_hash.encode('utf-8')):
-                    # 2. 檢查是否開通
                     if active == 'yes':
                         return True, role, "登入成功"
                     else:
                         return False, None, "⚠️ 您的帳號尚未開通，請聯繫管理員"
-            
             return False, None, "❌ 帳號或密碼錯誤"
     except Exception as e:
         return False, None, f"系統錯誤: {e}"
 
 def login_page():
-    """登入頁面 UI (無註冊功能)"""
     st.markdown("<h1 style='text-align: center;'>🔐 自選股戰情室</h1>", unsafe_allow_html=True)
-    
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("login_form"):
             username = st.text_input("帳號")
             password = st.text_input("密碼", type="password")
             submit = st.form_submit_button("登入", use_container_width=True)
-            
             if submit:
                 success, role, msg = check_login(username, password)
                 if success:
@@ -75,7 +69,7 @@ def login_page():
                     st.error(msg)
 
 # ===========================
-# 3. DB 操作函式
+# 3. DB 操作函式 (Watchlist)
 # ===========================
 def get_all_lists_db():
     with engine.connect() as conn:
@@ -143,7 +137,7 @@ def remove_stock_db(list_name, symbol):
         return True, "移除成功"
     except Exception as e: return False, str(e)
 
-# --- 資料讀取 ---
+# --- 資料讀取與指標運算 (核心升級) ---
 @st.cache_data(ttl=3600)
 def get_all_symbols_fast():
     try:
@@ -154,31 +148,81 @@ def get_all_symbols_fast():
 
 @st.cache_data(ttl=3600)
 def load_and_process_data():
+    """讀取並計算完整技術指標 (含 KD/MACD/乖離/量比)"""
     query = """
     SELECT sp.date, sp.symbol, sp.open, sp.high, sp.low, sp.close, sp.volume, 
-           si.name, si.industry
+           si.name, si.industry,
+           COALESCE(ii.foreign_net, 0) as foreign_net
     FROM stock_prices sp
     JOIN stock_info si ON sp.symbol = si.symbol
+    LEFT JOIN institutional_investors ii ON sp.date = ii.date AND sp.symbol = ii.symbol
     WHERE sp.date >= current_date - INTERVAL '400 days' 
     ORDER BY sp.symbol, sp.date
     """
     with engine.connect() as conn:
         df = pd.read_sql(query, conn)
+    
     df['symbol'] = df['symbol'].astype(str).str.strip()
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values(['symbol', 'date'])
     grouped = df.groupby('symbol')
+
+    # --- 1. 均線與量能 ---
     df['MA5'] = grouped['close'].transform(lambda x: x.rolling(5).mean())
     df['MA10'] = grouped['close'].transform(lambda x: x.rolling(10).mean())
     df['MA20'] = grouped['close'].transform(lambda x: x.rolling(20).mean())
     df['MA60'] = grouped['close'].transform(lambda x: x.rolling(60).mean())
+    
     df['Vol_MA5'] = grouped['volume'].transform(lambda x: x.rolling(5).mean())
+    df['Vol_MA10'] = grouped['volume'].transform(lambda x: x.rolling(10).mean())
+    df['Vol_MA20'] = grouped['volume'].transform(lambda x: x.rolling(20).mean())
+
+    # --- 2. 漲跌與前值 ---
     df['prev_close'] = grouped['close'].shift(1)
     df['prev_volume'] = grouped['volume'].shift(1)
     df['pct_change'] = (df['close'] - df['prev_close']) / df['prev_close'] * 100
+    df['pct_change_3d'] = grouped['close'].pct_change(3) * 100
     df['pct_change_5d'] = grouped['close'].pct_change(5) * 100
+    
+    df['high_3d'] = grouped['high'].transform(lambda x: x.rolling(3).max())
+    df['vol_max_3d'] = grouped['volume'].transform(lambda x: x.rolling(3).max())
+
+    # --- 3. 技術指標 (KD/MACD) ---
+    low_min = grouped['low'].transform(lambda x: x.rolling(9).min())
+    high_max = grouped['high'].transform(lambda x: x.rolling(9).max())
+    df['RSV'] = (df['close'] - low_min) / (high_max - low_min) * 100
+    # Groupby transform for EWM
+    df['K'] = grouped['RSV'].transform(lambda x: x.ewm(com=2, adjust=False).mean())
+    df['D'] = grouped['K'].transform(lambda x: x.ewm(com=2, adjust=False).mean())
+    
+    ema12 = grouped['close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
+    ema26 = grouped['close'].transform(lambda x: x.ewm(span=26, adjust=False).mean())
+    df['DIF'] = ema12 - ema26
+    df['MACD'] = grouped['DIF'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
+    df['MACD_OSC'] = df['DIF'] - df['MACD']
+
+    # --- 4. 衍生指標 ---
+    df['bias_ma5'] = (df['close'] - df['MA5']) / df['MA5'] * 100
+    df['bias_ma20'] = (df['close'] - df['MA20']) / df['MA20'] * 100
+    df['bias_ma60'] = (df['close'] - df['MA60']) / df['MA60'] * 100
+    
+    df['vol_bias_ma5'] = (df['volume'] - df['Vol_MA5']) / df['Vol_MA5'] * 100
+    df['vol_bias_ma10'] = (df['volume'] - df['Vol_MA10']) / df['Vol_MA10'] * 100
+    df['vol_bias_ma20'] = (df['volume'] - df['Vol_MA20']) / df['Vol_MA20'] * 100
+
     df['above_ma20'] = (df['close'] > df['MA20']).astype(int)
     df['days_above_ma20'] = grouped['above_ma20'].transform(lambda x: x.rolling(47).sum())
+    
+    df['above_ma60'] = (df['close'] > df['MA60']).astype(int)
+    df['days_above_ma60'] = grouped['above_ma60'].transform(lambda x: x.rolling(177).sum())
+
+    # 籌碼連買
+    df['f_buy_pos'] = (df['foreign_net'] > 0).astype(int)
+    df['f_buy_streak'] = grouped['f_buy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
+    
+    # 近5日外資買超
+    df['f_sum_5d'] = grouped['foreign_net'].transform(lambda x: x.rolling(5).sum())
+
     df['vol_ratio'] = df['volume'] / df['Vol_MA5']
     return df
 
@@ -190,28 +234,8 @@ def resolve_stock_symbol(input_code, valid_symbols_set):
     if f"{code}.TWO" in valid_symbols_set: return f"{code}.TWO"
     return None
 
-def calculate_indicators(df_stock):
-    df = df_stock.copy()
-    low_min = df['low'].rolling(9).min()
-    high_max = df['high'].rolling(9).max()
-    df['RSV'] = (df['close'] - low_min) / (high_max - low_min) * 100
-    df['K'] = df['RSV'].ewm(com=2, adjust=False).mean()
-    df['D'] = df['K'].ewm(com=2, adjust=False).mean()
-    exp12 = df['close'].ewm(span=12, adjust=False).mean()
-    exp26 = df['close'].ewm(span=26, adjust=False).mean()
-    df['DIF'] = exp12 - exp26
-    df['MACD'] = df['DIF'].ewm(span=9, adjust=False).mean()
-    df['MACD_OSC'] = df['DIF'] - df['MACD']
-    df['Sig_KD_Gold'] = (df['K'] > df['D']) & (df['K'].shift(1) < df['D'].shift(1))
-    df['Sig_Vol_Attack'] = (df['volume'] > df['prev_volume']) & (df['vol_ratio'] > 1.2)
-    df['Sig_MACD_Bull'] = (df['MACD_OSC'] > 0) & (df['MACD_OSC'].shift(1) < 0)
-    df['Sig_MA_Bull'] = (df['MA5'] > df['MA10']) & (df['MA10'] > df['MA20'])
-    return df
-
 def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profile=False):
-    df_plot = df_stock.tail(200).copy()
-    df_plot = calculate_indicators(df_plot)
-    df_plot = df_plot.tail(130)
+    df_plot = df_stock.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
     score_val = active_signals_text.count(',') + 1 if active_signals_text else 0
     
@@ -219,15 +243,9 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name} (評分:{score_val})", "量", "KD", "MACD", "訊號"))
 
-    layout_xaxis5 = dict(visible=False)
-    if show_vol_profile:
-        price_bins = 80 
-        hist_values, bin_edges = np.histogram(df_plot['close'], bins=price_bins, weights=df_plot['volume'])
-        bin_mids = (bin_edges[:-1] + bin_edges[1:]) / 2
-        fig.add_trace(go.Bar(x=hist_values, y=bin_mids, orientation='h', name='籌碼', marker_color='rgba(100,100,100,0.15)', xaxis='x5'), row=1, col=1)
-        layout_xaxis5 = dict(overlaying='x', side='top', showgrid=False, visible=False, range=[0, max(hist_values) * 1.2])
-
-    fig.add_trace(go.Candlestick(x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], name='K線'), row=1, col=1)
+    # K線
+    fig.add_trace(go.Candlestick(x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], 
+                                 name='K線', increasing_line_color='red', decreasing_line_color='green'), row=1, col=1)
     
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         if ma in df_plot: fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot[ma], mode='lines', name=ma, line=dict(color=color, width=1)), row=1, col=1)
@@ -242,21 +260,22 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
     fig.add_trace(go.Bar(x=df_plot['date_str'], y=df_plot['MACD_OSC'], marker_color=osc_colors, name='OSC'), row=4, col=1)
     fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot['DIF'], name='DIF', line=dict(color='orange')), row=4, col=1)
 
-    signals = [('KD金叉','Sig_KD_Gold','diamond','purple'), ('量攻','Sig_Vol_Attack','triangle-up','gold'), 
-               ('MACD紅','Sig_MACD_Bull','square','blue'), ('均線多','Sig_MA_Bull','circle','red')]
-    for i, (lbl, col, sym, clr) in enumerate(signals):
-        sig_dates = df_plot[df_plot[col]==True]['date_str']
+    signals = [('KD金叉', (df_plot['K']>df_plot['D'])&(df_plot['K'].shift(1)<df_plot['D'].shift(1)), 'diamond','purple'), 
+               ('量攻', (df_plot['volume']>df_plot['prev_volume'])&(df_plot['vol_ratio']>1.2), 'triangle-up','gold'), 
+               ('MACD紅', (df_plot['MACD_OSC']>0)&(df_plot['MACD_OSC'].shift(1)<0), 'square','blue')]
+    
+    for i, (lbl, mask, sym, clr) in enumerate(signals):
+        sig_dates = df_plot[mask]['date_str']
         fig.add_trace(go.Scatter(x=sig_dates, y=[i]*len(sig_dates), mode='markers', name=lbl, marker=dict(symbol=sym, size=10, color=clr)), row=5, col=1)
 
-    fig.update_layout(height=900, xaxis_rangeslider_visible=False, showlegend=False, xaxis5=layout_xaxis5, uirevision=str(uuid.uuid4()), margin=dict(t=30,l=10,r=10,b=10))
-    fig.update_yaxes(autorange=True, fixedrange=False)
+    fig.update_xaxes(type='category', categoryorder='category ascending', tickmode='auto', nticks=15)
+    fig.update_layout(height=900, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(t=30,l=10,r=10,b=10))
     return fig
 
 # ===========================
 # 4. 主應用程式邏輯
 # ===========================
 def main_app():
-    # 顯示使用者資訊與登出按鈕
     with st.sidebar:
         st.markdown(f"👤 **{st.session_state['username']}** ({st.session_state['role']})")
         if st.button("🚪 登出"):
@@ -274,14 +293,12 @@ def main_app():
 
     # --- 側邊欄：股票管理 ---
     st.sidebar.header("📝 股票管理")
-    
     all_lists = get_all_lists_db()
     if not all_lists:
         create_list_db("預設清單")
         all_lists = get_all_lists_db()
     
     selected_list = st.sidebar.selectbox("📂 選擇清單", all_lists, index=0)
-    
     watchlist_df = get_list_data_db(selected_list)
     current_symbols = watchlist_df['symbol'].tolist()
 
@@ -299,45 +316,24 @@ def main_app():
         if c1.button("新"):
             st.session_state.query_mode_symbol = None
             code = resolve_stock_symbol(inp_code, valid_symbols_set)
-            if code:
-                if code not in current_symbols:
-                    if add_stock_db(selected_list, code): 
-                        st.sidebar.success("✅")
-                        st.rerun()
-                else: st.sidebar.warning("已在")
-            else: st.sidebar.error("❌")
-        
+            if code and code not in current_symbols:
+                if add_stock_db(selected_list, code): st.sidebar.success("✅"); st.rerun()
+            else: st.sidebar.warning("❌")
         if c2.button("刪"):
             st.session_state.query_mode_symbol = None
             code = resolve_stock_symbol(inp_code, valid_symbols_set) or inp_code
             if code in current_symbols:
-                if remove_stock_db(selected_list, code):
-                    st.sidebar.success("🗑️")
-                    st.session_state.symbol_input = ""
-                    st.rerun()
-            else: st.sidebar.warning("不在")
-
+                if remove_stock_db(selected_list, code): st.sidebar.success("🗑️"); st.session_state.symbol_input = ""; st.rerun()
         if c3.button("查"):
             code = resolve_stock_symbol(inp_code, valid_symbols_set)
             if code:
                 st.session_state.query_mode_symbol = code
                 st.session_state.ticker_index = 0
-                st.sidebar.info("🔍")
-                st.rerun()
-            else: st.sidebar.error("❌")
+                st.sidebar.info("🔍"); st.rerun()
 
-    # 🔥 修改處：移除權限檢查，開放所有登入使用者管理清單
     with st.sidebar.expander("⚙️ 清單管理"):
-        new_ls = st.text_input("建新清單")
-        if st.button("建立"): 
-            if new_ls and create_list_db(new_ls): st.rerun()
-        
-        ren_ls = st.text_input("改名")
-        if st.button("改名"):
-            if ren_ls and rename_list_db(selected_list, ren_ls): st.rerun()
-            
-        if st.button("⚠️ 刪除", type="primary"):
-            if len(all_lists)>1 and delete_list_db(selected_list): st.rerun()
+        if st.button("建立"): create_list_db(st.text_input("建新清單")); st.rerun()
+        if st.button("刪除", type="primary"): delete_list_db(selected_list); st.rerun()
 
     st.sidebar.markdown("---")
 
@@ -348,14 +344,13 @@ def main_app():
     avail_dates = sorted(df_full['date'].dt.date.unique(), reverse=True)
     st.sidebar.header("📅 戰情參數")
     sel_date = st.sidebar.selectbox("日期", avail_dates, 0)
-    sort_opt = st.sidebar.selectbox("排序", ["加入日期 (新→舊)", "強勢總分", "漲跌幅", "量比", "代號"])
+    sort_opt = st.sidebar.selectbox("排序", ["加入日期", "強勢總分", "漲跌幅", "外資買超"])
     min_sc = st.sidebar.number_input("分數門檻", 0, 50, 0)
-    st.sidebar.markdown("---")
-    show_vp = st.sidebar.checkbox("分價量表", False)
-
+    
     target_date_ts = pd.Timestamp(sel_date)
     df_day = df_full[df_full['date'] == target_date_ts].copy()
 
+    # 篩選
     if st.session_state.query_mode_symbol:
         target_syms = [st.session_state.query_mode_symbol]
         title = f"🔍 查詢：{target_syms[0]}"
@@ -374,23 +369,55 @@ def main_app():
         st.warning("⚠️ 無資料")
         return
 
-    # Score Logic
+    # --- 🔥 動態訊號產生 (移植自 strongbuy_app v17) ---
+    # 計算排名
+    df_day['rank_pct_1d'] = df_day['pct_change'].rank(ascending=False, method='min')
+    df_day['rank_pct_5d'] = df_day['pct_change_5d'].rank(ascending=False, method='min')
+    df_day['rank_f_1d'] = df_day['foreign_net'].rank(ascending=False, method='min')
+    df_day['rank_f_5d'] = df_day['f_sum_5d'].rank(ascending=False, method='min')
+
+    df_day['signals_str'] = [[] for _ in range(len(df_day))]
     score = pd.Series(0, index=df_day.index)
-    df_day['signals'] = [[] for _ in range(len(df_day))]
+
+    def fmt(val, template):
+        return val.fillna(0).apply(lambda x: template.format(x))
+
+    # 動態文字準備
+    txt_bias_w = fmt(df_day['bias_ma5'], "突破週線{:.2f}%")
+    txt_vol_5 = fmt(df_day['vol_bias_ma5'], "較5日量增{:.1f}%")
+    txt_f_buy = df_day['f_buy_streak'].fillna(0).astype(int).apply(lambda x: f"外資連買{x}天")
+    txt_rank_1d = df_day['rank_pct_1d'].fillna(999).astype(int).apply(lambda x: f"漲幅第{x}名")
     
-    conds = [
-        (df_day['close']>df_day['MA5'], "破週線"),
-        (df_day['close']>df_day['MA20'], "破月線"),
-        (df_day['close']>df_day['MA60'], "破季線"),
-        (df_day['volume']>df_day['Vol_MA5'], "量增"),
-        (df_day['days_above_ma20']>=47, "連47紅")
+    strategies = [
+        (df_day['close'] > df_day['MA5'], txt_bias_w),
+        (df_day['close'] > df_day['MA20'], "突破月線"),
+        (df_day['close'] > df_day['MA60'], "突破季線"),
+        (df_day['pct_change'] > 3, fmt(df_day['pct_change'], "漲幅{:.2f}%")),
+        (df_day['pct_change'] > 9.5, "🔥漲停"),
+        (df_day['vol_bias_ma5'] > 30, txt_vol_5),
+        (df_day['volume'] > df_day['prev_volume'] * 1.5, "量增1.5倍"),
+        (df_day['f_buy_streak'] >= 2, txt_f_buy),
+        (df_day['rank_f_1d'] <= 10, fmt(df_day['rank_f_1d'], "外資買超第{:.0f}名")),
+        (df_day['days_above_ma20'] >= 47, fmt(df_day['days_above_ma20'], "連{:.0f}日站月線")),
+        (df_day['K'] > df_day['D'], "KD多頭"),
+        ((df_day['K'] > df_day['D']) & (df_day['K'].shift(1) < df_day['D'].shift(1)), "KD金叉"),
+        ((df_day['MACD_OSC'] > 0) & (df_day['MACD_OSC'].shift(1) < 0), "MACD轉紅")
     ]
-    for mask, txt in conds:
+
+    for mask, txt in strategies:
         score += mask.astype(int)
-        df_day.loc[mask, 'signals'] = df_day.loc[mask, 'signals'].apply(lambda x: x + [txt])
-    
+        if mask.any():
+            if isinstance(txt, pd.Series):
+                vals = txt[mask]
+                df_day.loc[mask, 'signals_str'] = df_day.loc[mask].apply(
+                    lambda row: row['signals_str'] + [vals[row.name]] if row.name in vals.index else row['signals_str'], 
+                    axis=1
+                )
+            else:
+                df_day.loc[mask, 'signals_str'] = df_day.loc[mask, 'signals_str'].apply(lambda x: x + [txt])
+
     df_day['Total_Score'] = score
-    df_day['Signal_List'] = df_day['signals'].apply(lambda x: ", ".join(x))
+    df_day['Signal_List'] = df_day['signals_str'].apply(lambda x: ", ".join(x))
 
     if min_sc > 0: df_day = df_day[df_day['Total_Score'] >= min_sc]
 
@@ -399,7 +426,7 @@ def main_app():
         if "加入" in sort_opt: df_day = df_day.sort_values(['added_date','symbol'], ascending=[False,True])
         elif "總分" in sort_opt: df_day = df_day.sort_values(['Total_Score','symbol'], ascending=[False,True])
         elif "漲跌" in sort_opt: df_day = df_day.sort_values(['pct_change','symbol'], ascending=[False,True])
-        elif "量比" in sort_opt: df_day = df_day.sort_values(['vol_ratio','symbol'], ascending=[False,True])
+        elif "外資" in sort_opt: df_day = df_day.sort_values(['foreign_net','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
     display_df = df_day[['symbol','name','added_date','industry','close','pct_change','Total_Score','Signal_List']].reset_index(drop=True)
@@ -413,7 +440,8 @@ def main_app():
     st.success(f"{title} (剩 {len(sym_list)})")
     
     evt = st.dataframe(display_df.style.format({"pct_change":"{:.2f}%","close":"{:.2f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
-                       on_select="rerun", selection_mode="single-row", use_container_width=True)
+                       on_select="rerun", selection_mode="single-row", use_container_width=True,
+                       column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")})
     
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
     
@@ -444,11 +472,11 @@ def main_app():
     
     if len(chart_src)<30: st.error("資料不足")
     else:
-        fig = plot_stock_kline(chart_src, cur_sym, cur_info['name'], cur_info['Signal_List'], show_vp)
+        fig = plot_stock_kline(chart_src, cur_sym, cur_info['name'], cur_info['Signal_List'])
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{cur_sym}_{uuid.uuid4()}")
 
 # ===========================
-# 6. 程式進入點 (Entry Point)
+# 6. 程式進入點
 # ===========================
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
