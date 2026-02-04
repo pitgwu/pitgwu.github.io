@@ -125,7 +125,7 @@ def generate_html_report():
         table{{width:100%;border-collapse:collapse}} th,td{{padding:10px;border-bottom:1px solid #333;text-align:left}}
         .row{{display:flex;gap:20px;flex-wrap:wrap}} .col{{flex:1;min-width:400px}}
     </style></head><body>
-    <header><h1>台股戰情日報 <span style="font-size:0.6em;color:#aaa">({TITLE_DATE})</span></h1></header>
+    <header><h1>台股戰情日報 ({DATE_STR}) <span style="font-size:0.6em;color:#aaa">({TITLE_DATE})</span></h1></header>
     {html_gauge}
     <div class="row"><div class="col"><div class="section"><h2 class="section-title">核心指數 & VIX</h2>{html_indices}</div></div>
     <div class="col"><div class="section"><h2 class="section-title">關鍵原物料</h2>{html_comm}</div></div></div>
