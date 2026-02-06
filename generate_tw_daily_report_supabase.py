@@ -10,6 +10,10 @@ from io import StringIO
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, text  # ✨ 新增：用於連線 Supabase
 
+TZ_TW = datetime.timezone(datetime.timedelta(hours=8))
+NOW = datetime.datetime.now(TZ_TW)
+DATE_STR = NOW.strftime("%Y%m%d")
+
 # 忽略期交所憑證警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -591,7 +595,7 @@ def main():
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <title>台股戰情日報</title>
+        <title>台股戰情日報 {DATE_STR}</title>
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <style>
             :root {{ --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --red: #ff5252; --green: #4caf50; --accent: #2196f3; --border: #333; }}
@@ -647,7 +651,7 @@ def main():
         </style>
     </head>
     <body>
-        <h1>📈 台股戰情日報</h1>
+        <h1>📈 台股戰情日報 ({DATE_STR})</h1>
         
         <div class="tabs">
             <button class="tab-btn active" onclick="openTab('daily')">今日戰報</button>
