@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from io import StringIO
+import datetime
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, text  # ✨ 新增：用於連線 Supabase
 
