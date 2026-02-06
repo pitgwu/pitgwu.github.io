@@ -7,12 +7,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from io import StringIO
-import datetime
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine, text  # ✨ 新增：用於連線 Supabase
 
-TZ_TW = datetime.timezone(datetime.timedelta(hours=8))
-NOW = datetime.datetime.now(TZ_TW)
+# 修正 1: 直接使用匯入的 timezone 與 timedelta，不需要再加 datetime. 前綴
+TZ_TW = timezone(timedelta(hours=8))
+# 修正 2: datetime 已經是類別，直接呼叫 .now() 即可，不需要寫 datetime.datetime.now()
+NOW = datetime.now(TZ_TW)
 DATE_STR = NOW.strftime("%Y%m%d")
 
 # 忽略期交所憑證警告
