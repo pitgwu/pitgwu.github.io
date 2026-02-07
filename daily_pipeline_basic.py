@@ -55,10 +55,9 @@ def upsert_to_supabase(df, table_name, unique_cols):
         ensure_primary_key(table_name, unique_cols)
         print(f"   ✨ 已建立新表 [{table_name}] 並寫入 {len(records)} 筆")
         return
-
+    
     # 建立 Upsert 語句
     stmt = insert(target_table).values(records)
-    
     # 定義衝突時更新的欄位 (排除 Primary Key)
     update_dict = {c.name: c for c in stmt.excluded if c.name not in unique_cols}
     
@@ -82,7 +81,7 @@ def upsert_to_supabase(df, table_name, unique_cols):
     print(f"   ✅ [{table_name}] Upsert 成功: {len(records)} 筆")
 
 # ===========================
-# 3. 模組 A: 股票清單
+# 3. 模組 A: 股票清單 (強效修復版)
 # ===========================
 def fetch_market_data_with_retry(url, retries=3):
     for i in range(retries):
@@ -97,8 +96,9 @@ def fetch_market_data_with_retry(url, retries=3):
     return None
 
 def sync_stock_info():
-    print("\n🚀 [1/2] 更新股票代號與產業分類...")
+    print("\n🚀 [1/2] 更新股票代號與產業分類 (含 ETF 修正)...")
     all_data = []
+    # 模式: 上市=2, 上櫃=4, 興櫃=5
     configs = [("上市", 2, ".TW"), ("上櫃", 4, ".TWO"), ("興櫃", 5, ".TWO")]
 
     for market_name, mode, suffix in configs:
@@ -116,24 +116,54 @@ def sync_stock_info():
             df = dfs[0]
             
             count = 0
+            found_00731 = False
+            
             for _, row in df.iterrows():
                 try:
+                    # 1. 取得第一欄 (代號+名稱)
                     raw_str = str(row.iloc[0]).strip()
-                    industry = str(row.iloc[4]).strip()
                     parts = re.split(r'[\s\u3000]+', raw_str, maxsplit=1)
                     
                     if len(parts) >= 2:
                         code = parts[0].strip()
                         name = parts[1].strip()
-                        if re.match(r'^\d{4}$', code): 
-                            if industry == 'nan' or not industry: industry = '其他'
+                        
+                        # 2. 判斷代號格式 (4~6碼)
+                        if re.match(r'^\d{4,6}$', code): 
+                            
+                            # 3. 嘗試取得產業別 (如果失敗，根據代號判斷)
+                            industry = '其他'
+                            try:
+                                # 有些列可能沒有第5欄 (index 4)，這裡加強防護
+                                if len(row) > 4:
+                                    ind_val = str(row.iloc[4]).strip()
+                                    if ind_val and ind_val.lower() != 'nan':
+                                        industry = ind_val
+                            except:
+                                pass
+                            
+                            # 4. 特殊修正：如果是 00 開頭，強制標記為 ETF (即使原本抓不到產業)
+                            if code.startswith('00'):
+                                industry = 'ETF'
+                                
+                            # Debug: 檢查是否抓到 00731
+                            if '00731' in code:
+                                found_00731 = True
+                                print(f"      👀 發現目標: {code} - {name} ({industry})")
+
                             all_data.append({
                                 'symbol': f"{code}{suffix}",
                                 'name': name,
                                 'industry': industry
                             })
                             count += 1
-                except: continue
+                except Exception as e:
+                    # 這一行如果失敗，不要影響其他行
+                    continue
+            
+            if not found_00731 and market_name == "上市":
+                print("      ⚠️ 警告: 本次掃描尚未發現 00731，請檢查來源網頁格式是否變更。")
+                
             print(f"      ✅ 取得 {count} 筆")
             
         except Exception as e:
@@ -141,36 +171,27 @@ def sync_stock_info():
         
         time.sleep(random.uniform(2, 4))
 
-    # 安全閥：如果抓太少，不要更新 DB
-    if len(all_data) < 1500:
-        print(f"\n🛑 [危險] 抓取數量過少 ({len(all_data)} 筆)，跳過更新 stock_info 以保護資料庫。")
-        try:
-            with engine.connect() as conn:
-                res = conn.execute(text("SELECT symbol FROM stock_info"))
-                return [r[0] for r in res]
-        except: return []
+    # 安全閥
+    if len(all_data) < 1000:
+        print(f"\n🛑 [危險] 抓取數量過少 ({len(all_data)} 筆)，跳過更新。")
+        return []
 
     if all_data:
         df_info = pd.DataFrame(all_data).drop_duplicates(subset=['symbol'])
-        print(f"   💾 資料完整 ({len(df_info)} 筆)，寫入資料庫 (Upsert)...")
-        
-        # 🔥 修改點：原本用 replace 會導致 DROP TABLE Timeout，現在改用 Upsert
-        # df_info.to_sql('stock_info', engine, if_exists='replace', index=False)
+        print(f"   💾 寫入資料庫: 共 {len(df_info)} 筆...")
         upsert_to_supabase(df_info, 'stock_info', ['symbol'])
-        
         # 確保索引存在
         try:
             with engine.begin() as conn:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stock_info_symbol ON stock_info (symbol)"))
         except: pass
-            
         print(f"   ✅ stock_info 更新完成")
         return df_info['symbol'].tolist()
     else:
         return []
 
 # ===========================
-# 4. 模組 B: 日 K 股價 (修正版)
+# 4. 模組 B: 日 K 股價
 # ===========================
 def sync_daily_prices(symbols):
     print("\n🚀 [2/2] 下載最新股價 (yfinance)...")
@@ -181,33 +202,33 @@ def sync_daily_prices(symbols):
     try:
         chunk_size = 500
         total_inserted = 0
-        
+
         for i in range(0, len(symbols), chunk_size):
             batch = symbols[i:i+chunk_size]
             print(f"   📡 下載進度 {i}/{len(symbols)}...", end="\r")
-            
+
             data = yf.download(batch, period="2d", progress=False, threads=True, auto_adjust=False)
-            
+
             if data.empty: continue
-            
+
             if isinstance(data.columns, pd.MultiIndex):
                 data = data.stack(level=1).reset_index()
                 data.rename(columns={'Ticker': 'symbol', 'Date': 'date'}, inplace=True)
             else:
                 data = data.reset_index()
-            
+
             data.columns = [str(c).lower() for c in data.columns]
-            
+
             req_cols = ['date', 'symbol', 'open', 'high', 'low', 'close', 'volume']
             if not set(req_cols).issubset(data.columns): continue
 
             df_upload = data[req_cols].copy()
             df_upload['date'] = pd.to_datetime(df_upload['date']).dt.strftime('%Y-%m-%d')
             df_upload.dropna(inplace=True)
-            
+
             # Upsert 寫入
             upsert_to_supabase(df_upload, 'stock_prices', ['date', 'symbol'])
-            
+
             total_inserted += len(df_upload)
 
         print(f"\n   ✅ 股價更新完成 (共處理 {total_inserted} 筆數據)")
@@ -220,11 +241,12 @@ def sync_daily_prices(symbols):
 # ===========================
 if __name__ == "__main__":
     print("="*60)
-    print(f"📅 基礎資料更新 (Basic Pipeline - No Drop Table)")
+    print(f"📅 ETF 名稱修復工具")
     print(f"⏰ 時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 
     symbols = sync_stock_info()
-    sync_daily_prices(symbols)
     
-    print("\n🎉 基礎資料更新完成！")
+    print("\n🎉 修復完成！現在回到 Streamlit 網頁：")
+    print("1. 點擊右上角 '...' -> 'Clear Cache'")
+    print("2. 重新整理網頁 (F5)")
