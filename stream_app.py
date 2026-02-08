@@ -1,27 +1,28 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import sqlalchemy
 import os
-import plotly.graph_objects as go  # 【新增】引入 Plotly 畫 K 線
-from sqlalchemy import create_engine
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 
 # ===========================
-# 1. 頁面設定與 CSS
+# 1. 頁面設定
 # ===========================
-st.set_page_config(
-    page_title="均線糾結選股神器",
-    page_icon="📈",
-    layout="wide"
-)
-
+st.set_page_config(page_title="均線糾結選股神器", page_icon="📈", layout="wide")
 st.markdown("""
 <style>
     .stDataFrame {font-size: 14px;}
-    div[data-testid="stMetricValue"] {font-size: 24px;}
     div.stButton > button {
         width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        font-weight: bold;
     }
+    .diag-pass {color: #00c853; font-weight: bold;}
+    .diag-fail {color: #ff5252; font-weight: bold;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -30,64 +31,77 @@ st.markdown("""
 # ===========================
 @st.cache_resource
 def get_db_engine():
-    db_url = None
-    if "SUPABASE_DB_URL" in os.environ:
-        db_url = os.environ["SUPABASE_DB_URL"]
-    
+    db_url = os.environ.get("SUPABASE_DB_URL")
+    if not db_url and st.secrets:
+        db_url = st.secrets.get("SUPABASE_DB_URL")
     if not db_url:
-        try:
-            if st.secrets is not None:
-                db_url = st.secrets.get("SUPABASE_DB_URL") or \
-                         st.secrets.get("database", {}).get("url")
-        except: pass
-
-    if not db_url:
-        st.error("❌ 找不到資料庫連線字串！請設定環境變數 SUPABASE_DB_URL 或建立 .streamlit/secrets.toml")
+        st.error("❌ 找不到資料庫連線！請設定 SUPABASE_DB_URL。")
         st.stop()
-        
     return create_engine(db_url)
 
 # ===========================
-# 3. 資料撈取與計算
+# 3. 核心邏輯
 # ===========================
 @st.cache_data(ttl=3600)
-def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshold):
+def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshold, strict_trend, min_days):
     engine = get_db_engine()
     
+    target_symbols = []
+    try:
+        with engine.connect() as conn:
+            latest_res = conn.execute(text("SELECT MAX(date) FROM stock_prices")).fetchone()
+            if not latest_res or not latest_res[0]: return pd.DataFrame(), pd.DataFrame()
+            latest_date = latest_res[0]
+            
+            query = text("""
+                SELECT symbol FROM stock_prices 
+                WHERE date = :d AND volume >= :v AND close >= :p
+            """)
+            res = conn.execute(query, {"d": latest_date, "v": min_volume, "p": min_price}).fetchall()
+            target_symbols = [r[0] for r in res]
+            
+            if not target_symbols: return pd.DataFrame(), pd.DataFrame()
+    except Exception as e:
+        st.error(f"篩選失敗: {e}"); return pd.DataFrame(), pd.DataFrame()
+
     start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
-    
-    # 【注意】必須確保 select 出來的欄位包含 open, high, low, close
-    query_prices = f"""
-        SELECT date, symbol, close, volume, open, high, low
-        FROM stock_prices
-        WHERE date >= '{start_date}'
-    """
-    query_info = "SELECT symbol, name, industry FROM stock_info"
+    all_dfs = []
+    batch_size = 50 
     
     try:
         with engine.connect() as conn:
-            df_prices = pd.read_sql(query_prices, conn)
-            df_info = pd.read_sql(query_info, conn)
+            df_info = pd.read_sql("SELECT symbol, name, industry FROM stock_info", conn)
+            
+            dl_bar = st.progress(0, text="下載資料中...")
+            total_batches = (len(target_symbols) // batch_size) + 1
+            
+            for i in range(0, len(target_symbols), batch_size):
+                batch = target_symbols[i : i+batch_size]
+                sym_str = "', '".join(batch)
+                q = f"SELECT date, symbol, close, volume, open, high, low FROM stock_prices WHERE date >= '{start_date}' AND symbol IN ('{sym_str}')"
+                all_dfs.append(pd.read_sql(q, conn))
+                dl_bar.progress(min((i // batch_size) / total_batches, 1.0))
+            
+            dl_bar.empty()
+                
     except Exception as e:
-        st.error(f"資料庫讀取失敗: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-    
-    if df_prices.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        st.error(f"下載失敗: {e}"); return pd.DataFrame(), pd.DataFrame()
 
+    if not all_dfs: return pd.DataFrame(), pd.DataFrame()
+    df_prices = pd.concat(all_dfs)
     df_prices['date'] = pd.to_datetime(df_prices['date'])
     df_prices = df_prices.sort_values(['symbol', 'date'])
-    
-    results = []
-    unique_symbols = df_prices['symbol'].unique()
-    progress_bar = st.progress(0, text="正在分析均線型態...")
-    total_symbols = len(unique_symbols)
-    
-    for idx, (symbol, df) in enumerate(df_prices.groupby('symbol')):
-        if idx % (total_symbols // 10 + 1) == 0:
-            progress_bar.progress(idx / total_symbols, text=f"正在分析: {symbol}")
 
-        if len(df) < 120: continue
+    results = []
+    p_bar = st.progress(0, text="分析均線型態...")
+    total = len(df_prices['symbol'].unique())
+    count = 0
+
+    for symbol, df in df_prices.groupby('symbol'):
+        count += 1
+        if count % 20 == 0: p_bar.progress(min(count/total, 1.0))
+        
+        if len(df) < 65: continue 
         
         df['ma5'] = df['close'].rolling(5).mean()
         df['ma10'] = df['close'].rolling(10).mean()
@@ -95,245 +109,309 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
         df['ma60'] = df['close'].rolling(60).mean()
         df['ma120'] = df['close'].rolling(120).mean()
         
-        last = df.iloc[-1]
-        
-        if last['volume'] < min_volume or last['close'] < min_price:
-            continue
-            
-        if not (last['ma60'] > last['ma120'] and last['close'] > last['ma60']):
-            continue
-            
-        short_mas = df[['ma5', 'ma10', 'ma20']]
-        df['max_ma'] = short_mas.max(axis=1)
-        df['min_ma'] = short_mas.min(axis=1)
-        
-        df['squeeze_pct'] = (df['max_ma'] - df['min_ma']) / df['min_ma']
-        df['is_tight'] = df['squeeze_pct'] <= squeeze_threshold
+        df['prev_volume'] = df['volume'].shift(1)
+        df['vol_ratio'] = df['volume'] / df['prev_volume']
         
         last = df.iloc[-1]
+        prev = df.iloc[-2]
         
-        if not last['is_tight']:
+        if strict_trend:
+            if pd.isna(last['ma60']) or pd.isna(last['ma120']) or last['ma60'] <= last['ma120']:
+                continue
+            
+        mas = [last['ma5'], last['ma10'], last['ma20']]
+        if any(pd.isna(mas)): continue
+        
+        max_ma = df[['ma5','ma10','ma20']].max(axis=1)
+        min_ma = df[['ma5','ma10','ma20']].min(axis=1)
+        df['sq_pct'] = (max_ma - min_ma) / min_ma
+        df['is_sq'] = df['sq_pct'] <= squeeze_threshold
+        
+        if not df.iloc[-1]['is_sq']:
             continue
             
-        consolidation_days = 0
+        days = 0
         for i in range(len(df)-1, -1, -1):
-            if df.iloc[i]['is_tight']:
-                consolidation_days += 1
-            else:
-                break
-        
-        if consolidation_days >= 3:
+            if df.iloc[i]['is_sq']: days += 1
+            else: break
+            
+        if days >= min_days:
+            v_ratio = last['vol_ratio']
+            if pd.isna(v_ratio) or np.isinf(v_ratio): v_ratio = 0.0
+            v_ratio_str = f"🔥 {v_ratio:.1f}x" if v_ratio >= 1.5 else f"{v_ratio:.1f}x"
+
+            # --- 計算均線方向字串 ---
+            # 這裡使用 🔺 和 ▼ (倒三角)，稍後透過 Styler 上色
+            def get_ma_str(curr, prev):
+                if pd.isna(curr) or pd.isna(prev): return "-"
+                arrow = "🔺" if curr >= prev else "▼"
+                return f"{curr:.2f} {arrow}"
+
+            ma5_str = get_ma_str(last['ma5'], prev['ma5'])
+            ma10_str = get_ma_str(last['ma10'], prev['ma10'])
+            ma20_str = get_ma_str(last['ma20'], prev['ma20'])
+            ma60_str = get_ma_str(last['ma60'], prev['ma60'])
+
             results.append({
-                'symbol': symbol,
-                'close': last['close'],
+                'symbol': symbol, 
+                'close': last['close'], 
                 'volume': int(last['volume']),
-                'ma5': round(last['ma5'], 2),
-                'ma20': round(last['ma20'], 2),
-                'ma60': round(last['ma60'], 2),
-                'squeeze_pct': round(last['squeeze_pct'] * 100, 2),
-                'days': consolidation_days,
+                'vol_ratio': v_ratio,
+                'vol_str': v_ratio_str,
+                'days': days, 
+                'squeeze_pct': round(df.iloc[-1]['sq_pct'] * 100, 2),
+                'ma5_str': ma5_str,
+                'ma10_str': ma10_str,
+                'ma20_str': ma20_str,
+                'ma60_str': ma60_str,
                 'last_date': last['date']
             })
-            
-    progress_bar.empty()
     
-    if not results:
-        return pd.DataFrame(), df_prices
-        
+    p_bar.empty()
+    
+    if not results: return pd.DataFrame(), df_prices
+    
     df_res = pd.DataFrame(results)
     df_final = pd.merge(df_res, df_info, on='symbol', how='left')
+    df_final['name'] = df_final['name'].fillna('未知名稱')
+    df_final['link'] = df_final['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{x.replace('.TW','').replace('.TWO','')}")
     
-    if 'name' in df_final.columns:
-        df_final['name'] = df_final['name'].fillna('未知名稱')
-    else:
-        df_final['name'] = '未知名稱'
-
-    # 【修改 1】更換為玩股網連結
-    def make_link(symbol):
-        code = symbol.replace('.TW', '').replace('.TWO', '')
-        return f"https://www.wantgoo.com/stock/{code}"
-
-    if not df_final.empty:
-        df_final['link'] = df_final['symbol'].apply(make_link)
-        return df_final.sort_values('days', ascending=False), df_prices
-    
-    return pd.DataFrame(), df_prices
+    return df_final, df_prices
 
 # ===========================
-# 4. Streamlit UI 佈局
+# 4. 診斷工具
 # ===========================
+def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, min_days):
+    engine = get_db_engine()
+    symbol_code = symbol_code.strip().upper()
+    
+    st.sidebar.markdown(f"#### 🕵️ 診斷報告: {symbol_code}")
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(text(f"SELECT symbol, name FROM stock_info WHERE symbol LIKE '%{symbol_code}%' LIMIT 1")).fetchone()
+            if not res:
+                st.sidebar.error("❌ 無此代號")
+                return
+            real_symbol, name = res[0], res[1]
+            
+            df = pd.read_sql(text(f"SELECT * FROM stock_prices WHERE symbol = '{real_symbol}' ORDER BY date ASC"), conn)
+            if df.empty or len(df) < 120:
+                st.sidebar.error("❌ 資料不足")
+                return
+            
+            df['date'] = pd.to_datetime(df['date'])
+            df['ma5'] = df['close'].rolling(5).mean()
+            df['ma10'] = df['close'].rolling(10).mean()
+            df['ma20'] = df['close'].rolling(20).mean()
+            df['ma60'] = df['close'].rolling(60).mean()
+            df['ma120'] = df['close'].rolling(120).mean()
+            
+            df['prev_volume'] = df['volume'].shift(1)
+            df['vol_ratio'] = df['volume'] / df['prev_volume']
+            
+            max_ma = df[['ma5','ma10','ma20']].max(axis=1)
+            min_ma = df[['ma5','ma10','ma20']].min(axis=1)
+            df['sq_pct'] = (max_ma - min_ma) / min_ma
+            df['is_sq'] = df['sq_pct'] <= sq_threshold
+            
+            days = 0
+            for i in range(len(df)-1, -1, -1):
+                if df.iloc[i]['is_sq']: days += 1
+                else: break
+            
+            last = df.iloc[-1]
+            
+            st.sidebar.caption(f"{real_symbol} {name} | {last['date'].strftime('%Y-%m-%d')}")
+            
+            v_ok = last['volume'] >= min_vol
+            t_ok = (last['ma60'] > last['ma120']) if strict_trend else True
+            s_ok = df.iloc[-1]['is_sq']
+            d_ok = days >= min_days
+            
+            def show_check(label, ok, val, target):
+                icon = "✅" if ok else "❌"
+                cls = "diag-pass" if ok else "diag-fail"
+                st.sidebar.markdown(f"{label}: <span class='{cls}'>{icon} {val}</span> / {target}", unsafe_allow_html=True)
+                
+            show_check("1.成交量", v_ok, int(last['volume']), min_vol)
+            show_check("2.趨勢(60>120)", t_ok, "多頭" if last['ma60']>last['ma120'] else "非多頭", "必要" if strict_trend else "不拘")
+            show_check("3.糾結度", s_ok, f"{last['sq_pct']*100:.2f}%", f"{sq_threshold*100:.1f}%")
+            show_check("4.連續天數", d_ok, f"{days} 天", f"{min_days} 天")
+            
+            v_r = last['vol_ratio']
+            if pd.isna(v_r) or np.isinf(v_r): v_r = 0.0
+            v_label = f"🔥 {v_r:.2f}x" if v_r >= 1.5 else f"{v_r:.2f}x"
+            st.sidebar.markdown(f"📊 今日量增比: **{v_label}**")
 
-st.sidebar.header("⚙️ 篩選參數設定")
+    except Exception as e:
+        st.sidebar.error(f"診斷錯誤: {e}")
 
-st.sidebar.subheader("1. 均線糾結定義")
-threshold_percent = st.sidebar.slider(
-    "均線差距 (5/10/20 MA) 小於多少 % ?", 
-    min_value=1.0, max_value=10.0, value=3.5, step=0.5
-)
-squeeze_threshold = threshold_percent / 100.0
+# ===========================
+# 5. UI 介面
+# ===========================
+st.sidebar.header("⚙️ 篩選參數")
+threshold_pct = st.sidebar.slider("均線糾結度 (%)", 1.0, 10.0, 3.5, 0.5)
+min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 200000, 50000)
+min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 10, 5)
+strict_trend = st.sidebar.checkbox("只看多頭排列 (MA60 > MA120)", value=False)
+min_days = st.sidebar.slider("最少整理天數", 1, 10, 3, 1)
 
-st.sidebar.subheader("2. 基本面濾網")
+st.title("📈 均線糾結選股神器")
 
-min_vol = st.sidebar.slider(
-    "最小成交量 (股)", 
-    min_value=0, 
-    max_value=5000000, 
-    value=500000, 
-    step=50000
-)
-
-min_price = st.sidebar.slider(
-    "最低股價 (元)", 
-    min_value=0, 
-    max_value=1000, 
-    value=10, 
-    step=5
-)
+with st.spinner("🚀 運算中..."):
+    df_res, df_raw = load_and_process_data(400, min_vol, min_price, threshold_pct/100, strict_trend, min_days)
 
 st.sidebar.divider()
-st.sidebar.caption("策略邏輯:\n1. 60MA > 120MA (長線多頭)\n2. 5/10/20MA 差距 < N% (短線糾結)")
+st.sidebar.subheader("🔍 為什麼找不到？")
+diag_code = st.sidebar.text_input("輸入代號 (如 3563)")
+if diag_code:
+    diagnose_stock(diag_code, min_vol, min_price, threshold_pct/100, strict_trend, min_days)
 
-# --- 主畫面 ---
-st.title("📈 均線糾結 + 長線多頭 選股器")
-
-with st.spinner("正在從資料庫撈取並運算..."):
-    df_result, df_raw_prices = load_and_process_data(
-        lookback_days=400, 
-        min_volume=min_vol, 
-        min_price=min_price, 
-        squeeze_threshold=squeeze_threshold
-    )
-
-if df_result.empty:
-    st.warning("⚠️ 在此條件下未找到符合的股票，請嘗試放寬篩選條件。")
+if df_res.empty:
+    st.warning("⚠️ 無符合條件股票")
 else:
-    # --- 初始化 Session State ---
+    c_sort1, c_sort2 = st.columns([1, 1])
+    with c_sort1:
+        sort_col_map = {
+            "天數": "days", 
+            "量增比": "vol_ratio", 
+            "成交量": "volume", 
+            "代號": "symbol",
+            "糾結度": "squeeze_pct"
+        }
+        sort_label = st.radio("排序依據", list(sort_col_map.keys()), horizontal=True, index=0)
+        sort_key = sort_col_map[sort_label]
+        
+    with c_sort2:
+        sort_order = st.radio("排序方式", ["遞減 (大到小)", "遞增 (小到大)"], horizontal=True, index=0)
+        ascending = True if sort_order == "遞增 (小到大)" else False
+
+    df_sorted = df_res.sort_values(by=sort_key, ascending=ascending).reset_index(drop=True)
+
     if 'selected_index' not in st.session_state:
         st.session_state.selected_index = 0
-    
-    if st.session_state.selected_index >= len(df_result):
+    if st.session_state.selected_index >= len(df_sorted):
         st.session_state.selected_index = 0
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("符合檔數", f"{len(df_result)} 檔")
-    col2.metric("平均整理天數", f"{int(df_result['days'].mean())} 天")
-    best_stock = df_result.iloc[0]
-    col3.metric("最長整理", f"{best_stock['days']} 天 ({best_stock['name']})")
-
-    st.subheader("📋 選股清單 (點選行可直接切換 K 線)")
+    opts = (df_sorted['symbol'] + " - " + df_sorted['name']).tolist()
+    max_idx = len(opts) - 1
     
+    if 'stock_selector' not in st.session_state:
+        st.session_state.stock_selector = opts[0]
+
+    def update_state(new_index):
+        st.session_state.selected_index = new_index
+        st.session_state.stock_selector = opts[new_index]
+
+    def go_first(): update_state(0)
+    def go_prev(): update_state(max(0, st.session_state.selected_index - 1))
+    def go_next(): update_state(min(max_idx, st.session_state.selected_index + 1))
+    def go_last(): update_state(max_idx)
+    
+    def on_dropdown_change():
+        val = st.session_state.stock_selector
+        if val in opts:
+            st.session_state.selected_index = opts.index(val)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("符合檔數", f"{len(df_sorted)}")
+    c2.metric("最長整理", f"{df_sorted['days'].max()} 天")
+    
+    # --- 套用 Styler 樣式 (關鍵步驟) ---
+    def color_arrow(val):
+        if '🔺' in str(val):
+            return 'color: #ff4b4b; font-weight: bold' # 紅色
+        elif '▼' in str(val):
+            return 'color: #26a69a; font-weight: bold' # 綠色 (使用 Teal 色系，對比度較好)
+        return ''
+
+    # 針對均線欄位套用顏色
+    styled_df = df_sorted.style.map(color_arrow, subset=['ma5_str', 'ma10_str', 'ma20_str', 'ma60_str'])
+
     selection_event = st.dataframe(
-        df_result,
+        styled_df, # 傳入有樣式的 dataframe
         column_config={
-            "symbol": "代號",
-            "name": "名稱",
-            "industry": "產業",
-            "close": st.column_config.NumberColumn("收盤價", format="$%.2f"),
-            "days": st.column_config.NumberColumn("連續糾結天數", help="均線符合糾結定義的連續天數"),
-            "squeeze_pct": st.column_config.NumberColumn("糾結度 %", format="%.2f%%"),
+            "symbol": "代號", "name": "名稱", "days": "天數",
+            "vol_str": st.column_config.TextColumn("量增比"),
+            "squeeze_pct": st.column_config.NumberColumn("糾結度", format="%.2f%%"),
+            "close": st.column_config.NumberColumn("收盤", format="$%.2f"),
             "volume": st.column_config.NumberColumn("成交量", format="%d"),
-            "link": st.column_config.LinkColumn("玩股網", display_text="查看詳情"), # 修改顯示文字
-            "last_date": st.column_config.DateColumn("資料日期", format="YYYY-MM-DD"),
+            "ma5_str": st.column_config.TextColumn("5MA"),
+            "ma10_str": st.column_config.TextColumn("10MA"),
+            "ma20_str": st.column_config.TextColumn("20MA"),
+            "ma60_str": st.column_config.TextColumn("60MA"),
+            "link": st.column_config.LinkColumn("連結", display_text="Go")
         },
-        column_order=["symbol", "name", "days", "squeeze_pct", "close", "industry", "link", "volume", "ma60"],
-        hide_index=True,
-        width="stretch", 
-        height=400,
-        on_select="rerun",
-        selection_mode="single-row" 
+        column_order=["symbol", "name", "days", "vol_str", "squeeze_pct", "close", "volume", 
+                      "ma5_str", "ma10_str", "ma20_str", "ma60_str", "link"],
+        hide_index=True, use_container_width=True, height=300,
+        on_select="rerun", selection_mode="single-row"
     )
 
     if selection_event.selection.rows:
-        clicked_index = selection_event.selection.rows[0]
-        if clicked_index != st.session_state.selected_index:
-            st.session_state.selected_index = clicked_index
+        clicked_idx = selection_event.selection.rows[0]
+        if clicked_idx != st.session_state.selected_index:
+            update_state(clicked_idx)
             st.rerun()
 
     st.divider()
-    st.subheader("📊 技術線圖 (K線 + 均線)")
-    
-    # 選項清單
-    options_list = (df_result['symbol'].astype(str) + " - " + df_result['name'].astype(str)).tolist()
+    st.subheader("📊 個股走勢")
 
-    # 按鈕區塊
-    c1, c2, c3, c4 = st.columns(4)
-    if c1.button("⏮️ 最前"):
-        st.session_state.selected_index = 0
-        st.rerun()
-    if c2.button("⬅️ 上一個"):
-        st.session_state.selected_index = max(0, st.session_state.selected_index - 1)
-        st.rerun()
-    if c3.button("➡️ 下一個"):
-        st.session_state.selected_index = min(len(options_list) - 1, st.session_state.selected_index + 1)
-        st.rerun()
-    if c4.button("⏭️ 最後"):
-        st.session_state.selected_index = len(options_list) - 1
-        st.rerun()
+    b1, b2, b3, b4 = st.columns(4)
+    b1.button("⏮️ 最前", on_click=go_first, use_container_width=True)
+    b2.button("⬅️ 上一個", on_click=go_prev, use_container_width=True)
+    b3.button("➡️ 下一個", on_click=go_next, use_container_width=True)
+    b4.button("⏭️ 最後", on_click=go_last, use_container_width=True)
 
-    selected_symbol_str = st.selectbox(
-        "選擇股票:", 
-        options=options_list,
-        index=st.session_state.selected_index,
-        key="stock_selector"
+    st.selectbox(
+        "選擇股票 (亦可使用上方按鈕切換)", 
+        options=opts, 
+        key="stock_selector",
+        on_change=on_dropdown_change
     )
-    
-    current_index_in_list = options_list.index(selected_symbol_str)
-    if st.session_state.selected_index != current_index_in_list:
-        st.session_state.selected_index = current_index_in_list
-        st.rerun()
 
-    # --- 【修改 2】改用 Plotly 繪製互動式 K 線圖 ---
-    if selected_symbol_str:
-        symbol_only = str(selected_symbol_str).split(" - ")[0]
+    current_sym_str = st.session_state.stock_selector
+    if current_sym_str:
+        sym = current_sym_str.split(" - ")[0]
+        chart = df_raw[df_raw['symbol'] == sym].copy().tail(120)
         
-        chart_data = df_raw_prices[df_raw_prices['symbol'] == symbol_only].copy()
-        
-        if not chart_data.empty:
-            chart_data = chart_data.tail(120) # 顯示最近 120 天
+        if not chart.empty:
+            for c in ['open','high','low','close']: chart[c] = pd.to_numeric(chart[c])
             
-            # 計算均線 (繪圖用)
-            chart_data['MA5'] = chart_data['close'].rolling(5).mean()
-            chart_data['MA20'] = chart_data['close'].rolling(20).mean()
-            chart_data['MA60'] = chart_data['close'].rolling(60).mean()
+            chart['MA5'] = chart['close'].rolling(5).mean()
+            chart['MA20'] = chart['close'].rolling(20).mean()
+            chart['MA60'] = chart['close'].rolling(60).mean()
+            chart['MA120'] = chart['close'].rolling(120).mean()
 
-            # 建立 Plotly 圖表物件
-            fig = go.Figure()
-
-            # 1. 畫 K 棒 (Candlestick)
-            fig.add_trace(go.Candlestick(
-                x=chart_data['date'],
-                open=chart_data['open'],
-                high=chart_data['high'],
-                low=chart_data['low'],
-                close=chart_data['close'],
-                # 設定台灣股市顏色：紅漲(increasing)、綠跌(decreasing)
-                increasing_line_color='#ef5350', # 紅色
-                decreasing_line_color='#26a69a', # 綠色
-                name='K線'
-            ))
-
-            # 2. 畫均線 (MA)
-            fig.add_trace(go.Scatter(x=chart_data['date'], y=chart_data['MA5'], 
-                                     line=dict(color='orange', width=1), name='MA5 (週)'))
-            fig.add_trace(go.Scatter(x=chart_data['date'], y=chart_data['MA20'], 
-                                     line=dict(color='purple', width=1), name='MA20 (月)'))
-            fig.add_trace(go.Scatter(x=chart_data['date'], y=chart_data['MA60'], 
-                                     line=dict(color='blue', width=1), name='MA60 (季)'))
-
-            # 3. 設定圖表版面 (Layout)
-            fig.update_layout(
-                title=f"{selected_symbol_str} - 日 K 線圖",
-                xaxis_title="日期",
-                yaxis_title="股價",
-                xaxis_rangeslider_visible=False, # 隱藏下方預設的範圍滑桿，節省空間
-                height=500,
-                margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(
-                    orientation="h", # 圖例水平排列
-                    yanchor="bottom", y=1.02,
-                    xanchor="right", x=1
-                )
+            fig = make_subplots(
+                rows=2, cols=1, 
+                shared_xaxes=True, 
+                vertical_spacing=0.03, 
+                row_heights=[0.7, 0.3], 
+                subplot_titles=(f"{current_sym_str} - 日K線圖", "成交量")
             )
 
-            # 顯示圖表
+            fig.add_trace(go.Candlestick(
+                x=chart['date'], open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'], 
+                increasing_line_color='#ef5350', decreasing_line_color='#26a69a', name='K線'
+            ), row=1, col=1)
+            
+            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA5'], line=dict(color='orange', width=1), name='MA5'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA20'], line=dict(color='purple', width=1), name='MA20'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA60'], line=dict(color='blue', width=1), name='MA60'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA120'], line=dict(color='green', width=1, dash='dot'), name='MA120'), row=1, col=1)
+            
+            vol_colors = ['#ef5350' if c >= o else '#26a69a' for c, o in zip(chart['close'], chart['open'])]
+            fig.add_trace(go.Bar(
+                x=chart['date'], y=chart['volume'], marker_color=vol_colors, name='成交量'
+            ), row=2, col=1)
+
+            fig.update_layout(
+                xaxis_rangeslider_visible=False, 
+                height=600, 
+                margin=dict(t=30,b=0,l=0,r=0), 
+                legend=dict(orientation="h", y=1.01, x=0.5, xanchor='center'),
+                hovermode='x unified'
+            )
+            
             st.plotly_chart(fig, use_container_width=True)
