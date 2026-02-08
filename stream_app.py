@@ -46,6 +46,7 @@ def get_db_engine():
 def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshold, strict_trend, min_days):
     engine = get_db_engine()
     
+    # --- 步驟 1: 快速篩選 ---
     target_symbols = []
     try:
         with engine.connect() as conn:
@@ -64,6 +65,7 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
     except Exception as e:
         st.error(f"篩選失敗: {e}"); return pd.DataFrame(), pd.DataFrame()
 
+    # --- 步驟 2: 分批下載 ---
     start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
     all_dfs = []
     batch_size = 50 
@@ -92,6 +94,7 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
     df_prices['date'] = pd.to_datetime(df_prices['date'])
     df_prices = df_prices.sort_values(['symbol', 'date'])
 
+    # --- 步驟 3: 計算指標 ---
     results = []
     p_bar = st.progress(0, text="分析均線型態...")
     total = len(df_prices['symbol'].unique())
@@ -140,8 +143,6 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
             if pd.isna(v_ratio) or np.isinf(v_ratio): v_ratio = 0.0
             v_ratio_str = f"🔥 {v_ratio:.1f}x" if v_ratio >= 1.5 else f"{v_ratio:.1f}x"
 
-            # --- 計算均線方向字串 ---
-            # 這裡使用 🔺 和 ▼ (倒三角)，稍後透過 Styler 上色
             def get_ma_str(curr, prev):
                 if pd.isna(curr) or pd.isna(prev): return "-"
                 arrow = "🔺" if curr >= prev else "▼"
@@ -250,11 +251,11 @@ def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, 
 # 5. UI 介面
 # ===========================
 st.sidebar.header("⚙️ 篩選參數")
-threshold_pct = st.sidebar.slider("均線糾結度 (%)", 1.0, 10.0, 3.5, 0.5)
-min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 200000, 50000)
-min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 10, 5)
-strict_trend = st.sidebar.checkbox("只看多頭排列 (MA60 > MA120)", value=False)
-min_days = st.sidebar.slider("最少整理天數", 1, 10, 3, 1)
+threshold_pct = st.sidebar.slider("均線糾結度 (%)", 1.0, 10.0, 3.0, 0.5)
+min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 1000000, 50000)
+min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 30, 5)
+strict_trend = st.sidebar.checkbox("只看多頭排列 (MA60 > MA120)", value=True)
+min_days = st.sidebar.slider("最少整理天數", 1, 10, 2, 1)
 
 st.title("📈 均線糾結選股神器")
 
@@ -272,13 +273,15 @@ if df_res.empty:
 else:
     c_sort1, c_sort2 = st.columns([1, 1])
     with c_sort1:
+        # 修改：調整排序欄位順序 (量增比 -> 成交量 -> 糾結度 -> 天數 -> 代號)
         sort_col_map = {
-            "天數": "days", 
             "量增比": "vol_ratio", 
-            "成交量": "volume", 
-            "代號": "symbol",
-            "糾結度": "squeeze_pct"
+            "成交量": "volume",
+            "糾結度": "squeeze_pct",
+            "天數": "days", 
+            "代號": "symbol"
         }
+        # index=0 將預設選中第一個 key ("量增比")
         sort_label = st.radio("排序依據", list(sort_col_map.keys()), horizontal=True, index=0)
         sort_key = sort_col_map[sort_label]
         
@@ -317,19 +320,18 @@ else:
     c1.metric("符合檔數", f"{len(df_sorted)}")
     c2.metric("最長整理", f"{df_sorted['days'].max()} 天")
     
-    # --- 套用 Styler 樣式 (關鍵步驟) ---
+    # --- 套用 Styler 樣式 ---
     def color_arrow(val):
         if '🔺' in str(val):
-            return 'color: #ff4b4b; font-weight: bold' # 紅色
+            return 'color: #ff4b4b; font-weight: bold' # 紅
         elif '▼' in str(val):
-            return 'color: #26a69a; font-weight: bold' # 綠色 (使用 Teal 色系，對比度較好)
+            return 'color: #26a69a; font-weight: bold' # 綠
         return ''
 
-    # 針對均線欄位套用顏色
     styled_df = df_sorted.style.map(color_arrow, subset=['ma5_str', 'ma10_str', 'ma20_str', 'ma60_str'])
 
     selection_event = st.dataframe(
-        styled_df, # 傳入有樣式的 dataframe
+        styled_df,
         column_config={
             "symbol": "代號", "name": "名稱", "days": "天數",
             "vol_str": st.column_config.TextColumn("量增比"),
