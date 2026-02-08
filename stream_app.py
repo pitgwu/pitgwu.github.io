@@ -252,7 +252,8 @@ def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, 
 # ===========================
 st.sidebar.header("⚙️ 篩選參數")
 threshold_pct = st.sidebar.slider("均線糾結度 (%)", 1.0, 10.0, 3.0, 0.5)
-min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 1000000, 50000)
+# 修正預設值為 500,000 (500張)
+min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 500000, 50000)
 min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 30, 5)
 strict_trend = st.sidebar.checkbox("只看多頭排列 (MA60 > MA120)", value=True)
 min_days = st.sidebar.slider("最少整理天數", 1, 10, 2, 1)
@@ -273,7 +274,6 @@ if df_res.empty:
 else:
     c_sort1, c_sort2 = st.columns([1, 1])
     with c_sort1:
-        # 修改：調整排序欄位順序 (量增比 -> 成交量 -> 糾結度 -> 天數 -> 代號)
         sort_col_map = {
             "量增比": "vol_ratio", 
             "成交量": "volume",
@@ -281,7 +281,6 @@ else:
             "天數": "days", 
             "代號": "symbol"
         }
-        # index=0 將預設選中第一個 key ("量增比")
         sort_label = st.radio("排序依據", list(sort_col_map.keys()), horizontal=True, index=0)
         sort_key = sort_col_map[sort_label]
         
