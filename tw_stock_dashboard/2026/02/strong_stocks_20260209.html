@@ -1,0 +1,1944 @@
+
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>強勢股篩選 - 2026-02-09</title>
+        <style>
+            :root { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --red: #ff5252; --green: #4caf50; --accent: #2196f3; --border: #333; }
+            body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+            h1 { text-align: center; color: var(--accent); margin-bottom: 10px; }
+            .info { text-align: center; color: #888; margin-bottom: 20px; font-size: 0.9rem; }
+            .container { max-width: 1000px; margin: 0 auto; }
+            .card { background: var(--card); border-radius: 8px; border: 1px solid var(--border); overflow: hidden; }
+            
+            .table-wrapper { overflow-x: auto; }
+            table { width: 100%; border-collapse: collapse; font-size: 0.9rem; white-space: nowrap; }
+            
+            /* 表頭樣式與排序指標 */
+            th { 
+                background: #252525; padding: 12px; text-align: left; color: #aaa; font-weight: 600; 
+                position: sticky; top: 0; cursor: pointer; user-select: none; transition: background 0.2s;
+            }
+            th:hover { background: #333; color: var(--accent); }
+            
+            /* 排序箭頭 */
+            th.sort-asc::after { content: ' ▲'; color: var(--accent); }
+            th.sort-desc::after { content: ' ▼'; color: var(--accent); }
+            th::after { content: ' ⇅'; font-size: 0.8em; opacity: 0.2; margin-left: 5px; }
+            th.sort-asc::after, th.sort-desc::after { opacity: 1; }
+
+            td { border-bottom: 1px solid #2a2a2a; padding: 10px 12px; vertical-align: middle; }
+            tr:hover { background: #2c2c2c; }
+            
+            .stock-link { color: var(--accent); text-decoration: none; font-weight: bold; font-size: 1.05rem; display: block; }
+            .stock-link small { color: #777; font-size: 0.75rem; font-weight: normal; display: block; margin-top: 2px; }
+            .stock-link:hover { text-decoration: underline; }
+            
+            .ind-badge { background: #334155; color: #94a3b8; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
+            .up { color: var(--red); font-weight: bold; }
+            .down { color: var(--green); font-weight: bold; }
+            .vol-tag { color: #ffa726; font-size: 0.8rem; }
+        </style>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const table = document.getElementById("stockTable");
+                const headers = table.querySelectorAll("th");
+                const tbody = table.querySelector("tbody");
+
+                headers.forEach((header, index) => {
+                    header.addEventListener("click", () => {
+                        const rows = Array.from(tbody.querySelectorAll("tr"));
+                        const isAsc = header.classList.contains("sort-asc");
+                        
+                        // 重置所有 header 樣式
+                        headers.forEach(h => h.classList.remove("sort-asc", "sort-desc"));
+                        
+                        // 設定當前 header 樣式
+                        header.classList.toggle("sort-asc", !isAsc);
+                        header.classList.toggle("sort-desc", isAsc);
+                        
+                        const direction = isAsc ? -1 : 1;
+
+                        // 執行排序 (記憶體內陣列排序，極速)
+                        rows.sort((rowA, rowB) => {
+                            const cellA = rowA.children[index].innerText;
+                            const cellB = rowB.children[index].innerText;
+                            
+                            // 清洗數據轉為數字
+                            const valA = parseValue(cellA);
+                            const valB = parseValue(cellB);
+
+                            if (typeof valA === 'number' && typeof valB === 'number') {
+                                return (valA - valB) * direction;
+                            } else {
+                                return valA.toString().localeCompare(valB.toString()) * direction;
+                            }
+                        });
+
+                        // 一次性將排序好的 rows 放回 tbody (減少 reflow)
+                        tbody.append(...rows);
+
+                        // 重新編號
+                        reindexRows();
+                    });
+                });
+            });
+
+            function parseValue(str) {
+                // 移除 %, ,, x, 🔥 等符號
+                const cleanStr = str.replace(/[%,,🔥x]/g, "").trim();
+                const num = parseFloat(cleanStr);
+                return isNaN(num) ? str : num;
+            }
+
+            function reindexRows() {
+                const rows = document.querySelectorAll("#stockTable tbody tr");
+                rows.forEach((row, index) => {
+                    row.children[0].innerText = index + 1;
+                });
+            }
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 強勢股篩選清單</h1>
+            <div class="info">
+                📅 日期: 2026-02-09 | 
+                🔍 條件: 均線多頭(5>10>20) + 股價強勢 + 量增 | 
+                ✅ 符合: 129 檔
+            </div>
+            
+            <div class="card">
+                <div class="table-wrapper">
+                    <table id="stockTable">
+                        <thead>
+                            <tr>
+                                <th width="5%">No.</th>
+                                <th width="15%">代號/名稱</th>
+                                <th width="15%">產業</th>
+                                <th width="15%">收盤</th>
+                                <th width="15%">漲跌幅</th>
+                                <th width="15%">成交量</th>
+                                <th width="20%">量增比</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    
+                            <tr>
+                                <td>1</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7828.TWO" target="_blank" class="stock-link">
+                                        創新服務 <small>7828.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>937.00</td>
+                                <td class="up">+13.71%</td>
+                                <td>698,619</td>
+                                <td class="vol-tag">🔥 1.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>2</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4925.TWO" target="_blank" class="stock-link">
+                                        智微 <small>4925.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>66.50</td>
+                                <td class="up">+12.33%</td>
+                                <td>867,379</td>
+                                <td class="vol-tag">🔥 3.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>3</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8147.TWO" target="_blank" class="stock-link">
+                                        正淩 <small>8147.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>132.00</td>
+                                <td class="up">+10.00%</td>
+                                <td>3,324,444</td>
+                                <td class="vol-tag">🔥 2.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>4</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6830.TW" target="_blank" class="stock-link">
+                                        汎銓 <small>6830.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>225.50</td>
+                                <td class="up">+10.00%</td>
+                                <td>6,571,063</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>5</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/5220.TWO" target="_blank" class="stock-link">
+                                        萬達光電 <small>5220.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">光電業</span></td>
+                                <td>19.80</td>
+                                <td class="up">+10.00%</td>
+                                <td>273,929</td>
+                                <td class="vol-tag">🔥 4.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>6</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8935.TWO" target="_blank" class="stock-link">
+                                        邦泰 <small>8935.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他業</span></td>
+                                <td>23.20</td>
+                                <td class="up">+9.95%</td>
+                                <td>4,095,841</td>
+                                <td class="vol-tag">🔥 8.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>7</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8046.TW" target="_blank" class="stock-link">
+                                        南電 <small>8046.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>416.50</td>
+                                <td class="up">+9.89%</td>
+                                <td>3,644,516</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>8</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3550.TW" target="_blank" class="stock-link">
+                                        聯穎 <small>3550.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>20.60</td>
+                                <td class="up">+9.87%</td>
+                                <td>21,908,771</td>
+                                <td class="vol-tag">🔥 1.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>9</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6598.TW" target="_blank" class="stock-link">
+                                        ABC-KY <small>6598.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>25.65</td>
+                                <td class="up">+9.85%</td>
+                                <td>2,383,350</td>
+                                <td class="vol-tag">🔥 14.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>10</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3163.TWO" target="_blank" class="stock-link">
+                                        波若威 <small>3163.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>537.00</td>
+                                <td class="up">+9.82%</td>
+                                <td>2,592,175</td>
+                                <td class="vol-tag">1.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>11</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/5386.TWO" target="_blank" class="stock-link">
+                                        青雲 <small>5386.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電腦及週邊設備業</span></td>
+                                <td>134.50</td>
+                                <td class="up">+9.80%</td>
+                                <td>10,993,401</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>12</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7610.TW" target="_blank" class="stock-link">
+                                        聯友金屬-創 <small>7610.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">綠能環保</span></td>
+                                <td>241.00</td>
+                                <td class="up">+9.79%</td>
+                                <td>2,033,600</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>13</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00951.TW" target="_blank" class="stock-link">
+                                        台新日本半導體 <small>00951.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>14.93</td>
+                                <td class="up">+9.54%</td>
+                                <td>19,211,411</td>
+                                <td class="vol-tag">🔥 3.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>14</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6588.TWO" target="_blank" class="stock-link">
+                                        東典光電 <small>6588.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>76.60</td>
+                                <td class="up">+9.43%</td>
+                                <td>1,179,050</td>
+                                <td class="vol-tag">🔥 2.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>15</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4198.TWO" target="_blank" class="stock-link">
+                                        欣大健康 <small>4198.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>34.80</td>
+                                <td class="up">+8.75%</td>
+                                <td>14,154</td>
+                                <td class="vol-tag">🔥 4.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>16</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6290.TWO" target="_blank" class="stock-link">
+                                        良維 <small>6290.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>186.50</td>
+                                <td class="up">+8.43%</td>
+                                <td>16,196,724</td>
+                                <td class="vol-tag">🔥 3.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>17</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4537.TWO" target="_blank" class="stock-link">
+                                        旭東 <small>4537.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">光電業</span></td>
+                                <td>88.90</td>
+                                <td class="up">+8.41%</td>
+                                <td>859,764</td>
+                                <td class="vol-tag">🔥 2.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>18</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3526.TWO" target="_blank" class="stock-link">
+                                        凡甲 <small>3526.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>286.00</td>
+                                <td class="up">+8.33%</td>
+                                <td>2,919,145</td>
+                                <td class="vol-tag">🔥 5.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>19</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2515.TW" target="_blank" class="stock-link">
+                                        中工 <small>2515.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">建材營造業</span></td>
+                                <td>14.95</td>
+                                <td class="up">+7.55%</td>
+                                <td>27,627,222</td>
+                                <td class="vol-tag">🔥 3.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>20</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00954.TW" target="_blank" class="stock-link">
+                                        中信日本半導體 <small>00954.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>15.72</td>
+                                <td class="up">+7.38%</td>
+                                <td>7,449,734</td>
+                                <td class="vol-tag">🔥 3.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>21</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3324.TWO" target="_blank" class="stock-link">
+                                        雙鴻 <small>3324.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>1105.00</td>
+                                <td class="up">+7.28%</td>
+                                <td>7,547,069</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>22</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6568.TWO" target="_blank" class="stock-link">
+                                        宏觀 <small>6568.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>172.50</td>
+                                <td class="up">+7.14%</td>
+                                <td>2,088,243</td>
+                                <td class="vol-tag">1.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>23</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2454.TW" target="_blank" class="stock-link">
+                                        聯發科 <small>2454.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>1830.00</td>
+                                <td class="up">+7.02%</td>
+                                <td>12,770,205</td>
+                                <td class="vol-tag">1.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>24</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6426.TW" target="_blank" class="stock-link">
+                                        統新 <small>6426.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>128.50</td>
+                                <td class="up">+6.64%</td>
+                                <td>1,671,988</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>25</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2360.TW" target="_blank" class="stock-link">
+                                        致茂 <small>2360.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>1030.00</td>
+                                <td class="up">+6.51%</td>
+                                <td>2,564,451</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>26</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4979.TWO" target="_blank" class="stock-link">
+                                        華星光 <small>4979.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>338.50</td>
+                                <td class="up">+6.28%</td>
+                                <td>36,802,463</td>
+                                <td class="vol-tag">🔥 1.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>27</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2436.TW" target="_blank" class="stock-link">
+                                        偉詮電 <small>2436.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>56.80</td>
+                                <td class="up">+6.17%</td>
+                                <td>10,515,241</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>28</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3653.TW" target="_blank" class="stock-link">
+                                        健策 <small>3653.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>3145.00</td>
+                                <td class="up">+5.89%</td>
+                                <td>1,877,545</td>
+                                <td class="vol-tag">1.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>29</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4806.TWO" target="_blank" class="stock-link">
+                                        桂田文創 <small>4806.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">文化創意業</span></td>
+                                <td>10.40</td>
+                                <td class="up">+5.80%</td>
+                                <td>24,081</td>
+                                <td class="vol-tag">🔥 3.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>30</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00988A.TW" target="_blank" class="stock-link">
+                                        None <small>00988A.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他</span></td>
+                                <td>11.86</td>
+                                <td class="up">+5.70%</td>
+                                <td>29,484,916</td>
+                                <td class="vol-tag">1.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>31</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00640L.TW" target="_blank" class="stock-link">
+                                        None <small>00640L.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他</span></td>
+                                <td>94.80</td>
+                                <td class="up">+5.57%</td>
+                                <td>2,042,694</td>
+                                <td class="vol-tag">🔥 2.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>32</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2301.TW" target="_blank" class="stock-link">
+                                        光寶科 <small>2301.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電腦及週邊設備業</span></td>
+                                <td>173.50</td>
+                                <td class="up">+5.47%</td>
+                                <td>26,205,364</td>
+                                <td class="vol-tag">🔥 2.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>33</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00990A.TW" target="_blank" class="stock-link">
+                                        None <small>00990A.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他</span></td>
+                                <td>11.54</td>
+                                <td class="up">+5.20%</td>
+                                <td>56,591,457</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>34</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2455.TW" target="_blank" class="stock-link">
+                                        全新 <small>2455.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>173.00</td>
+                                <td class="up">+5.17%</td>
+                                <td>11,929,664</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>35</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3631.TWO" target="_blank" class="stock-link">
+                                        晟楠 <small>3631.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>29.10</td>
+                                <td class="up">+5.05%</td>
+                                <td>190,877</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>36</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00657.TW" target="_blank" class="stock-link">
+                                        國泰日經225 <small>00657.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>66.75</td>
+                                <td class="up">+5.04%</td>
+                                <td>415,988</td>
+                                <td class="vol-tag">🔥 3.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>37</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4974.TWO" target="_blank" class="stock-link">
+                                        亞泰 <small>4974.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>78.30</td>
+                                <td class="up">+4.96%</td>
+                                <td>1,161,615</td>
+                                <td class="vol-tag">🔥 3.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>38</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00661.TW" target="_blank" class="stock-link">
+                                        元大日經225 <small>00661.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>73.15</td>
+                                <td class="up">+4.87%</td>
+                                <td>444,533</td>
+                                <td class="vol-tag">🔥 2.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>39</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6716.TWO" target="_blank" class="stock-link">
+                                        應廣 <small>6716.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>60.60</td>
+                                <td class="up">+4.84%</td>
+                                <td>1,058,197</td>
+                                <td class="vol-tag">🔥 3.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>40</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6515.TW" target="_blank" class="stock-link">
+                                        穎崴 <small>6515.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>4720.00</td>
+                                <td class="up">+4.66%</td>
+                                <td>750,141</td>
+                                <td class="vol-tag">🔥 1.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>41</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7551.TWO" target="_blank" class="stock-link">
+                                        知識科技 <small>7551.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">數位雲端</span></td>
+                                <td>13.95</td>
+                                <td class="up">+4.49%</td>
+                                <td>30,594</td>
+                                <td class="vol-tag">🔥 10198.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>42</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00986A.TW" target="_blank" class="stock-link">
+                                        None <small>00986A.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他</span></td>
+                                <td>12.08</td>
+                                <td class="up">+4.41%</td>
+                                <td>1,731,386</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>43</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2489.TW" target="_blank" class="stock-link">
+                                        瑞軒 <small>2489.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">光電業</span></td>
+                                <td>23.75</td>
+                                <td class="up">+4.40%</td>
+                                <td>10,644,345</td>
+                                <td class="vol-tag">🔥 2.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>44</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7769.TW" target="_blank" class="stock-link">
+                                        鴻勁 <small>7769.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>3850.00</td>
+                                <td class="up">+4.34%</td>
+                                <td>1,095,297</td>
+                                <td class="vol-tag">🔥 1.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>45</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2464.TW" target="_blank" class="stock-link">
+                                        盟立 <small>2464.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>74.60</td>
+                                <td class="up">+4.34%</td>
+                                <td>40,040,816</td>
+                                <td class="vol-tag">🔥 1.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>46</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7849.TWO" target="_blank" class="stock-link">
+                                        旭誼 <small>7849.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>151.00</td>
+                                <td class="up">+4.14%</td>
+                                <td>4,211</td>
+                                <td class="vol-tag">🔥 1.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>47</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00941.TW" target="_blank" class="stock-link">
+                                        中信上游半導體 <small>00941.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>21.29</td>
+                                <td class="up">+4.11%</td>
+                                <td>3,136,838</td>
+                                <td class="vol-tag">1.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>48</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3633.TWO" target="_blank" class="stock-link">
+                                        云光 <small>3633.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">光電業</span></td>
+                                <td>91.80</td>
+                                <td class="up">+3.96%</td>
+                                <td>118,423</td>
+                                <td class="vol-tag">🔥 5.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>49</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6223.TWO" target="_blank" class="stock-link">
+                                        旺矽 <small>6223.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>2775.00</td>
+                                <td class="up">+3.93%</td>
+                                <td>1,362,068</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>50</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1434.TW" target="_blank" class="stock-link">
+                                        福懋 <small>1434.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">紡織纖維</span></td>
+                                <td>17.75</td>
+                                <td class="up">+3.80%</td>
+                                <td>5,581,200</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>51</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6271.TW" target="_blank" class="stock-link">
+                                        同欣電 <small>6271.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>153.00</td>
+                                <td class="up">+3.73%</td>
+                                <td>8,959,003</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>52</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00892.TW" target="_blank" class="stock-link">
+                                        富邦台灣半導體 <small>00892.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>25.91</td>
+                                <td class="up">+3.72%</td>
+                                <td>1,620,439</td>
+                                <td class="vol-tag">1.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>53</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1466.TW" target="_blank" class="stock-link">
+                                        聚隆 <small>1466.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">紡織纖維</span></td>
+                                <td>17.25</td>
+                                <td class="up">+3.60%</td>
+                                <td>4,718,383</td>
+                                <td class="vol-tag">🔥 2.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>54</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00935.TW" target="_blank" class="stock-link">
+                                        野村臺灣新科技50 <small>00935.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>35.99</td>
+                                <td class="up">+3.57%</td>
+                                <td>10,745,649</td>
+                                <td class="vol-tag">🔥 1.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>55</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00891.TW" target="_blank" class="stock-link">
+                                        中信關鍵半導體 <small>00891.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>23.94</td>
+                                <td class="up">+3.55%</td>
+                                <td>29,949,023</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>56</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7827.TWO" target="_blank" class="stock-link">
+                                        漢康-KY <small>7827.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>132.00</td>
+                                <td class="up">+3.53%</td>
+                                <td>685,000</td>
+                                <td class="vol-tag">1.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>57</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2883.TW" target="_blank" class="stock-link">
+                                        凱基金 <small>2883.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>18.85</td>
+                                <td class="up">+3.01%</td>
+                                <td>115,478,022</td>
+                                <td class="vol-tag">🔥 2.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>58</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00922.TW" target="_blank" class="stock-link">
+                                        國泰台灣領袖50 <small>00922.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>29.07</td>
+                                <td class="up">+2.98%</td>
+                                <td>14,946,009</td>
+                                <td class="vol-tag">🔥 1.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>59</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/009804.TW" target="_blank" class="stock-link">
+                                        聯邦台精彩50 <small>009804.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>16.36</td>
+                                <td class="up">+2.96%</td>
+                                <td>1,711,435</td>
+                                <td class="vol-tag">🔥 2.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>60</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00994A.TW" target="_blank" class="stock-link">
+                                        None <small>00994A.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他</span></td>
+                                <td>10.86</td>
+                                <td class="up">+2.94%</td>
+                                <td>2,943,206</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>61</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2885.TW" target="_blank" class="stock-link">
+                                        元大金 <small>2885.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>43.90</td>
+                                <td class="up">+2.93%</td>
+                                <td>28,939,437</td>
+                                <td class="vol-tag">🔥 2.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>62</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00645.TW" target="_blank" class="stock-link">
+                                        富邦日本 <small>00645.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>53.10</td>
+                                <td class="up">+2.91%</td>
+                                <td>1,028,698</td>
+                                <td class="vol-tag">🔥 2.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>63</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/006208.TW" target="_blank" class="stock-link">
+                                        富邦台50 <small>006208.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>171.25</td>
+                                <td class="up">+2.85%</td>
+                                <td>6,443,291</td>
+                                <td class="vol-tag">1.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>64</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/009812.TW" target="_blank" class="stock-link">
+                                        野村日本東證 <small>009812.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>11.94</td>
+                                <td class="up">+2.84%</td>
+                                <td>2,927,578</td>
+                                <td class="vol-tag">🔥 2.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>65</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7669.TWO" target="_blank" class="stock-link">
+                                        碩正科技 <small>7669.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>695.00</td>
+                                <td class="up">+2.81%</td>
+                                <td>331,132</td>
+                                <td class="vol-tag">1.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>66</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00912.TW" target="_blank" class="stock-link">
+                                        中信臺灣智慧50 <small>00912.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>23.50</td>
+                                <td class="up">+2.80%</td>
+                                <td>1,003,501</td>
+                                <td class="vol-tag">1.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>67</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00949.TW" target="_blank" class="stock-link">
+                                        復華日本龍頭 <small>00949.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>19.99</td>
+                                <td class="up">+2.78%</td>
+                                <td>4,451,494</td>
+                                <td class="vol-tag">🔥 2.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>68</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/009803.TW" target="_blank" class="stock-link">
+                                        保德信市值動能50 <small>009803.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>14.83</td>
+                                <td class="up">+2.77%</td>
+                                <td>1,639,972</td>
+                                <td class="vol-tag">1.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>69</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/006203.TW" target="_blank" class="stock-link">
+                                        元大MSCI台灣 <small>006203.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>134.50</td>
+                                <td class="up">+2.71%</td>
+                                <td>20,409</td>
+                                <td class="vol-tag">0.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>70</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3363.TWO" target="_blank" class="stock-link">
+                                        上詮 <small>3363.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>439.50</td>
+                                <td class="up">+2.69%</td>
+                                <td>3,827,928</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>71</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/009808.TW" target="_blank" class="stock-link">
+                                        華南永昌優選50 <small>009808.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>22.09</td>
+                                <td class="up">+2.65%</td>
+                                <td>2,201,805</td>
+                                <td class="vol-tag">🔥 2.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>72</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6955.TW" target="_blank" class="stock-link">
+                                        邦睿生技-創 <small>6955.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>177.00</td>
+                                <td class="up">+2.61%</td>
+                                <td>20,441</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>73</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1708.TW" target="_blank" class="stock-link">
+                                        東鹼 <small>1708.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">化學工業</span></td>
+                                <td>35.00</td>
+                                <td class="up">+2.49%</td>
+                                <td>2,093,135</td>
+                                <td class="vol-tag">🔥 2.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>74</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6996.TWO" target="_blank" class="stock-link">
+                                        力領科技 <small>6996.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">半導體業</span></td>
+                                <td>167.00</td>
+                                <td class="up">+2.45%</td>
+                                <td>102,049</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>75</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6848.TWO" target="_blank" class="stock-link">
+                                        拉法醫 <small>6848.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>16.90</td>
+                                <td class="up">+2.42%</td>
+                                <td>15,104</td>
+                                <td class="vol-tag">🔥 7.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>76</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1294.TWO" target="_blank" class="stock-link">
+                                        漢田生技 <small>1294.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">食品工業</span></td>
+                                <td>80.60</td>
+                                <td class="up">+2.41%</td>
+                                <td>169,382</td>
+                                <td class="vol-tag">🔥 15.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>77</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6126.TWO" target="_blank" class="stock-link">
+                                        信音 <small>6126.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>38.40</td>
+                                <td class="up">+2.40%</td>
+                                <td>4,734,499</td>
+                                <td class="vol-tag">🔥 2.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>78</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7575.TWO" target="_blank" class="stock-link">
+                                        安美得 <small>7575.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>28.45</td>
+                                <td class="up">+2.34%</td>
+                                <td>162,312</td>
+                                <td class="vol-tag">🔥 9.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>79</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00850.TW" target="_blank" class="stock-link">
+                                        元大臺灣ESG永續 <small>00850.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>61.60</td>
+                                <td class="up">+2.33%</td>
+                                <td>995,345</td>
+                                <td class="vol-tag">1.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>80</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3596.TW" target="_blank" class="stock-link">
+                                        智易 <small>3596.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>183.00</td>
+                                <td class="up">+2.23%</td>
+                                <td>1,207,601</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>81</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6225.TW" target="_blank" class="stock-link">
+                                        天瀚 <small>6225.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">光電業</span></td>
+                                <td>18.30</td>
+                                <td class="up">+2.23%</td>
+                                <td>12,000</td>
+                                <td class="vol-tag">🔥 2.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>82</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8435.TWO" target="_blank" class="stock-link">
+                                        鉅邁 <small>8435.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他業</span></td>
+                                <td>56.20</td>
+                                <td class="up">+2.18%</td>
+                                <td>137,184</td>
+                                <td class="vol-tag">🔥 3.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>83</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3093.TWO" target="_blank" class="stock-link">
+                                        港建* <small>3093.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>26.40</td>
+                                <td class="up">+2.13%</td>
+                                <td>235,831</td>
+                                <td class="vol-tag">🔥 2.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>84</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8487.TW" target="_blank" class="stock-link">
+                                        愛爾達-創 <small>8487.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">數位雲端</span></td>
+                                <td>81.80</td>
+                                <td class="up">+2.00%</td>
+                                <td>38,199</td>
+                                <td class="vol-tag">🔥 8.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>85</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6894.TWO" target="_blank" class="stock-link">
+                                        衛司特 <small>6894.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">綠能環保</span></td>
+                                <td>238.00</td>
+                                <td class="up">+1.93%</td>
+                                <td>192,534</td>
+                                <td class="vol-tag">🔥 2.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>86</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2887.TW" target="_blank" class="stock-link">
+                                        台新新光金 <small>2887.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>23.80</td>
+                                <td class="up">+1.93%</td>
+                                <td>98,895,398</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>87</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6984.TWO" target="_blank" class="stock-link">
+                                        ACPAY <small>6984.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">數位雲端</span></td>
+                                <td>27.00</td>
+                                <td class="up">+1.89%</td>
+                                <td>9,002</td>
+                                <td class="vol-tag">🔥 9.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>88</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00964.TW" target="_blank" class="stock-link">
+                                        中信亞太高股息 <small>00964.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>13.08</td>
+                                <td class="up">+1.87%</td>
+                                <td>3,171,738</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>89</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00956.TW" target="_blank" class="stock-link">
+                                        中信日經高股息 <small>00956.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>12.78</td>
+                                <td class="up">+1.83%</td>
+                                <td>1,165,341</td>
+                                <td class="vol-tag">🔥 2.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>90</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7862.TWO" target="_blank" class="stock-link">
+                                        聚泰 <small>7862.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">紡織纖維</span></td>
+                                <td>50.00</td>
+                                <td class="up">+1.73%</td>
+                                <td>9,015</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>91</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2890.TW" target="_blank" class="stock-link">
+                                        永豐金 <small>2890.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>30.00</td>
+                                <td class="up">+1.69%</td>
+                                <td>38,283,009</td>
+                                <td class="vol-tag">🔥 2.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>92</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8249.TW" target="_blank" class="stock-link">
+                                        菱光 <small>8249.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>61.90</td>
+                                <td class="up">+1.64%</td>
+                                <td>4,496,011</td>
+                                <td class="vol-tag">🔥 1.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>93</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3095.TWO" target="_blank" class="stock-link">
+                                        及成 <small>3095.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>31.35</td>
+                                <td class="up">+1.62%</td>
+                                <td>31,232</td>
+                                <td class="vol-tag">🔥 2.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>94</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2249.TWO" target="_blank" class="stock-link">
+                                        湧盛 <small>2249.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電機機械</span></td>
+                                <td>126.00</td>
+                                <td class="up">+1.61%</td>
+                                <td>90,136</td>
+                                <td class="vol-tag">🔥 2.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>95</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6028.TWO" target="_blank" class="stock-link">
+                                        公勝保經 <small>6028.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>107.00</td>
+                                <td class="up">+1.42%</td>
+                                <td>56,401</td>
+                                <td class="vol-tag">🔥 8.8x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>96</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00960.TW" target="_blank" class="stock-link">
+                                        野村全球航運龍頭 <small>00960.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>15.48</td>
+                                <td class="up">+1.38%</td>
+                                <td>1,621,946</td>
+                                <td class="vol-tag">🔥 1.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>97</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6174.TWO" target="_blank" class="stock-link">
+                                        安碁 <small>6174.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>22.20</td>
+                                <td class="up">+1.37%</td>
+                                <td>84,697</td>
+                                <td class="vol-tag">1.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>98</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6483.TWO" target="_blank" class="stock-link">
+                                        原創生醫 <small>6483.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>15.20</td>
+                                <td class="up">+1.33%</td>
+                                <td>527,155</td>
+                                <td class="vol-tag">🔥 3.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>99</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1432.TW" target="_blank" class="stock-link">
+                                        大魯閣 <small>1432.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">運動休閒</span></td>
+                                <td>19.15</td>
+                                <td class="up">+1.32%</td>
+                                <td>490,471</td>
+                                <td class="vol-tag">🔥 1.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>100</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2535.TW" target="_blank" class="stock-link">
+                                        達欣工 <small>2535.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">建材營造業</span></td>
+                                <td>69.80</td>
+                                <td class="up">+1.31%</td>
+                                <td>418,295</td>
+                                <td class="vol-tag">1.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>101</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00972.TW" target="_blank" class="stock-link">
+                                        野村日本動能高息 <small>00972.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>20.22</td>
+                                <td class="up">+1.30%</td>
+                                <td>580,759</td>
+                                <td class="vol-tag">🔥 1.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>102</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2903.TW" target="_blank" class="stock-link">
+                                        遠百 <small>2903.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">貿易百貨業</span></td>
+                                <td>23.40</td>
+                                <td class="up">+1.30%</td>
+                                <td>4,048,219</td>
+                                <td class="vol-tag">🔥 1.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>103</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6634.TWO" target="_blank" class="stock-link">
+                                        欣耀 <small>6634.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>38.45</td>
+                                <td class="up">+1.18%</td>
+                                <td>45,030</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>104</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/0055.TW" target="_blank" class="stock-link">
+                                        元大MSCI金融 <small>0055.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>32.88</td>
+                                <td class="up">+1.17%</td>
+                                <td>271,666</td>
+                                <td class="vol-tag">0.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>105</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/7716.TWO" target="_blank" class="stock-link">
+                                        昱臺國際 <small>7716.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">航運業</span></td>
+                                <td>26.00</td>
+                                <td class="up">+1.17%</td>
+                                <td>9,000</td>
+                                <td class="vol-tag">🔥 2.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>106</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00882.TW" target="_blank" class="stock-link">
+                                        中信中國高股息 <small>00882.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>15.98</td>
+                                <td class="up">+1.08%</td>
+                                <td>24,149,575</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>107</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4207.TWO" target="_blank" class="stock-link">
+                                        環泰 <small>4207.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">食品工業</span></td>
+                                <td>19.10</td>
+                                <td class="up">+1.06%</td>
+                                <td>315,384</td>
+                                <td class="vol-tag">🔥 1.9x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>108</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1203.TW" target="_blank" class="stock-link">
+                                        味王 <small>1203.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">食品工業</span></td>
+                                <td>39.85</td>
+                                <td class="up">+1.01%</td>
+                                <td>22,757</td>
+                                <td class="vol-tag">🔥 1.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>109</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00702.TW" target="_blank" class="stock-link">
+                                        國泰標普低波高息 <small>00702.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>24.37</td>
+                                <td class="up">+0.91%</td>
+                                <td>178,192</td>
+                                <td class="vol-tag">🔥 5.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>110</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00981T.TW" target="_blank" class="stock-link">
+                                        None <small>00981T.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他</span></td>
+                                <td>11.20</td>
+                                <td class="up">+0.90%</td>
+                                <td>7,193,401</td>
+                                <td class="vol-tag">1.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>111</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2891.TW" target="_blank" class="stock-link">
+                                        中信金 <small>2891.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>52.00</td>
+                                <td class="up">+0.78%</td>
+                                <td>23,168,102</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>112</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/1225.TW" target="_blank" class="stock-link">
+                                        福懋油 <small>1225.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">食品工業</span></td>
+                                <td>28.40</td>
+                                <td class="up">+0.71%</td>
+                                <td>278,297</td>
+                                <td class="vol-tag">🔥 4.5x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>113</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/3209.TW" target="_blank" class="stock-link">
+                                        全科 <small>3209.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子通路業</span></td>
+                                <td>35.70</td>
+                                <td class="up">+0.71%</td>
+                                <td>2,953,525</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>114</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6248.TWO" target="_blank" class="stock-link">
+                                        沛波 <small>6248.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">鋼鐵工業</span></td>
+                                <td>21.85</td>
+                                <td class="up">+0.69%</td>
+                                <td>166,909</td>
+                                <td class="vol-tag">1.4x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>115</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2610.TW" target="_blank" class="stock-link">
+                                        華航 <small>2610.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">航運業</span></td>
+                                <td>22.80</td>
+                                <td class="up">+0.66%</td>
+                                <td>25,884,736</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>116</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4905.TWO" target="_blank" class="stock-link">
+                                        台聯電 <small>4905.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>63.40</td>
+                                <td class="up">+0.63%</td>
+                                <td>8,080</td>
+                                <td class="vol-tag">0.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>117</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/8085.TWO" target="_blank" class="stock-link">
+                                        福華 <small>8085.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">其他電子業</span></td>
+                                <td>17.65</td>
+                                <td class="up">+0.57%</td>
+                                <td>436,335</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>118</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2006.TW" target="_blank" class="stock-link">
+                                        東和鋼鐵 <small>2006.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">鋼鐵工業</span></td>
+                                <td>71.30</td>
+                                <td class="up">+0.56%</td>
+                                <td>1,393,399</td>
+                                <td class="vol-tag">1.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>119</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2618.TW" target="_blank" class="stock-link">
+                                        長榮航 <small>2618.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">航運業</span></td>
+                                <td>38.80</td>
+                                <td class="up">+0.52%</td>
+                                <td>26,147,120</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>120</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6833.TWO" target="_blank" class="stock-link">
+                                        太康精密 <small>6833.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>27.20</td>
+                                <td class="up">+0.37%</td>
+                                <td>75,361</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>121</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/00908.TW" target="_blank" class="stock-link">
+                                        富邦入息REITs+ <small>00908.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">ETF</span></td>
+                                <td>14.35</td>
+                                <td class="up">+0.35%</td>
+                                <td>214,847</td>
+                                <td class="vol-tag">🔥 6.0x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>122</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/4904.TW" target="_blank" class="stock-link">
+                                        遠傳 <small>4904.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">通信網路業</span></td>
+                                <td>92.50</td>
+                                <td class="up">+0.33%</td>
+                                <td>6,918,462</td>
+                                <td class="vol-tag">1.2x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>123</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6805.TW" target="_blank" class="stock-link">
+                                        富世達 <small>6805.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">電子零組件業</span></td>
+                                <td>1550.00</td>
+                                <td class="up">+0.32%</td>
+                                <td>2,196,275</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>124</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6676.TWO" target="_blank" class="stock-link">
+                                        祥翊 <small>6676.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>16.05</td>
+                                <td class="up">+0.31%</td>
+                                <td>302,278</td>
+                                <td class="vol-tag">1.3x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>125</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2880.TW" target="_blank" class="stock-link">
+                                        華南金 <small>2880.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>33.95</td>
+                                <td class="up">+0.30%</td>
+                                <td>9,822,193</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>126</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6574.TWO" target="_blank" class="stock-link">
+                                        霈方 <small>6574.TWO</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">生技醫療業</span></td>
+                                <td>76.00</td>
+                                <td class="up">+0.26%</td>
+                                <td>20,988</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>127</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2801.TW" target="_blank" class="stock-link">
+                                        彰銀 <small>2801.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>20.55</td>
+                                <td class="up">+0.24%</td>
+                                <td>13,498,151</td>
+                                <td class="vol-tag">🔥 1.6x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>128</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/6951.TW" target="_blank" class="stock-link">
+                                        青新-創 <small>6951.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">綠能環保</span></td>
+                                <td>77.90</td>
+                                <td class="up">+0.13%</td>
+                                <td>58,684</td>
+                                <td class="vol-tag">1.1x</td>
+                            </tr>
+        
+                            <tr>
+                                <td>129</td>
+                                <td>
+                                    <a href="https://tw.stock.yahoo.com/quote/2867.TW" target="_blank" class="stock-link">
+                                        三商壽 <small>2867.TW</small>
+                                    </a>
+                                </td>
+                                <td><span class="ind-badge">金融保險業</span></td>
+                                <td>7.96</td>
+                                <td class="up">+0.13%</td>
+                                <td>17,332,907</td>
+                                <td class="vol-tag">🔥 1.7x</td>
+                            </tr>
+        
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <br>
+            <div class="info">Generated by AI Stock Screener (Click headers to sort)</div>
+        </div>
+    </body>
+    </html>
+    
