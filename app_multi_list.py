@@ -137,7 +137,7 @@ def remove_stock_db(list_name, symbol):
         return True, "移除成功"
     except Exception as e: return False, str(e)
 
-# --- 資料讀取與指標運算 (核心升級) ---
+# --- 資料讀取與指標運算 ---
 @st.cache_data(ttl=3600)
 def get_all_symbols_fast():
     try:
@@ -148,7 +148,7 @@ def get_all_symbols_fast():
 
 @st.cache_data(ttl=3600)
 def load_and_process_data():
-    """讀取並計算完整技術指標 (含 KD/MACD/乖離/量比)"""
+    """讀取並計算完整技術指標"""
     query = """
     SELECT sp.date, sp.symbol, sp.open, sp.high, sp.low, sp.close, sp.volume, 
            si.name, si.industry,
@@ -167,7 +167,7 @@ def load_and_process_data():
     df = df.sort_values(['symbol', 'date'])
     grouped = df.groupby('symbol')
 
-    # --- 1. 均線與量能 ---
+    # 均線
     df['MA5'] = grouped['close'].transform(lambda x: x.rolling(5).mean())
     df['MA10'] = grouped['close'].transform(lambda x: x.rolling(10).mean())
     df['MA20'] = grouped['close'].transform(lambda x: x.rolling(20).mean())
@@ -177,7 +177,7 @@ def load_and_process_data():
     df['Vol_MA10'] = grouped['volume'].transform(lambda x: x.rolling(10).mean())
     df['Vol_MA20'] = grouped['volume'].transform(lambda x: x.rolling(20).mean())
 
-    # --- 2. 漲跌與前值 ---
+    # 漲跌與前值
     df['prev_close'] = grouped['close'].shift(1)
     df['prev_volume'] = grouped['volume'].shift(1)
     df['pct_change'] = (df['close'] - df['prev_close']) / df['prev_close'] * 100
@@ -187,11 +187,10 @@ def load_and_process_data():
     df['high_3d'] = grouped['high'].transform(lambda x: x.rolling(3).max())
     df['vol_max_3d'] = grouped['volume'].transform(lambda x: x.rolling(3).max())
 
-    # --- 3. 技術指標 (KD/MACD) ---
+    # 技術指標 (KD/MACD)
     low_min = grouped['low'].transform(lambda x: x.rolling(9).min())
     high_max = grouped['high'].transform(lambda x: x.rolling(9).max())
     df['RSV'] = (df['close'] - low_min) / (high_max - low_min) * 100
-    # Groupby transform for EWM
     df['K'] = grouped['RSV'].transform(lambda x: x.ewm(com=2, adjust=False).mean())
     df['D'] = grouped['K'].transform(lambda x: x.ewm(com=2, adjust=False).mean())
     
@@ -201,7 +200,7 @@ def load_and_process_data():
     df['MACD'] = grouped['DIF'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
     df['MACD_OSC'] = df['DIF'] - df['MACD']
 
-    # --- 4. 衍生指標 ---
+    # 衍生指標
     df['bias_ma5'] = (df['close'] - df['MA5']) / df['MA5'] * 100
     df['bias_ma20'] = (df['close'] - df['MA20']) / df['MA20'] * 100
     df['bias_ma60'] = (df['close'] - df['MA60']) / df['MA60'] * 100
@@ -216,11 +215,9 @@ def load_and_process_data():
     df['above_ma60'] = (df['close'] > df['MA60']).astype(int)
     df['days_above_ma60'] = grouped['above_ma60'].transform(lambda x: x.rolling(177).sum())
 
-    # 籌碼連買
+    # 籌碼
     df['f_buy_pos'] = (df['foreign_net'] > 0).astype(int)
     df['f_buy_streak'] = grouped['f_buy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
-    
-    # 近5日外資買超
     df['f_sum_5d'] = grouped['foreign_net'].transform(lambda x: x.rolling(5).sum())
 
     df['vol_ratio'] = df['volume'] / df['Vol_MA5']
@@ -243,7 +240,6 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name} (評分:{score_val})", "量", "KD", "MACD", "訊號"))
 
-    # K線
     fig.add_trace(go.Candlestick(x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], 
                                  name='K線', increasing_line_color='red', decreasing_line_color='green'), row=1, col=1)
     
@@ -284,7 +280,6 @@ def main_app():
             st.rerun()
         st.markdown("---")
 
-    # State Init
     for k in ['ticker_index', 'last_selected_rows', 'symbol_input', 'query_mode_symbol']:
         if k not in st.session_state: st.session_state[k] = None
     if st.session_state.symbol_input is None: st.session_state.symbol_input = ""
@@ -331,9 +326,34 @@ def main_app():
                 st.session_state.ticker_index = 0
                 st.sidebar.info("🔍"); st.rerun()
 
+    # 🔥 修正清單管理介面
     with st.sidebar.expander("⚙️ 清單管理"):
-        if st.button("建立"): create_list_db(st.text_input("建新清單")); st.rerun()
-        if st.button("刪除", type="primary"): delete_list_db(selected_list); st.rerun()
+        # 建立
+        new_list_name = st.text_input("建立新清單名稱")
+        if st.button("建立清單"):
+            if new_list_name:
+                success, msg = create_list_db(new_list_name)
+                if success: st.success(msg); st.rerun()
+                else: st.error(msg)
+        
+        st.markdown("---")
+        # 改名
+        rename_text = st.text_input("重新命名為")
+        if st.button("確認改名"):
+            if rename_text:
+                success, msg = rename_list_db(selected_list, rename_text)
+                if success: st.success(msg); st.rerun()
+                else: st.error(msg)
+        
+        st.markdown("---")
+        # 刪除
+        if st.button("⚠️ 刪除目前清單", type="primary"):
+            if len(all_lists) > 1:
+                success, msg = delete_list_db(selected_list)
+                if success: st.success(msg); st.rerun()
+                else: st.error(msg)
+            else:
+                st.warning("至少保留一個清單")
 
     st.sidebar.markdown("---")
 
@@ -369,8 +389,7 @@ def main_app():
         st.warning("⚠️ 無資料")
         return
 
-    # --- 🔥 動態訊號產生 (移植自 strongbuy_app v17) ---
-    # 計算排名
+    # --- 運算邏輯 (動態文字) ---
     df_day['rank_pct_1d'] = df_day['pct_change'].rank(ascending=False, method='min')
     df_day['rank_pct_5d'] = df_day['pct_change_5d'].rank(ascending=False, method='min')
     df_day['rank_f_1d'] = df_day['foreign_net'].rank(ascending=False, method='min')
@@ -382,7 +401,6 @@ def main_app():
     def fmt(val, template):
         return val.fillna(0).apply(lambda x: template.format(x))
 
-    # 動態文字準備
     txt_bias_w = fmt(df_day['bias_ma5'], "突破週線{:.2f}%")
     txt_vol_5 = fmt(df_day['vol_bias_ma5'], "較5日量增{:.1f}%")
     txt_f_buy = df_day['f_buy_streak'].fillna(0).astype(int).apply(lambda x: f"外資連買{x}天")
