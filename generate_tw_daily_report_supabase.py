@@ -7,14 +7,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from io import StringIO
-from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine, text  # ✨ 新增：用於連線 Supabase
-
-# 修正 1: 直接使用匯入的 timezone 與 timedelta，不需要再加 datetime. 前綴
-TZ_TW = timezone(timedelta(hours=8))
-# 修正 2: datetime 已經是類別，直接呼叫 .now() 即可，不需要寫 datetime.datetime.now()
-NOW = datetime.now(TZ_TW)
-DATE_STR = NOW.strftime("%Y%m%d")
+from datetime import datetime, timedelta
+from sqlalchemy import create_engine, text
 
 # 忽略期交所憑證警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -22,17 +16,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ===========================
 # 配置區
 # ===========================
-# ✨ 修改：設定 Supabase 連線字串
-# 格式通常為: postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
-# 建議將此設定放在環境變數中，或者在此處直接填入
 SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 
 if not SUPABASE_DB_URL:
     raise RuntimeError("❌ SUPABASE_DB_URL 環境變數未設定")
 
-# 輸出目錄設定
 BASE_OUTPUT_DIR = "tw_stock_dashboard"
-
 TOP_N = 100
 LOOKBACK_DAYS = 365 
 
@@ -48,16 +37,30 @@ INDICES_DICT = {
 CORE_WEIGHTS = ["2330.TW", "2317.TW", "2454.TW"]
 
 # ===========================
-# 1. 資料庫連線輔助
+# 1. 資料庫連線輔助 (單例模式)
 # ===========================
+_db_engine = None
+
 def get_db_engine():
-    """建立並回傳資料庫引擎"""
-    try:
-        engine = create_engine(SUPABASE_DB_URL)
-        return engine
-    except Exception as e:
-        print(f"❌ 資料庫連線設定錯誤: {e}")
-        return None
+    """
+    取得資料庫引擎 (Singleton 模式)
+    避免重複 create_engine 導致連線數爆滿 (MaxClientsInSessionMode)
+    """
+    global _db_engine
+    if _db_engine is None:
+        try:
+            # pool_pre_ping=True 可自動重連斷掉的連線
+            # pool_size=5 限制連線池大小，避免超過 Supabase 上限
+            _db_engine = create_engine(
+                SUPABASE_DB_URL, 
+                pool_size=5, 
+                max_overflow=0,
+                pool_pre_ping=True
+            )
+        except Exception as e:
+            print(f"❌ 資料庫連線設定錯誤: {e}")
+            return None
+    return _db_engine
 
 # ===========================
 # 2. 輔助函式
@@ -104,66 +107,16 @@ def format_display_date(date_str, period_type):
 # 3. 資料抓取 (VIX)
 # ===========================
 def fetch_tw_vix_taifex():
-    """
-    🔥 VIX 三重保險版 (Supabase 整合版)
-    """
     print("   🔍 嘗試抓取台指 VIX...")
-    
     session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.taifex.com.tw/cht/index",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.taifex.com.tw/cht/index"
     }
     session.headers.update(headers)
 
-    # --- Plan A: 期交所歷史資料 ---
+    # Plan C: HiStock (最穩定)
     try:
-        session.get("https://www.taifex.com.tw/cht/index", timeout=5, verify=False)
-        url_hist = "https://www.taifex.com.tw/cht/2/vixData"
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        payload = {'queryStartDate': start_date.strftime('%Y/%m/%d'), 'queryEndDate': end_date.strftime('%Y/%m/%d')}
-        
-        session.headers.update({"Referer": "https://www.taifex.com.tw/cht/2/vixData"})
-        res = session.post(url_hist, data=payload, timeout=10, verify=False)
-        res.encoding = 'utf-8'
-        
-        dfs = pd.read_html(StringIO(res.text))
-        for df in dfs:
-            if "日期" in str(df.columns) and "收盤價" in str(df.columns):
-                df = df.sort_values(by=df.columns[0])
-                latest = df.iloc[-1]
-                price = float(latest['收盤價'])
-                pct = 0.0
-                if len(df) >= 2:
-                    prev = float(df.iloc[-2]['收盤價'])
-                    if prev > 0: pct = ((price - prev) / prev) * 100
-                print(f"      [DEBUG] Plan A (期交所歷史) 成功: {price}")
-                return price, pct
-    except: pass
-
-    # --- Plan B: 期交所即時看板 ---
-    try:
-        url_real = "https://www.taifex.com.tw/cht/7/vixMinNew"
-        res = session.get(url_real, timeout=10, verify=False)
-        res.encoding = 'utf-8'
-        dfs = pd.read_html(StringIO(res.text))
-        for df in dfs:
-            if "指數" in str(df.columns) or "成交指數" in str(df.columns):
-                row = df.iloc[-1]
-                price = 0.0
-                for c in ['成交指數', '指數']:
-                    if c in row: 
-                        price = float(row[c]); break
-                if price > 0:
-                    print(f"      [DEBUG] Plan B (期交所即時) 成功: {price}")
-                    return price, 0.0
-    except: pass
-
-    # --- Plan C: HiStock ---
-    try:
-        print("      [DEBUG] 切換至 Plan C (HiStock)...")
         url_hi = "https://histock.tw/index/VIX"
         res = requests.get(url_hi, headers=headers, timeout=10)
         res.encoding = 'utf-8'
@@ -174,12 +127,8 @@ def fetch_tw_vix_taifex():
                 price = float(row['指數'])
                 raw_pct = str(row.get('幅度', row.get('漲跌幅', 0)))
                 pct = float(raw_pct.replace('%', '').replace('+', ''))
-                print(f"      [DEBUG] Plan C (HiStock) 成功: {price} ({pct}%)")
                 return price, pct
-    except Exception as e:
-        print(f"      [DEBUG] Plan C 失敗: {e}")
-
-    print("      ⚠️ 放棄 VIX 抓取")
+    except: pass
     return None, 0.0
 
 def fetch_indices_data():
@@ -202,7 +151,6 @@ def fetch_indices_data():
             except: pass
     except: pass
     
-    # 🔥 VIX
     vix_val, vix_pct = fetch_tw_vix_taifex()
     if vix_val:
         data_list.append({"symbol": "VIXTWN", "name": "台指 VIX", "industry": "避險", "close": vix_val, "change_pct": vix_pct, "volume": 0})
@@ -210,7 +158,7 @@ def fetch_indices_data():
     return pd.DataFrame(data_list)
 
 # ===========================
-# 4. 資料庫讀取 (改為 Supabase/SQLAlchemy)
+# 4. 資料庫讀取
 # ===========================
 def load_db_data(period_type):
     engine = get_db_engine()
@@ -220,19 +168,15 @@ def load_db_data(period_type):
     latest_date_str = "Unknown"
     
     try:
-        # 使用 context manager 自動管理連線
         with engine.connect() as conn:
             if period_type == 'D':
-                # 取得最新日期
                 res = conn.execute(text("SELECT MAX(date) FROM stock_prices")).fetchone()
                 if res and res[0]:
                     latest_date_str = str(res[0])
                     print(f"   [DEBUG] 資料庫最新日期: {latest_date_str}")
                     
-                    # 讀取當日股價
                     df = pd.read_sql(text(f"SELECT * FROM stock_prices WHERE date = '{latest_date_str}'"), conn)
                     
-                    # 取得前一日日期以計算漲跌
                     res_prev = conn.execute(text(f"SELECT MAX(date) FROM stock_prices WHERE date < '{latest_date_str}'")).fetchone()
                     if res_prev and res_prev[0]:
                         prev_date = str(res_prev[0])
@@ -243,7 +187,6 @@ def load_db_data(period_type):
                         df['change_pct'] = 0.0
             
             else:
-                # 週線或月線
                 table = 'stock_weekly_k' if period_type == 'W' else 'stock_monthly_k'
                 try:
                     res = conn.execute(text(f"SELECT MAX(period) FROM {table}")).fetchone()
@@ -252,47 +195,32 @@ def load_db_data(period_type):
                         df = pd.read_sql(text(f"SELECT * FROM {table} WHERE period = '{latest_date_str}'"), conn)
                         df['change_pct'] = ((df['close'] - df['open']) / df['open']) * 100
                 except Exception as e:
-                    print(f"   [DEBUG] 週/月資料讀取異常: {e}")
+                    print(f"   [DEBUG] 週/月資料讀取異常 (可能未執行聚合): {e}")
 
             if df is None or df.empty:
-                print("   [DEBUG] 載入資料失敗 (df 為空)")
                 return None, "無資料"
 
-            # 讀取股票資訊 (名稱、產業)
             try:
                 info_df = pd.read_sql(text("SELECT symbol, name, industry FROM stock_info"), conn)
                 df = df.merge(info_df, on='symbol', how='left')
                 df['name'] = df['name'].fillna(df['symbol'])
                 df['industry'] = df['industry'].fillna('其他')
             except:
-                # 備用方案：只讀取名稱表
-                try:
-                    names = pd.read_sql(text("SELECT symbol, name FROM stock_names"), conn)
-                    name_map = dict(zip(names['symbol'], names['name']))
-                    df['name'] = df['symbol'].map(name_map).fillna(df['symbol'])
-                except:
-                    df['name'] = df['symbol']
+                df['name'] = df['symbol']
                 df['industry'] = '其他'
 
-            # 讀取法人買賣超 (僅日報需要)
+            # 讀取法人 (僅日報)
             try:
                 if period_type == 'D':
                     inst = pd.read_sql(text(f"SELECT symbol, foreign_net, trust_net, dealer_net FROM institutional_investors WHERE date = '{latest_date_str}'"), conn)
-                elif period_type == 'W' and '/' in latest_date_str:
-                    s, e = latest_date_str.split('/')
-                    inst = pd.read_sql(text(f"SELECT symbol, SUM(foreign_net) as foreign_net, SUM(trust_net) as trust_net, SUM(dealer_net) as dealer_net FROM institutional_investors WHERE date BETWEEN '{s}' AND '{e}' GROUP BY symbol"), conn)
-                elif period_type == 'M':
-                    inst = pd.read_sql(text(f"SELECT symbol, SUM(foreign_net) as foreign_net, SUM(trust_net) as trust_net, SUM(dealer_net) as dealer_net FROM institutional_investors WHERE date LIKE '{latest_date_str}%' GROUP BY symbol"), conn)
-                
-                if not inst.empty:
-                    df = df.merge(inst, on='symbol', how='left')
+                    if not inst.empty:
+                        df = df.merge(inst, on='symbol', how='left')
             except: pass
 
     except Exception as e:
-        print(f"❌ 資料庫錯誤: {e}")
-        return None, "資料庫錯誤"
+        print(f"❌ 資料庫讀取錯誤: {e}")
+        return None, f"資料庫錯誤: {str(e)}"
     
-    # 填補空值
     for c in ['change_pct', 'volume', 'foreign_net', 'trust_net', 'dealer_net']:
         if c in df.columns: df[c] = df[c].fillna(0)
     
@@ -301,13 +229,10 @@ def load_db_data(period_type):
     return df, latest_date_str
 
 # ===========================
-# 5. 核心計算模組 & 圖表
+# 5. 計算 & 圖表
 # ===========================
-
-# --- A. 市場廣度 (多空排列) ---
 def calculate_market_breadth_html():
-    print("📊 正在計算全市場多空排列 (Market Breadth)...")
-    
+    print("📊 正在計算全市場多空排列...")
     engine = get_db_engine()
     if not engine: return "<p>資料庫連線失敗</p>"
 
@@ -343,7 +268,6 @@ def calculate_market_breadth_html():
         'long_bear_pct': (long_bear / total_stocks) * 100
     }).dropna()
     
-    # 抓取大盤
     try:
         twii = yf.download("^TWII", start=start_date, progress=False)
         if not twii.empty:
@@ -383,18 +307,13 @@ def calculate_market_breadth_html():
     )
     return fig.to_html(full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
 
-# --- B. 類股成交比重 ---
 def generate_sector_turnover_html(df):
     if df is None or df.empty or 'industry' not in df.columns:
         return "<div class='card'>無產業數據</div>"
 
     print("📊 正在計算產業資金流向...")
 
-    mask = (
-        ~df['symbol'].str.startswith('00') & 
-        (df['industry'] != '其他') & 
-        (df['industry'].notna())
-    )
+    mask = (~df['symbol'].str.startswith('00') & (df['industry'] != '其他') & (df['industry'].notna()))
     df_sec = df[mask].copy()
     df_sec['turnover'] = df_sec['close'] * df_sec['volume']
     
@@ -407,7 +326,6 @@ def generate_sector_turnover_html(df):
     sector_stats['ratio'] = (sector_stats['total_turnover'] / market_turnover) * 100
     sector_stats = sector_stats.sort_values('ratio', ascending=False)
     
-    # Pie Chart
     top_n = 15
     if len(sector_stats) > top_n:
         top_sec = sector_stats.head(top_n).copy()
@@ -431,7 +349,6 @@ def generate_sector_turnover_html(df):
         marker=dict(colors=px.colors.qualitative.Pastel)
     )])
 
-    # 🔥 版面優化：放大圖表高度 (450)
     fig.update_layout(
         title_text="<b>各產業成交比重 (資金流向)</b>",
         template="plotly_dark",
@@ -442,7 +359,6 @@ def generate_sector_turnover_html(df):
     )
     pie_html = fig.to_html(full_html=False, include_plotlyjs=False, config={'displayModeBar': False})
 
-    # Table
     table_html = f'''
     <div class="card">
         <h3>💰 類股資金成交比重</h3>
@@ -482,7 +398,6 @@ def generate_sector_turnover_html(df):
     
     table_html += "</tbody></table></div></div>"
 
-    # 🔥 佈局優化：使用 1fr 1fr
     return f"""
     <div class="grid-container" style="grid-template-columns: 1fr 1fr;">
         <div class="chart-container" style="display:flex; align-items:center; justify-content:center;">
@@ -533,26 +448,22 @@ def generate_tab_content(period_type):
     df, raw_date_str = load_db_data(period_type)
     display_date = format_display_date(raw_date_str, period_type)
     
-    if df is None: return f"<div class='error-msg'>{raw_date_str}</div>"
+    if df is None: return f"<div class='error-msg'>資料讀取錯誤: {raw_date_str}</div>"
     
     html_parts = []
     
-    # 1. 亞股指數
     df_indices = fetch_indices_data()
     if not df_indices.empty:
         html_parts.append(get_ranking_html(df_indices, "🌏 亞洲股市 & VIX", "symbol", True, lambda x: "", limit=10, show_rank=False))
 
-    # 2. 權值觀察
     df_core = df[df['symbol'].isin(CORE_WEIGHTS)]
     df_no_etf = df[~df['symbol'].str.startswith('00')]
     df_top_val = df_no_etf.sort_values('turnover_billion', ascending=False).head(12)
     df_watch = pd.concat([df_core, df_top_val]).drop_duplicates(subset=['symbol'])
     html_parts.append(get_ranking_html(df_watch, "👀 權值觀察", "turnover_billion", False, lambda x: f"{x:.2f} 億", limit=15))
 
-    # 3. 高價股
     html_parts.append(get_ranking_html(df, "👑 高價股", "close", False, lambda x: f"${x:,.0f}", limit=50))
 
-    # 10 大表格
     min_vol = 500000 if period_type == 'D' else 100000
     df_active = df[df['volume'] > min_vol]
     if df_active.empty: df_active = df 
@@ -577,7 +488,6 @@ def generate_tab_content(period_type):
     final_html = f"<h2>統計日期: {display_date}</h2>"
     
     if not df_indices.empty:
-         # 亞股單獨一行
          final_html += f'<div class="grid-container" style="grid-template-columns: 1fr;">{html_parts[0]}</div>'
          html_parts = html_parts[1:]
     
@@ -590,6 +500,10 @@ def generate_tab_content(period_type):
 def main():
     print("🚀 正在生成台股戰情日報 (Supabase + VIX救援版)...")
     
+    # 1. 取得當日日期字串
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    
     market_breadth_chart = calculate_market_breadth_html()
     
     html_template = f"""
@@ -597,7 +511,8 @@ def main():
     <html lang="zh-TW">
     <head>
         <meta charset="UTF-8">
-        <title>台股戰情日報 {DATE_STR}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>台股戰情日報 {date_str}</title>
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <style>
             :root {{ --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --red: #ff5252; --green: #4caf50; --accent: #2196f3; --border: #333; }}
@@ -611,7 +526,6 @@ def main():
             .tab-content {{ display: none; }}
             .tab-content.active {{ display: block; animation: fadeIn 0.5s; }}
             
-            /* 固定為雙欄佈局 (1:1) */
             .grid-container {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px; }}
             
             @media (max-width: 768px) {{
@@ -653,7 +567,7 @@ def main():
         </style>
     </head>
     <body>
-        <h1>📈 台股戰情日報 ({DATE_STR})</h1>
+        <h1>📈 台股戰情日報 <small style="font-size: 0.6em; color: #888;">{date_str}</small></h1>
         
         <div class="tabs">
             <button class="tab-btn active" onclick="openTab('daily')">今日戰報</button>
@@ -684,7 +598,7 @@ def main():
     """
     
     # 輸出邏輯
-    now = datetime.now()
+    # now 已經在上面定義過
     yyyy = now.strftime("%Y")
     mm = now.strftime("%m")
     yyyymmdd = now.strftime("%Y%m%d")
