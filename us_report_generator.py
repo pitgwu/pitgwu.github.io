@@ -34,14 +34,14 @@ if not os.path.exists(TARGET_DIR):
 INDICES_TICKERS = ["^DJI", "^GSPC", "^IXIC", "^SOX", "^VIX"]
 COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"]
 
-# ✨ [關鍵修正] 完整 24 檔重點觀察股
+# ✨ 完整 24 檔重點觀察股
 WATCHLIST_TICKERS = [
     "NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", 
     "TSM", "AMD", "MU", "QCOM", "TXN", "AMAT", "LRCX", "SMCI", 
     "ORCL", "CRWV", "PLTR", "LLY", "NFLX", "XOM", "BTC-USD", "COIN"
 ]
 
-# TradingView 代號對照表
+# ✨ TradingView 代號對照表 (美股專用)
 TV_MAPPING = {
     # 指數
     "^DJI": "DJ-DJI",
@@ -249,11 +249,11 @@ def generate_gauge_html(sentiment):
     </div>
     """
 
-def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=False):
+def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=False, sort_by_mkt_cap=False):
     if df.empty: return "<p style='color:#666'>無數據</p>"
     col_map = {
         'Rank': '排名', 'Code': '代號', 'Name': '公司名稱', 'Sector': '族群', 'Industry': '細分產業',
-        'Close': '收盤價', 'RVOL': '相對量能',
+        'Close': '收盤價', 'RVOL': '相對量能', 'Market_Cap_B': '市值(B)',
         'Daily_Chg%': '漲跌幅', 'Daily_Amount_B': '成交額(B)', 'Volume': '成交量',
         'Weekly_Chg%': '漲跌幅', 'Weekly_Amount_B': '成交額(B)',
         'Monthly_Chg%': '漲跌幅', 'Monthly_Amount_B': '成交額(B)'
@@ -264,6 +264,7 @@ def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=
 
     base_cols = ['Rank', 'Code', 'Name', 'Industry', 'Close', chg_col]
     if sort_by_rvol: cols_to_use = base_cols + ['RVOL', bar_col]
+    elif sort_by_mkt_cap: cols_to_use = base_cols + ['Market_Cap_B', bar_col]
     else: cols_to_use = base_cols + [bar_col, 'Volume']
     cols_to_use = [c for c in cols_to_use if c in df.columns]
     
@@ -271,13 +272,13 @@ def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=
     display_chg_col = col_map.get(chg_col)
     display_amt_col = col_map.get(bar_col)
     display_rvol_col = '相對量能' if sort_by_rvol else None
+    display_mkt_cap_col = '市值(B)' if sort_by_mkt_cap else None
 
-    # TradingView 超連結生成
+    # ✨ 生成 TradingView 超連結
     def make_tv_link(code):
         code_str = str(code)
-        tv_symbol = code_str # 預設使用代號本身
-        if code_str in TV_MAPPING:
-            tv_symbol = TV_MAPPING[code_str]
+        tv_symbol = code_str 
+        if code_str in TV_MAPPING: tv_symbol = TV_MAPPING[code_str]
         return f'<a href="https://www.tradingview.com/symbols/{tv_symbol}/" target="_blank" style="color: #82cfff; text-decoration: none; font-weight: bold;">{code_str}</a>'
 
     df_show['代號'] = df_show['代號'].apply(make_tv_link)
@@ -299,6 +300,7 @@ def style_dataframe(df, table_id, period_type, is_watchlist=False, sort_by_rvol=
     if display_chg_col: format_dict[display_chg_col] = "{:+.2f}%"
     if display_amt_col: format_dict[display_amt_col] = "${:.2f} B"
     if display_rvol_col: format_dict[display_rvol_col] = "{:.2f}x"
+    if display_mkt_cap_col: format_dict[display_mkt_cap_col] = "${:,.2f} B"
 
     styler = df_show.style.format(format_dict)
     if display_chg_col: styler = styler.map(color_change, subset=[display_chg_col])
@@ -327,11 +329,14 @@ def generate_section_html(df, period_name, title_prefix, is_active=False):
     elif period_name == 'Weekly': col_amt, col_chg = 'Weekly_Amount_B', 'Weekly_Chg%'
     else: col_amt, col_chg = 'Monthly_Amount_B', 'Monthly_Chg%'
 
-    for col in [col_amt, col_chg, 'RVOL']: 
+    for col in [col_amt, col_chg, 'RVOL', 'Market_Cap_B']: 
         if col in df_clean.columns: df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
 
     df_amt = add_rank_column(df_clean.sort_values(by=col_amt, ascending=False).head(50))
     html_amt = style_dataframe(df_amt, f"tbl_{period_name}_amt", period_name)
+
+    df_mkt = add_rank_column(df_clean.sort_values(by='Market_Cap_B', ascending=False).head(20))
+    html_mkt = style_dataframe(df_mkt, f"tbl_{period_name}_mkt", period_name, sort_by_mkt_cap=True, is_watchlist=True)
 
     df_rvol = add_rank_column(df_clean[df_clean[col_amt] > 0.01].sort_values(by='RVOL', ascending=False).head(50))
     html_rvol = style_dataframe(df_rvol, f"tbl_{period_name}_rvol", period_name, sort_by_rvol=True)
@@ -347,6 +352,12 @@ def generate_section_html(df, period_name, title_prefix, is_active=False):
     <div id="tab-{period_name}" class="tab-content" style="display: {display_style};">
         <div class="section">
             <h2 class="section-title">{title_prefix}</h2>
+            
+            <div class="section" style="border: 2px solid #9c27b0; background: #0d1319; margin-bottom: 20px;">
+                <h3 style="color: #ba68c8; margin-top:0;">🏆 美股市值排行 Top 20 (Market Cap Giants)</h3>
+                {html_mkt}
+            </div>
+
             <div class="row">
                 <div class="col">
                     <h3>💰 資金重心 Top 50 (Turnover)</h3>
@@ -393,7 +404,6 @@ def generate_commodities_html(df):
 def generate_watchlist_html(df):
     mask = df['Code'].isin(WATCHLIST_TICKERS)
     df_watch = df[mask].copy()
-    # 確保按照 WATCHLIST_TICKERS 的順序排序，而不是亂跳
     df_watch['Code'] = pd.Categorical(df_watch['Code'], categories=WATCHLIST_TICKERS, ordered=True)
     df_watch = df_watch.sort_values('Code')
     df_watch = add_rank_column(df_watch)
