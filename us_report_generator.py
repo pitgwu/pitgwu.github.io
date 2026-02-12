@@ -8,21 +8,21 @@ import shutil
 # ==========================================
 # 0. 設定與路徑
 # ==========================================
-# 系統時間
-NOW_SYS = datetime.datetime.now()
-DATE_STR = NOW_SYS.strftime("%Y%m%d")
-
 # 定義時區
 TZ_UTC = datetime.timezone.utc
 TZ_TW = datetime.timezone(datetime.timedelta(hours=8))
 
-# 計算美股日期 (US Eastern Time 約為 UTC-5)
+# ✨ [關鍵修正] 使用美股日期 (UTC-5) 作為所有檔案讀寫的基準
 now_utc = datetime.datetime.now(TZ_UTC)
 us_date = now_utc - datetime.timedelta(hours=5)
-US_DATE_STR = us_date.strftime("%Y/%m/%d")
 
-YYYY = NOW_SYS.strftime("%Y")
-MM = NOW_SYS.strftime("%m")
+# 用於顯示 (2026/02/11)
+US_DATE_STR = us_date.strftime("%Y/%m/%d")  
+# 用於檔名 (20260211) -> 確保讀取 CSV 和寫入 HTML 都是這個日期
+US_FILENAME_STR = us_date.strftime("%Y%m%d") 
+
+YYYY = us_date.strftime("%Y")
+MM = us_date.strftime("%m")
 
 BASE_DIR = "us_stock_dashboard"
 TARGET_DIR = os.path.join(BASE_DIR, YYYY, MM)
@@ -31,31 +31,24 @@ if not os.path.exists(TARGET_DIR):
     print(f"❌ 目錄不存在: {TARGET_DIR}，請先執行 us_data_engine.py")
     exit()
 
+# 更新時間 (顯示用 UTC+8)
+now_tw = datetime.datetime.now(TZ_TW)
+NOW_STR_TW = now_tw.strftime("%Y-%m-%d %H:%M:%S")
+
 INDICES_TICKERS = ["^DJI", "^GSPC", "^IXIC", "^SOX", "^VIX"]
 COMMODITY_TICKERS = ["GC=F", "SI=F", "HG=F", "HRC=F", "CL=F"]
 
-# ✨ 完整 24 檔重點觀察股
+# 完整 24 檔重點觀察股
 WATCHLIST_TICKERS = [
     "NVDA", "MSFT", "AAPL", "AMZN", "GOOG", "META", "AVGO", "TSLA", 
     "TSM", "AMD", "MU", "QCOM", "TXN", "AMAT", "LRCX", "SMCI", 
     "ORCL", "CRWV", "PLTR", "LLY", "NFLX", "XOM", "BTC-USD", "COIN"
 ]
 
-# ✨ TradingView 代號對照表 (美股專用)
+# TradingView 代號對照表
 TV_MAPPING = {
-    # 指數
-    "^DJI": "DJ-DJI",
-    "^GSPC": "SP-SPX",
-    "^IXIC": "TVC-IXIC",
-    "^SOX": "PHLX-SOX",
-    "^VIX": "CBOE-VIX",
-    # 原物料 (期貨連續月)
-    "GC=F": "COMEX-GC1!",    # 黃金
-    "SI=F": "COMEX-SI1!",    # 白銀
-    "HG=F": "COMEX-HG1!",    # 銅
-    "HRC=F": "CME-HRC1!",    # 熱軋鋼
-    "CL=F": "NYMEX-CL1!",    # 原油
-    # 加密貨幣
+    "^DJI": "DJ-DJI", "^GSPC": "SP-SPX", "^IXIC": "TVC-IXIC", "^SOX": "PHLX-SOX", "^VIX": "CBOE-VIX",
+    "GC=F": "COMEX-GC1!", "SI=F": "COMEX-SI1!", "HG=F": "COMEX-HG1!", "HRC=F": "CME-HRC1!", "CL=F": "NYMEX-CL1!",
     "BTC-USD": "CRYPTO-BTCUSD"
 }
 
@@ -63,13 +56,13 @@ TV_MAPPING = {
 # 1. 資料讀取函式
 # ==========================================
 def load_sentiment_data():
-    filepath = os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json")
+    filepath = os.path.join(TARGET_DIR, f"sentiment_{US_FILENAME_STR}.json")
     if os.path.exists(filepath):
         with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
     return {"score": 50, "rating": "N/A"}
 
 def load_ai_data():
-    filepath = os.path.join(TARGET_DIR, f"ai_report_{DATE_STR}.json")
+    filepath = os.path.join(TARGET_DIR, f"ai_report_{US_FILENAME_STR}.json")
     if os.path.exists(filepath):
         with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
     return []
@@ -80,17 +73,13 @@ def load_ai_data():
 def generate_treemap_data(df):
     exclude = INDICES_TICKERS + ['BTC-USD']
     df_clean = df[~df['Code'].isin(exclude)].copy()
-    
     for col in ['Daily_Amount_B', 'Daily_Chg%', 'RVOL']:
         df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
-    
     if 'Sector' not in df_clean.columns: df_clean['Sector'] = 'Other'
     if 'Industry' not in df_clean.columns: df_clean['Industry'] = 'Other'
     df_clean['Sector'] = df_clean['Sector'].fillna('Other')
     df_clean['Industry'] = df_clean['Industry'].fillna('Other')
-
     df_top = df_clean[df_clean['Daily_Amount_B'] > 0].sort_values(by='Daily_Amount_B', ascending=False).head(100)
-    
     data = []
     for sector, sector_group in df_top.groupby('Sector'):
         industry_children = []
@@ -98,31 +87,20 @@ def generate_treemap_data(df):
             stock_children = []
             for _, row in industry_group.iterrows():
                 chg = row['Daily_Chg%']
-                if chg >= 3.0:   color = "#006400"
+                if chg >= 3.0: color = "#006400"
                 elif chg >= 1.0: color = "#228B22"
                 elif chg >= 0.0: color = "#4CAF50"
                 elif chg <= -3.0: color = "#8B0000"
                 elif chg <= -1.0: color = "#CC0000"
-                else:             color = "#F44336"
+                else: color = "#F44336"
                 if abs(chg) < 0.1: color = "#444444"
-
                 stock_children.append({
-                    "name": row['Code'],
-                    "company": row['Name'],
+                    "name": row['Code'], "company": row['Name'],
                     "value": [float(row['Daily_Amount_B']), float(row['Daily_Chg%']), float(row['RVOL'])],
-                    "itemStyle": {"color": color},
-                    "label": {"show": True, "formatter": "{b}\n{c}%"} 
+                    "itemStyle": {"color": color}, "label": {"show": True, "formatter": "{b}\n{c}%"} 
                 })
-            industry_children.append({
-                "name": industry,
-                "children": stock_children,
-                "itemStyle": {"borderColor": "#555", "borderWidth": 1, "gapWidth": 1}
-            })
-        data.append({
-            "name": sector,
-            "children": industry_children,
-            "itemStyle": {"borderColor": "#000", "borderWidth": 2, "gapWidth": 2}
-        })
+            industry_children.append({"name": industry, "children": stock_children, "itemStyle": {"borderColor": "#555", "borderWidth": 1, "gapWidth": 1}})
+        data.append({"name": sector, "children": industry_children, "itemStyle": {"borderColor": "#000", "borderWidth": 2, "gapWidth": 2}})
     return json.dumps(data)
 
 def generate_heatmap_script(treemap_data):
@@ -136,9 +114,7 @@ def generate_heatmap_script(treemap_data):
             backgroundColor: '#161b22',
             title: {{ text: '🔥 美股全市場熱力圖', left: 'center', top: 10, textStyle: {{ color: '#fff', fontSize: 20 }} }},
             tooltip: {{
-                backgroundColor: 'rgba(50,50,50,0.95)',
-                borderColor: '#777',
-                textStyle: {{ color: '#fff' }},
+                backgroundColor: 'rgba(50,50,50,0.95)', borderColor: '#777', textStyle: {{ color: '#fff' }},
                 formatter: function (info) {{
                     var value = info.value;
                     if (Array.isArray(value) && value.length >= 3) {{
@@ -156,12 +132,8 @@ def generate_heatmap_script(treemap_data):
             }},
             series: [
                 {{
-                    name: 'US Market',
-                    type: 'treemap',
-                    roam: false,
-                    nodeClick: 'zoomToNode',
-                    width: '95%', height: '85%', top: 60, bottom: 20,
-                    visualDimension: 0, 
+                    name: 'US Market', type: 'treemap', roam: false, nodeClick: 'zoomToNode',
+                    width: '95%', height: '85%', top: 60, bottom: 20, visualDimension: 0, 
                     breadcrumb: {{ show: true, height: 30, itemStyle: {{ textStyle: {{ lineHeight: 30 }} }} }},
                     label: {{
                         show: true,
@@ -422,19 +394,17 @@ def generate_html_report():
     sentiment = load_sentiment_data()
     ai_data = load_ai_data()
     
-    # 更新時間 (UTC+8)
-    now_tw = datetime.datetime.now(TZ_TW)
-    now_str = now_tw.strftime("%Y-%m-%d %H:%M:%S")
-
     try:
-        df_daily = pd.read_csv(os.path.join(TARGET_DIR, f"rank_daily_{DATE_STR}.csv"))
+        # ✨ [關鍵修正] 使用美股日期 (US_FILENAME_STR) 讀取 CSV
+        # 確保讀到的 CSV 與 Data Engine 產生的檔名一致
+        df_daily = pd.read_csv(os.path.join(TARGET_DIR, f"rank_daily_{US_FILENAME_STR}.csv"))
         for col in ['Sector', 'Industry']:
             if col not in df_daily.columns: df_daily[col] = 'Other'
             df_daily[col] = df_daily[col].fillna('Other')
             
-        try: df_weekly = pd.read_csv(os.path.join(TARGET_DIR, f"rank_weekly_{DATE_STR}.csv"))
+        try: df_weekly = pd.read_csv(os.path.join(TARGET_DIR, f"rank_weekly_{US_FILENAME_STR}.csv"))
         except: df_weekly = pd.DataFrame()
-        try: df_monthly = pd.read_csv(os.path.join(TARGET_DIR, f"rank_monthly_{DATE_STR}.csv"))
+        try: df_monthly = pd.read_csv(os.path.join(TARGET_DIR, f"rank_monthly_{US_FILENAME_STR}.csv"))
         except: df_monthly = pd.DataFrame()
     except Exception as e:
         print(f"❌ 讀取 CSV 失敗: {e}"); return
@@ -458,7 +428,7 @@ def generate_html_report():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>美股戰情室 ({DATE_STR})</title>
+        <title>美股戰情室 ({US_DATE_STR})</title>
         <meta charset="utf-8">
         <style>
             body {{ font-family: 'Segoe UI', sans-serif; background-color: #0e1117; color: #e0e0e0; padding: 20px; margin: 0; }}
@@ -508,7 +478,7 @@ def generate_html_report():
     <body>
         <header>
             <h1>美股資金流向戰情日報 <span style="font-size: 0.6em; color: #aaa;">(美股收盤: {US_DATE_STR})</span></h1>
-            <div class="timestamp">更新時間: {now_str} (UTC+8)</div>
+            <div class="timestamp">更新時間: {NOW_STR_TW} (UTC+8)</div>
         </header>
         
         {html_gauge}
@@ -563,10 +533,11 @@ def generate_html_report():
     </html>
     """
     
-    out_path = os.path.join(TARGET_DIR, f"market_dashboard_{DATE_STR}.html")
+    # 使用美股日期命名 HTML
+    out_path = os.path.join(TARGET_DIR, f"market_dashboard_{US_FILENAME_STR}.html")
     with open(out_path, "w", encoding="utf-8") as f: f.write(full_html)
     print(f"✅ 報表生成: {out_path}")
-    create_current_link(f"{YYYY}/{MM}/market_dashboard_{DATE_STR}.html")
+    create_current_link(f"{YYYY}/{MM}/market_dashboard_{US_FILENAME_STR}.html")
 
 if __name__ == "__main__":
     generate_html_report()
