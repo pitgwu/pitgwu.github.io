@@ -473,7 +473,9 @@ def main_app():
     df_day['Total_Score'] = score
     df_day['Signal_List'] = df_day['signals_str'].apply(lambda x: ", ".join(x))
 
-    if min_sc > 0: df_day = df_day[df_day['Total_Score'] >= min_sc]
+    # 🔥 修改：如果是「查詢單一股票」模式，就不套用分數門檻，強制顯示
+    if min_sc > 0 and not st.session_state.query_mode_symbol: 
+        df_day = df_day[df_day['Total_Score'] >= min_sc]
 
     # Sort
     if not st.session_state.query_mode_symbol:
