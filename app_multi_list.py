@@ -69,59 +69,88 @@ def login_page():
                     st.error(msg)
 
 # ===========================
-# 3. DB 操作函式 (Watchlist)
+# 3. DB 操作函式 (Watchlist - 綁定使用者版)
 # ===========================
-def get_all_lists_db():
+def get_all_lists_db(username):
+    """取得特定使用者的所有清單"""
     with engine.connect() as conn:
-        result = conn.execute(text("SELECT name FROM watchlist_menus ORDER BY name"))
+        result = conn.execute(
+            text("SELECT name FROM watchlist_menus WHERE username = :u ORDER BY name"),
+            {"u": username}
+        )
         return [row[0] for row in result]
 
-def get_list_data_db(list_name):
+def get_list_data_db(list_name, username):
+    """取得特定使用者某清單內的股票"""
     query = """
     SELECT i.symbol, i.added_date 
     FROM watchlist_items i
     JOIN watchlist_menus m ON i.menu_id = m.id
-    WHERE m.name = :list_name
+    WHERE m.name = :list_name AND m.username = :u
     ORDER BY i.symbol
     """
     with engine.connect() as conn:
-        df = pd.read_sql(text(query), conn, params={"list_name": list_name})
+        df = pd.read_sql(text(query), conn, params={"list_name": list_name, "u": username})
     return df
 
-def create_list_db(new_name):
-    current_lists = get_all_lists_db()
+def create_list_db(new_name, username):
+    """特定使用者建立新清單"""
+    current_lists = get_all_lists_db(username)
     if len(current_lists) >= 200: return False, "清單數量已達上限"
     if new_name in current_lists: return False, "名稱已存在"
     try:
         with engine.begin() as conn:
-            conn.execute(text("INSERT INTO watchlist_menus (name) VALUES (:name)"), {"name": new_name})
+            conn.execute(
+                text("INSERT INTO watchlist_menus (name, username) VALUES (:name, :u)"), 
+                {"name": new_name, "u": username}
+            )
         return True, "建立成功"
     except Exception as e: return False, str(e)
 
-def rename_list_db(old_name, new_name):
+def rename_list_db(old_name, new_name, username):
+    """重新命名特定使用者的清單"""
     try:
         with engine.begin() as conn:
-            exists = conn.execute(text("SELECT 1 FROM watchlist_menus WHERE name = :new"), {"new": new_name}).scalar()
+            exists = conn.execute(
+                text("SELECT 1 FROM watchlist_menus WHERE name = :new AND username = :u"), 
+                {"new": new_name, "u": username}
+            ).scalar()
             if exists: return False, "名稱已存在"
-            conn.execute(text("UPDATE watchlist_menus SET name = :new WHERE name = :old"), {"new": new_name, "old": old_name})
+            
+            conn.execute(
+                text("UPDATE watchlist_menus SET name = :new WHERE name = :old AND username = :u"), 
+                {"new": new_name, "old": old_name, "u": username}
+            )
         return True, "改名成功"
     except Exception as e: return False, str(e)
 
-def delete_list_db(list_name):
+def delete_list_db(list_name, username):
+    """刪除特定使用者的清單"""
     try:
         with engine.begin() as conn:
-            conn.execute(text("DELETE FROM watchlist_menus WHERE name = :name"), {"name": list_name})
+            conn.execute(
+                text("DELETE FROM watchlist_menus WHERE name = :name AND username = :u"), 
+                {"name": list_name, "u": username}
+            )
         return True, "刪除成功"
     except Exception as e: return False, str(e)
 
-def add_stock_db(list_name, symbol):
+def add_stock_db(list_name, symbol, username):
+    """加入股票到特定使用者的清單"""
     added_date = datetime.now().strftime('%Y-%m-%d')
     try:
         with engine.begin() as conn:
-            menu_id = conn.execute(text("SELECT id FROM watchlist_menus WHERE name = :name"), {"name": list_name}).scalar()
+            # 確保取得的是該使用者的 menu_id
+            menu_id = conn.execute(
+                text("SELECT id FROM watchlist_menus WHERE name = :name AND username = :u"), 
+                {"name": list_name, "u": username}
+            ).scalar()
+            
             if not menu_id: return False, "清單不存在"
+            
             count = conn.execute(text("SELECT COUNT(*) FROM watchlist_items WHERE menu_id = :mid"), {"mid": menu_id}).scalar()
             if count >= 1000: return False, "數量達上限"
+            
             conn.execute(text("""
                 INSERT INTO watchlist_items (menu_id, symbol, added_date) VALUES (:mid, :sym, :date)
                 ON CONFLICT (menu_id, symbol) DO NOTHING
@@ -129,11 +158,15 @@ def add_stock_db(list_name, symbol):
         return True, "加入成功"
     except Exception as e: return False, str(e)
 
-def remove_stock_db(list_name, symbol):
+def remove_stock_db(list_name, symbol, username):
+    """從特定使用者的清單移除股票"""
     try:
         with engine.begin() as conn:
-            conn.execute(text("DELETE FROM watchlist_items WHERE symbol=:s AND menu_id=(SELECT id FROM watchlist_menus WHERE name=:n)"), 
-                         {"s": symbol, "n": list_name})
+            conn.execute(text("""
+                DELETE FROM watchlist_items 
+                WHERE symbol=:s 
+                AND menu_id=(SELECT id FROM watchlist_menus WHERE name=:n AND username=:u)
+            """), {"s": symbol, "n": list_name, "u": username})
         return True, "移除成功"
     except Exception as e: return False, str(e)
 
@@ -275,8 +308,11 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
 # 4. 主應用程式邏輯
 # ===========================
 def main_app():
+    # 取得當下登入的使用者名稱
+    current_user = st.session_state['username']
+
     with st.sidebar:
-        st.markdown(f"👤 **{st.session_state['username']}** ({st.session_state['role']})")
+        st.markdown(f"👤 **{current_user}** ({st.session_state['role']})")
         if st.button("🚪 登出"):
             st.session_state['logged_in'] = False
             st.session_state['role'] = None
@@ -292,13 +328,17 @@ def main_app():
 
     # --- 側邊欄：股票管理 ---
     st.sidebar.header("📝 股票管理")
-    all_lists = get_all_lists_db()
+    
+    # 🔥 取得該使用者的清單
+    all_lists = get_all_lists_db(current_user)
     if not all_lists:
-        create_list_db("預設清單")
-        all_lists = get_all_lists_db()
+        create_list_db("預設清單", current_user)
+        all_lists = get_all_lists_db(current_user)
     
     selected_list = st.sidebar.selectbox("📂 選擇清單", all_lists, index=0)
-    watchlist_df = get_list_data_db(selected_list)
+    
+    # 🔥 取得該使用者所選清單的內容
+    watchlist_df = get_list_data_db(selected_list, current_user)
     current_symbols = watchlist_df['symbol'].tolist()
 
     with st.sidebar.expander(f"📋 查看清單 ({len(current_symbols)})", expanded=True):
@@ -316,13 +356,13 @@ def main_app():
             st.session_state.query_mode_symbol = None
             code = resolve_stock_symbol(inp_code, valid_symbols_set)
             if code and code not in current_symbols:
-                if add_stock_db(selected_list, code): st.sidebar.success("✅"); st.rerun()
+                if add_stock_db(selected_list, code, current_user): st.sidebar.success("✅"); st.rerun()
             else: st.sidebar.warning("❌")
         if c2.button("刪"):
             st.session_state.query_mode_symbol = None
             code = resolve_stock_symbol(inp_code, valid_symbols_set) or inp_code
             if code in current_symbols:
-                if remove_stock_db(selected_list, code): st.sidebar.success("🗑️"); st.session_state.symbol_input = ""; st.rerun()
+                if remove_stock_db(selected_list, code, current_user): st.sidebar.success("🗑️"); st.session_state.symbol_input = ""; st.rerun()
         if c3.button("查"):
             code = resolve_stock_symbol(inp_code, valid_symbols_set)
             if code:
@@ -330,25 +370,25 @@ def main_app():
                 st.session_state.ticker_index = 0
                 st.sidebar.info("🔍"); st.rerun()
 
-    # 🔥 修正 UI：將輸入框移出按鈕邏輯
+    # 清單管理
     with st.sidebar.expander("⚙️ 清單管理"):
         new_list_name = st.text_input("建立新清單名稱")
         if st.button("建立"): 
             if new_list_name:
-                success, msg = create_list_db(new_list_name)
+                success, msg = create_list_db(new_list_name, current_user)
                 if success: st.success(msg); st.rerun()
                 else: st.error(msg)
         
         rename_text = st.text_input("改名為")
         if st.button("改名"):
             if rename_text:
-                success, msg = rename_list_db(selected_list, rename_text)
+                success, msg = rename_list_db(selected_list, rename_text, current_user)
                 if success: st.success(msg); st.rerun()
                 else: st.error(msg)
             
         if st.button("⚠️ 刪除", type="primary"):
             if len(all_lists) > 1:
-                if delete_list_db(selected_list): st.rerun()
+                if delete_list_db(selected_list, current_user): st.rerun()
             else: st.warning("至少保留一個清單")
 
     st.sidebar.markdown("---")
@@ -360,8 +400,6 @@ def main_app():
     avail_dates = sorted(df_full['date'].dt.date.unique(), reverse=True)
     st.sidebar.header("📅 戰情參數")
     sel_date = st.sidebar.selectbox("日期", avail_dates, 0)
-    
-    # 🔥 修正預設值：強勢總分, 門檻4
     sort_opt = st.sidebar.selectbox("排序", ["強勢總分", "加入日期", "漲跌幅", "外資買超"])
     min_sc = st.sidebar.number_input("分數門檻", 0, 50, 4)
     
@@ -388,7 +426,6 @@ def main_app():
         return
 
     # --- 🔥 動態訊號產生 ---
-    # 計算排名
     df_day['rank_pct_1d'] = df_day['pct_change'].rank(ascending=False, method='min')
     df_day['rank_pct_5d'] = df_day['pct_change_5d'].rank(ascending=False, method='min')
     df_day['rank_f_1d'] = df_day['foreign_net'].rank(ascending=False, method='min')
@@ -400,7 +437,6 @@ def main_app():
     def fmt(val, template):
         return val.fillna(0).apply(lambda x: template.format(x))
 
-    # 動態文字準備
     txt_bias_w = fmt(df_day['bias_ma5'], "突破週線{:.2f}%")
     txt_vol_5 = fmt(df_day['vol_bias_ma5'], "較5日量增{:.1f}%")
     txt_f_buy = df_day['f_buy_streak'].fillna(0).astype(int).apply(lambda x: f"外資連買{x}天")
