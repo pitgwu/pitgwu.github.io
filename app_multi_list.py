@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import uuid
-import bcrypt # 需 pip install bcrypt
+import bcrypt
 
 # ===========================
 # 1. 資料庫連線與全域設定
@@ -30,7 +30,6 @@ engine = get_engine()
 # 2. 身份驗證模組
 # ===========================
 def check_login(username, password):
-    """驗證帳號密碼，並檢查 Active 狀態"""
     try:
         with engine.connect() as conn:
             result = conn.execute(
@@ -41,10 +40,8 @@ def check_login(username, password):
             if result:
                 db_hash, role, active = result
                 if bcrypt.checkpw(password.encode('utf-8'), db_hash.encode('utf-8')):
-                    if active == 'yes':
-                        return True, role, "登入成功"
-                    else:
-                        return False, None, "⚠️ 您的帳號尚未開通，請聯繫管理員"
+                    if active == 'yes': return True, role, "登入成功"
+                    else: return False, None, "⚠️ 您的帳號尚未開通，請聯繫管理員"
             return False, None, "❌ 帳號或密碼錯誤"
     except Exception as e:
         return False, None, f"系統錯誤: {e}"
@@ -69,10 +66,9 @@ def login_page():
                     st.error(msg)
 
 # ===========================
-# 3. DB 操作函式 (Watchlist - 綁定使用者版)
+# 3. DB 操作函式 
 # ===========================
 def get_all_lists_db(username):
-    """取得特定使用者的所有清單"""
     with engine.connect() as conn:
         result = conn.execute(
             text("SELECT name FROM watchlist_menus WHERE username = :u ORDER BY name"),
@@ -81,7 +77,6 @@ def get_all_lists_db(username):
         return [row[0] for row in result]
 
 def get_list_data_db(list_name, username):
-    """取得特定使用者某清單內的股票"""
     query = """
     SELECT i.symbol, i.added_date 
     FROM watchlist_items i
@@ -140,12 +135,9 @@ def add_stock_db(list_name, symbol, username):
                 text("SELECT id FROM watchlist_menus WHERE name = :name AND username = :u"), 
                 {"name": list_name, "u": username}
             ).scalar()
-            
             if not menu_id: return False, "清單不存在"
-            
             count = conn.execute(text("SELECT COUNT(*) FROM watchlist_items WHERE menu_id = :mid"), {"mid": menu_id}).scalar()
             if count >= 1000: return False, "數量達上限"
-            
             conn.execute(text("""
                 INSERT INTO watchlist_items (menu_id, symbol, added_date) VALUES (:mid, :sym, :date)
                 ON CONFLICT (menu_id, symbol) DO NOTHING
@@ -166,45 +158,30 @@ def remove_stock_db(list_name, symbol, username):
 
 # --- 資料讀取與指標運算 ---
 @st.cache_data(ttl=3600)
-def get_all_symbols_fast():
-    try:
-        with engine.connect() as conn:
-            df = pd.read_sql("SELECT symbol FROM stock_info", conn)
-        return set(df['symbol'].astype(str).str.strip().unique())
-    except: return set()
-
-@st.cache_data(ttl=3600)
 def get_stock_mapping():
-    """建立名稱、短代號與完整代號的對照表"""
     try:
         with engine.connect() as conn:
             df = pd.read_sql("SELECT symbol, name FROM stock_info", conn)
-        
         mapping = {}
         for _, row in df.iterrows():
             sym = str(row['symbol']).strip()
             name = str(row['name']).strip()
             short_code = sym.split('.')[0]
-            
             mapping[sym.upper()] = sym           
             mapping[short_code.upper()] = sym    
             mapping[name.upper()] = sym          
         return mapping
-    except: 
-        return {}
+    except: return {}
 
 def resolve_stock_symbol(input_val, mapping):
-    """透過對照表解析使用者輸入，回傳完整代號"""
     if not input_val: return None
-    val = str(input_val).strip().upper()
-    return mapping.get(val, None)
+    return mapping.get(str(input_val).strip().upper(), None)
 
 @st.cache_data(ttl=3600)
 def load_and_process_data():
     query = """
     SELECT sp.date, sp.symbol, sp.open, sp.high, sp.low, sp.close, sp.volume, 
-           si.name, si.industry,
-           COALESCE(ii.foreign_net, 0) as foreign_net
+           si.name, si.industry, COALESCE(ii.foreign_net, 0) as foreign_net
     FROM stock_prices sp
     JOIN stock_info si ON sp.symbol = si.symbol
     LEFT JOIN institutional_investors ii ON sp.date = ii.date AND sp.symbol = ii.symbol
@@ -219,7 +196,6 @@ def load_and_process_data():
     df = df.sort_values(['symbol', 'date'])
     grouped = df.groupby('symbol')
 
-    # 1. 均線與量能
     df['MA5'] = grouped['close'].transform(lambda x: x.rolling(5).mean())
     df['MA10'] = grouped['close'].transform(lambda x: x.rolling(10).mean())
     df['MA20'] = grouped['close'].transform(lambda x: x.rolling(20).mean())
@@ -229,17 +205,14 @@ def load_and_process_data():
     df['Vol_MA10'] = grouped['volume'].transform(lambda x: x.rolling(10).mean())
     df['Vol_MA20'] = grouped['volume'].transform(lambda x: x.rolling(20).mean())
 
-    # 2. 漲跌與前值
     df['prev_close'] = grouped['close'].shift(1)
     df['prev_volume'] = grouped['volume'].shift(1)
     df['pct_change'] = (df['close'] - df['prev_close']) / df['prev_close'] * 100
     df['pct_change_3d'] = grouped['close'].pct_change(3) * 100
     df['pct_change_5d'] = grouped['close'].pct_change(5) * 100
-    
     df['high_3d'] = grouped['high'].transform(lambda x: x.rolling(3).max())
     df['vol_max_3d'] = grouped['volume'].transform(lambda x: x.rolling(3).max())
 
-    # 3. 技術指標 (KD/MACD)
     low_min = grouped['low'].transform(lambda x: x.rolling(9).min())
     high_max = grouped['high'].transform(lambda x: x.rolling(9).max())
     df['RSV'] = (df['close'] - low_min) / (high_max - low_min) * 100
@@ -252,7 +225,6 @@ def load_and_process_data():
     df['MACD'] = grouped['DIF'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
     df['MACD_OSC'] = df['DIF'] - df['MACD']
 
-    # 4. 衍生指標
     df['bias_ma5'] = (df['close'] - df['MA5']) / df['MA5'] * 100
     df['bias_ma20'] = (df['close'] - df['MA20']) / df['MA20'] * 100
     df['bias_ma60'] = (df['close'] - df['MA60']) / df['MA60'] * 100
@@ -267,7 +239,6 @@ def load_and_process_data():
     df['above_ma60'] = (df['close'] > df['MA60']).astype(int)
     df['days_above_ma60'] = grouped['above_ma60'].transform(lambda x: x.rolling(177).sum())
 
-    # 5. 籌碼
     df['f_buy_pos'] = (df['foreign_net'] > 0).astype(int)
     df['f_buy_streak'] = grouped['f_buy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
     df['f_sum_5d'] = grouped['foreign_net'].transform(lambda x: x.rolling(5).sum())
@@ -276,7 +247,7 @@ def load_and_process_data():
     return df
 
 # --- 繪圖輔助 ---
-def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profile=False):
+def plot_stock_kline(df_stock, symbol, name, active_signals_text):
     df_plot = df_stock.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
     score_val = active_signals_text.count(',') + 1 if active_signals_text else 0
@@ -285,7 +256,6 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name} (評分:{score_val})", "量", "KD", "MACD", "訊號"))
 
-    # K線 (紅漲綠跌)
     fig.add_trace(go.Candlestick(
         x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], 
         name='K線', increasing_line_color='red', decreasing_line_color='green'
@@ -317,8 +287,62 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
     return fig
 
 # ===========================
-# 4. 主應用程式邏輯
+# 4. 主應用程式邏輯與 Callbacks
 # ===========================
+def action_search():
+    """執行查詢的回呼函數"""
+    inp = st.session_state.get('symbol_input_widget', '').strip()
+    mapping = get_stock_mapping()
+    code = resolve_stock_symbol(inp, mapping)
+    
+    if code:
+        st.session_state.query_mode_symbol = code
+        st.session_state.ticker_index = 0
+        st.session_state.symbol_input_widget = code # 🔥 將正確代碼蓋回文字方塊
+        st.session_state.action_msg = ("info", f"🔍 成功查詢：{code}")
+    else:
+        st.session_state.action_msg = ("warning", "❌ 找不到該股票")
+
+def action_add():
+    """執行新增的回呼函數"""
+    sel_list = st.session_state.get('selected_list_widget')
+    usr = st.session_state.get('username')
+    inp = st.session_state.get('symbol_input_widget', '').strip()
+    mapping = get_stock_mapping()
+    code = resolve_stock_symbol(inp, mapping)
+    
+    if code:
+        df = get_list_data_db(sel_list, usr)
+        syms = df['symbol'].tolist()
+        if code not in syms:
+            if add_stock_db(sel_list, code, usr):
+                st.session_state.symbol_input_widget = code # 🔥 將正確代碼蓋回文字方塊
+                st.session_state.action_msg = ("success", f"✅ {code} 加入成功")
+        else:
+            st.session_state.action_msg = ("warning", "❌ 該股票已在清單中")
+    else:
+        st.session_state.action_msg = ("warning", "❌ 找不到該股票")
+    st.session_state.query_mode_symbol = None
+
+def action_del():
+    """執行刪除的回呼函數"""
+    sel_list = st.session_state.get('selected_list_widget')
+    usr = st.session_state.get('username')
+    inp = st.session_state.get('symbol_input_widget', '').strip()
+    mapping = get_stock_mapping()
+    code = resolve_stock_symbol(inp, mapping) or inp
+    
+    df = get_list_data_db(sel_list, usr)
+    syms = df['symbol'].tolist()
+    if code in syms:
+        if remove_stock_db(sel_list, code, usr):
+            st.session_state.symbol_input_widget = "" # 🔥 清空文字方塊
+            st.session_state.action_msg = ("success", f"🗑️ {code} 移除成功")
+    else:
+        st.session_state.action_msg = ("warning", "❌ 清單中無此股票")
+    st.session_state.query_mode_symbol = None
+
+
 def main_app():
     current_user = st.session_state['username']
 
@@ -330,12 +354,12 @@ def main_app():
             st.rerun()
         st.markdown("---")
 
-    # State Init
-    for k in ['ticker_index', 'last_selected_rows', 'symbol_input', 'query_mode_symbol']:
+    # 🔥 State 初始化
+    for k in ['ticker_index', 'query_mode_symbol']:
         if k not in st.session_state: st.session_state[k] = None
-    if st.session_state.symbol_input is None: st.session_state.symbol_input = ""
-
-    stock_mapping = get_stock_mapping()
+    if 'symbol_input_widget' not in st.session_state: st.session_state.symbol_input_widget = ""
+    if 'last_df_selection' not in st.session_state: st.session_state.last_df_selection = []
+    if 'action_msg' not in st.session_state: st.session_state.action_msg = None
 
     # --- 側邊欄：股票管理 ---
     st.sidebar.header("📝 股票管理")
@@ -345,56 +369,43 @@ def main_app():
         create_list_db("預設清單", current_user)
         all_lists = get_all_lists_db(current_user)
     
-    selected_list = st.sidebar.selectbox("📂 選擇清單", all_lists, index=0)
+    st.sidebar.selectbox("📂 選擇清單", all_lists, index=0, key="selected_list_widget")
+    selected_list = st.session_state.selected_list_widget
     
     watchlist_df = get_list_data_db(selected_list, current_user)
     current_symbols = watchlist_df['symbol'].tolist()
 
-    # 點擊表格時，更新輸入框的值
     with st.sidebar.expander(f"📋 查看清單 ({len(current_symbols)})", expanded=True):
         event = st.dataframe(watchlist_df, hide_index=True, on_select="rerun", selection_mode="single-row", use_container_width=True)
-        if len(event.selection.rows) > 0:
-            idx = event.selection.rows[0]
-            if idx < len(watchlist_df): 
-                st.session_state.symbol_input = watchlist_df.iloc[idx]['symbol']
+        
+        # 🔥 表格防呆邏輯：只有當使用者真的點了不同的 Row 時，才蓋掉文字方塊
+        current_selection = event.selection.rows
+        if current_selection != st.session_state.last_df_selection:
+            st.session_state.last_df_selection = current_selection
+            if len(current_selection) > 0:
+                idx = current_selection[0]
+                if idx < len(watchlist_df): 
+                    st.session_state.symbol_input_widget = watchlist_df.iloc[idx]['symbol']
 
-    # 🔥 關鍵修復：不綁定 key，改用 value 來避免 StreamlitAPIException
+    # --- 輸入框與按鈕 (綁定 Callback) ---
     col_in, col_act = st.sidebar.columns([1.5, 2])
-    inp_code = col_in.text_input("代號/名稱", value=st.session_state.symbol_input).strip()
+    col_in.text_input("代號/名稱", key="symbol_input_widget")
     
-    # 即時同步使用者的輸入內容回 session_state
-    st.session_state.symbol_input = inp_code
-
     with col_act:
         c1, c2, c3 = st.columns(3)
-        
-        if c1.button("新"):
-            st.session_state.query_mode_symbol = None
-            code = resolve_stock_symbol(inp_code, stock_mapping)
-            if code and code not in current_symbols:
-                if add_stock_db(selected_list, code, current_user): 
-                    st.session_state.symbol_input = code # 將完整代碼回寫文字方塊
-                    st.sidebar.success("✅"); st.rerun()
-            else: st.sidebar.warning("❌")
-            
-        if c2.button("刪"):
-            st.session_state.query_mode_symbol = None
-            code = resolve_stock_symbol(inp_code, stock_mapping) or inp_code
-            if code in current_symbols:
-                if remove_stock_db(selected_list, code, current_user): 
-                    st.session_state.symbol_input = "" # 清空文字方塊
-                    st.sidebar.success("🗑️"); st.rerun()
-                    
-        if c3.button("查"):
-            code = resolve_stock_symbol(inp_code, stock_mapping)
-            if code:
-                st.session_state.query_mode_symbol = code
-                st.session_state.ticker_index = 0
-                st.session_state.symbol_input = code # 將完整代碼回寫文字方塊
-                st.sidebar.info("🔍"); st.rerun()
-            else:
-                st.sidebar.warning("❌ 找不到該股票")
+        c1.button("新", on_click=action_add)
+        c2.button("刪", on_click=action_del)
+        c3.button("查", on_click=action_search)
 
+    # 顯示操作訊息
+    if st.session_state.action_msg:
+        m_type, m_txt = st.session_state.action_msg
+        if m_type == "success": st.sidebar.success(m_txt)
+        elif m_type == "warning": st.sidebar.warning(m_txt)
+        elif m_type == "info": st.sidebar.info(m_txt)
+        st.session_state.action_msg = None
+
+    # 清單管理
     with st.sidebar.expander("⚙️ 清單管理"):
         new_list_name = st.text_input("建立新清單名稱")
         if st.button("建立"): 
@@ -446,7 +457,7 @@ def main_app():
         df_day['added_date'] = '查詢'
 
     if df_day.empty:
-        st.warning("⚠️ 無資料")
+        st.warning("⚠️ 無符合資料")
         return
 
     # --- 動態訊號產生 ---
@@ -497,7 +508,6 @@ def main_app():
     df_day['Total_Score'] = score
     df_day['Signal_List'] = df_day['signals_str'].apply(lambda x: ", ".join(x))
 
-    # 🔥 修復 Bug：如果是「查詢模式」，則強制顯示，略過分數過濾
     if min_sc > 0 and not st.session_state.query_mode_symbol: 
         df_day = df_day[df_day['Total_Score'] >= min_sc]
 
