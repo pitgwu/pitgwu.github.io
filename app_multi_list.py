@@ -94,7 +94,6 @@ def get_list_data_db(list_name, username):
     return df
 
 def create_list_db(new_name, username):
-    """特定使用者建立新清單"""
     current_lists = get_all_lists_db(username)
     if len(current_lists) >= 200: return False, "清單數量已達上限"
     if new_name in current_lists: return False, "名稱已存在"
@@ -108,7 +107,6 @@ def create_list_db(new_name, username):
     except Exception as e: return False, str(e)
 
 def rename_list_db(old_name, new_name, username):
-    """重新命名特定使用者的清單"""
     try:
         with engine.begin() as conn:
             exists = conn.execute(
@@ -125,7 +123,6 @@ def rename_list_db(old_name, new_name, username):
     except Exception as e: return False, str(e)
 
 def delete_list_db(list_name, username):
-    """刪除特定使用者的清單"""
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -136,7 +133,6 @@ def delete_list_db(list_name, username):
     except Exception as e: return False, str(e)
 
 def add_stock_db(list_name, symbol, username):
-    """加入股票到特定使用者的清單"""
     added_date = datetime.now().strftime('%Y-%m-%d')
     try:
         with engine.begin() as conn:
@@ -158,7 +154,6 @@ def add_stock_db(list_name, symbol, username):
     except Exception as e: return False, str(e)
 
 def remove_stock_db(list_name, symbol, username):
-    """從特定使用者的清單移除股票"""
     try:
         with engine.begin() as conn:
             conn.execute(text("""
@@ -171,14 +166,16 @@ def remove_stock_db(list_name, symbol, username):
 
 # --- 資料讀取與指標運算 ---
 @st.cache_data(ttl=3600)
+def get_all_symbols_fast():
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql("SELECT symbol FROM stock_info", conn)
+        return set(df['symbol'].astype(str).str.strip().unique())
+    except: return set()
+
+@st.cache_data(ttl=3600)
 def get_stock_mapping():
-    """
-    🔥 新增：建立「股票名稱」、「短代號」對應到「完整代號」的字典
-    例如：
-      "環球晶" -> "6488.TWO"
-      "6488"  -> "6488.TWO"
-      "6488.TWO" -> "6488.TWO"
-    """
+    """建立名稱、短代號與完整代號的對照表"""
     try:
         with engine.connect() as conn:
             df = pd.read_sql("SELECT symbol, name FROM stock_info", conn)
@@ -189,22 +186,21 @@ def get_stock_mapping():
             name = str(row['name']).strip()
             short_code = sym.split('.')[0]
             
-            mapping[sym.upper()] = sym           # 完整代號
-            mapping[short_code.upper()] = sym    # 短代號 (4碼)
-            mapping[name.upper()] = sym          # 中文名稱
+            mapping[sym.upper()] = sym           
+            mapping[short_code.upper()] = sym    
+            mapping[name.upper()] = sym          
         return mapping
     except: 
         return {}
 
 def resolve_stock_symbol(input_val, mapping):
-    """🔥 透過對照表解析使用者輸入，回傳完整代號"""
+    """透過對照表解析使用者輸入，回傳完整代號"""
     if not input_val: return None
     val = str(input_val).strip().upper()
     return mapping.get(val, None)
 
 @st.cache_data(ttl=3600)
 def load_and_process_data():
-    """讀取並計算完整技術指標"""
     query = """
     SELECT sp.date, sp.symbol, sp.open, sp.high, sp.low, sp.close, sp.volume, 
            si.name, si.industry,
@@ -339,7 +335,6 @@ def main_app():
         if k not in st.session_state: st.session_state[k] = None
     if st.session_state.symbol_input is None: st.session_state.symbol_input = ""
 
-    # 🔥 取得字典對照表
     stock_mapping = get_stock_mapping()
 
     # --- 側邊欄：股票管理 ---
@@ -355,23 +350,30 @@ def main_app():
     watchlist_df = get_list_data_db(selected_list, current_user)
     current_symbols = watchlist_df['symbol'].tolist()
 
+    # 點擊表格時，更新輸入框的值
     with st.sidebar.expander(f"📋 查看清單 ({len(current_symbols)})", expanded=True):
         event = st.dataframe(watchlist_df, hide_index=True, on_select="rerun", selection_mode="single-row", use_container_width=True)
         if len(event.selection.rows) > 0:
             idx = event.selection.rows[0]
-            if idx < len(watchlist_df): st.session_state.symbol_input = watchlist_df.iloc[idx]['symbol']
+            if idx < len(watchlist_df): 
+                st.session_state.symbol_input = watchlist_df.iloc[idx]['symbol']
 
+    # 🔥 關鍵修復：不綁定 key，改用 value 來避免 StreamlitAPIException
     col_in, col_act = st.sidebar.columns([1.5, 2])
-    inp_code = col_in.text_input("代號/名稱", key="symbol_input").strip()
+    inp_code = col_in.text_input("代號/名稱", value=st.session_state.symbol_input).strip()
     
+    # 即時同步使用者的輸入內容回 session_state
+    st.session_state.symbol_input = inp_code
+
     with col_act:
         c1, c2, c3 = st.columns(3)
+        
         if c1.button("新"):
             st.session_state.query_mode_symbol = None
             code = resolve_stock_symbol(inp_code, stock_mapping)
             if code and code not in current_symbols:
                 if add_stock_db(selected_list, code, current_user): 
-                    st.session_state.symbol_input = code # 更新文字方塊
+                    st.session_state.symbol_input = code # 將完整代碼回寫文字方塊
                     st.sidebar.success("✅"); st.rerun()
             else: st.sidebar.warning("❌")
             
@@ -380,19 +382,19 @@ def main_app():
             code = resolve_stock_symbol(inp_code, stock_mapping) or inp_code
             if code in current_symbols:
                 if remove_stock_db(selected_list, code, current_user): 
-                    st.sidebar.success("🗑️"); st.session_state.symbol_input = ""; st.rerun()
+                    st.session_state.symbol_input = "" # 清空文字方塊
+                    st.sidebar.success("🗑️"); st.rerun()
                     
         if c3.button("查"):
             code = resolve_stock_symbol(inp_code, stock_mapping)
             if code:
                 st.session_state.query_mode_symbol = code
                 st.session_state.ticker_index = 0
-                st.session_state.symbol_input = code # 更新文字方塊
+                st.session_state.symbol_input = code # 將完整代碼回寫文字方塊
                 st.sidebar.info("🔍"); st.rerun()
             else:
                 st.sidebar.warning("❌ 找不到該股票")
 
-    # 清單管理
     with st.sidebar.expander("⚙️ 清單管理"):
         new_list_name = st.text_input("建立新清單名稱")
         if st.button("建立"): 
