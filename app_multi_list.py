@@ -140,7 +140,6 @@ def add_stock_db(list_name, symbol, username):
     added_date = datetime.now().strftime('%Y-%m-%d')
     try:
         with engine.begin() as conn:
-            # 確保取得的是該使用者的 menu_id
             menu_id = conn.execute(
                 text("SELECT id FROM watchlist_menus WHERE name = :name AND username = :u"), 
                 {"name": list_name, "u": username}
@@ -172,12 +171,36 @@ def remove_stock_db(list_name, symbol, username):
 
 # --- 資料讀取與指標運算 ---
 @st.cache_data(ttl=3600)
-def get_all_symbols_fast():
+def get_stock_mapping():
+    """
+    🔥 新增：建立「股票名稱」、「短代號」對應到「完整代號」的字典
+    例如：
+      "環球晶" -> "6488.TWO"
+      "6488"  -> "6488.TWO"
+      "6488.TWO" -> "6488.TWO"
+    """
     try:
         with engine.connect() as conn:
-            df = pd.read_sql("SELECT symbol FROM stock_info", conn)
-        return set(df['symbol'].astype(str).str.strip().unique())
-    except: return set()
+            df = pd.read_sql("SELECT symbol, name FROM stock_info", conn)
+        
+        mapping = {}
+        for _, row in df.iterrows():
+            sym = str(row['symbol']).strip()
+            name = str(row['name']).strip()
+            short_code = sym.split('.')[0]
+            
+            mapping[sym.upper()] = sym           # 完整代號
+            mapping[short_code.upper()] = sym    # 短代號 (4碼)
+            mapping[name.upper()] = sym          # 中文名稱
+        return mapping
+    except: 
+        return {}
+
+def resolve_stock_symbol(input_val, mapping):
+    """🔥 透過對照表解析使用者輸入，回傳完整代號"""
+    if not input_val: return None
+    val = str(input_val).strip().upper()
+    return mapping.get(val, None)
 
 @st.cache_data(ttl=3600)
 def load_and_process_data():
@@ -257,13 +280,6 @@ def load_and_process_data():
     return df
 
 # --- 繪圖輔助 ---
-def resolve_stock_symbol(input_code, valid_symbols_set):
-    code = input_code.strip().upper()
-    if code in valid_symbols_set: return code
-    if f"{code}.TW" in valid_symbols_set: return f"{code}.TW"
-    if f"{code}.TWO" in valid_symbols_set: return f"{code}.TWO"
-    return None
-
 def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profile=False):
     df_plot = df_stock.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
@@ -308,7 +324,6 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text, show_vol_profi
 # 4. 主應用程式邏輯
 # ===========================
 def main_app():
-    # 取得當下登入的使用者名稱
     current_user = st.session_state['username']
 
     with st.sidebar:
@@ -324,12 +339,12 @@ def main_app():
         if k not in st.session_state: st.session_state[k] = None
     if st.session_state.symbol_input is None: st.session_state.symbol_input = ""
 
-    valid_symbols_set = get_all_symbols_fast()
+    # 🔥 取得字典對照表
+    stock_mapping = get_stock_mapping()
 
     # --- 側邊欄：股票管理 ---
     st.sidebar.header("📝 股票管理")
     
-    # 🔥 取得該使用者的清單
     all_lists = get_all_lists_db(current_user)
     if not all_lists:
         create_list_db("預設清單", current_user)
@@ -337,7 +352,6 @@ def main_app():
     
     selected_list = st.sidebar.selectbox("📂 選擇清單", all_lists, index=0)
     
-    # 🔥 取得該使用者所選清單的內容
     watchlist_df = get_list_data_db(selected_list, current_user)
     current_symbols = watchlist_df['symbol'].tolist()
 
@@ -348,27 +362,35 @@ def main_app():
             if idx < len(watchlist_df): st.session_state.symbol_input = watchlist_df.iloc[idx]['symbol']
 
     col_in, col_act = st.sidebar.columns([1.5, 2])
-    inp_code = col_in.text_input("代號", key="symbol_input").strip()
+    inp_code = col_in.text_input("代號/名稱", key="symbol_input").strip()
     
     with col_act:
         c1, c2, c3 = st.columns(3)
         if c1.button("新"):
             st.session_state.query_mode_symbol = None
-            code = resolve_stock_symbol(inp_code, valid_symbols_set)
+            code = resolve_stock_symbol(inp_code, stock_mapping)
             if code and code not in current_symbols:
-                if add_stock_db(selected_list, code, current_user): st.sidebar.success("✅"); st.rerun()
+                if add_stock_db(selected_list, code, current_user): 
+                    st.session_state.symbol_input = code # 更新文字方塊
+                    st.sidebar.success("✅"); st.rerun()
             else: st.sidebar.warning("❌")
+            
         if c2.button("刪"):
             st.session_state.query_mode_symbol = None
-            code = resolve_stock_symbol(inp_code, valid_symbols_set) or inp_code
+            code = resolve_stock_symbol(inp_code, stock_mapping) or inp_code
             if code in current_symbols:
-                if remove_stock_db(selected_list, code, current_user): st.sidebar.success("🗑️"); st.session_state.symbol_input = ""; st.rerun()
+                if remove_stock_db(selected_list, code, current_user): 
+                    st.sidebar.success("🗑️"); st.session_state.symbol_input = ""; st.rerun()
+                    
         if c3.button("查"):
-            code = resolve_stock_symbol(inp_code, valid_symbols_set)
+            code = resolve_stock_symbol(inp_code, stock_mapping)
             if code:
                 st.session_state.query_mode_symbol = code
                 st.session_state.ticker_index = 0
+                st.session_state.symbol_input = code # 更新文字方塊
                 st.sidebar.info("🔍"); st.rerun()
+            else:
+                st.sidebar.warning("❌ 找不到該股票")
 
     # 清單管理
     with st.sidebar.expander("⚙️ 清單管理"):
@@ -425,7 +447,7 @@ def main_app():
         st.warning("⚠️ 無資料")
         return
 
-    # --- 🔥 動態訊號產生 ---
+    # --- 動態訊號產生 ---
     df_day['rank_pct_1d'] = df_day['pct_change'].rank(ascending=False, method='min')
     df_day['rank_pct_5d'] = df_day['pct_change_5d'].rank(ascending=False, method='min')
     df_day['rank_f_1d'] = df_day['foreign_net'].rank(ascending=False, method='min')
@@ -473,7 +495,7 @@ def main_app():
     df_day['Total_Score'] = score
     df_day['Signal_List'] = df_day['signals_str'].apply(lambda x: ", ".join(x))
 
-    # 🔥 修改：如果是「查詢單一股票」模式，就不套用分數門檻，強制顯示
+    # 🔥 修復 Bug：如果是「查詢模式」，則強制顯示，略過分數過濾
     if min_sc > 0 and not st.session_state.query_mode_symbol: 
         df_day = df_day[df_day['Total_Score'] >= min_sc]
 
@@ -489,11 +511,11 @@ def main_app():
     sym_list = display_df['symbol'].tolist()
 
     if st.session_state.query_mode_symbol:
-        if st.button("🔙 返回"):
+        if st.button("🔙 返回清單"):
             st.session_state.query_mode_symbol = None
             st.rerun()
     
-    st.success(f"{title} (剩 {len(sym_list)})")
+    st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
     
     evt = st.dataframe(display_df.style.format({"pct_change":"{:.2f}%","close":"{:.2f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
                        on_select="rerun", selection_mode="single-row", use_container_width=True,
@@ -502,7 +524,7 @@ def main_app():
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
     
     if not sym_list: 
-        st.warning("無符合股票")
+        st.warning("目前無符合過濾條件的股票。您可以降低「分數門檻」查看更多。")
         return
 
     if st.session_state.ticker_index is None or st.session_state.ticker_index >= len(sym_list):
