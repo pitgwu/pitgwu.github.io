@@ -79,7 +79,9 @@ def load_precalculated_data():
     if not df.empty:
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
-        df['Total_Score'] = df['Total_Score'].fillna(0)
+        
+        # 🔥 優化 1：強制轉為整數型態 (去掉小數點)
+        df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
     return df
 
@@ -161,7 +163,8 @@ def main_app():
 
     st.success(f"篩選出 {len(syms)} 檔 (門檻:{min_sc})")
     
-    evt = st.dataframe(disp.style.format({"pct_change":"{:.2f}%","close":"{:.2f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
+    # 🔥 優化 2：確保表格內的 Total_Score 強制不顯示小數點 ("{:.0f}")
+    evt = st.dataframe(disp.style.format({"pct_change":"{:.2f}%","close":"{:.2f}", "Total_Score":"{:.0f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
                        on_select="rerun", selection_mode="single-row", use_container_width=True,
                        column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")})
     
@@ -178,7 +181,8 @@ def main_app():
     cur_sym = syms[st.session_state.ticker_index]
     cur_row = res[res['symbol']==cur_sym].iloc[0]
     
-    st.markdown(f"### {cur_sym} {cur_row['name']} | 分數: {cur_row['Total_Score']}")
+    # 🔥 優化 3：下方單檔股票資訊的標題強制轉為 int
+    st.markdown(f"### {cur_sym} {cur_row['name']} | 分數: {int(cur_row['Total_Score'])}")
     st.info(f"💡 {cur_row['Signal_List']}")
 
     chart_data = df_full[df_full['symbol']==cur_sym].sort_values('date')
