@@ -26,7 +26,7 @@ def get_engine():
 engine = get_engine()
 
 # ===========================
-# 2. 身份驗證模組
+# 2. 身份驗證與註冊模組
 # ===========================
 def check_login(username, password):
     try:
@@ -47,24 +47,75 @@ def check_login(username, password):
     except Exception as e:
         return False, None, f"系統錯誤: {e}"
 
+def register_user(username, password):
+    """處理新使用者註冊，預設 active = 'no'"""
+    try:
+        with engine.begin() as conn:
+            # 1. 檢查帳號是否已存在
+            exists = conn.execute(
+                text("SELECT 1 FROM users WHERE username = :u"), 
+                {"u": username}
+            ).scalar()
+            
+            if exists:
+                return False, "❌ 此帳號已被註冊，請更換一個帳號名稱"
+
+            # 2. 密碼加密
+            hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+            # 3. 寫入資料庫 (預設為一般 user，且未啟用)
+            conn.execute(
+                text("INSERT INTO users (username, password_hash, role, active) VALUES (:u, :p, 'user', 'no')"),
+                {"u": username, "p": hashed_pw}
+            )
+            return True, f"✅ 帳號 {username} 已新增，請等待管理者開通帳號"
+    except Exception as e:
+        return False, f"系統錯誤: {e}"
+
 def login_page():
     st.markdown("<h1 style='text-align: center;'>🔐 自選股戰情室</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
+    
     with col2:
-        with st.form("login_form"):
-            username = st.text_input("帳號")
-            password = st.text_input("密碼", type="password")
-            submit = st.form_submit_button("登入", use_container_width=True)
-            if submit:
-                success, role, msg = check_login(username, password)
-                if success:
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = username
-                    st.session_state['role'] = role
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
+        # 🔥 加入 Tabs 切換登入與註冊介面
+        tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊新帳號"])
+        
+        # --- 登入區塊 ---
+        with tab_login:
+            with st.form("login_form"):
+                username = st.text_input("帳號")
+                password = st.text_input("密碼", type="password")
+                submit = st.form_submit_button("登入", use_container_width=True)
+                if submit:
+                    success, role, msg = check_login(username, password)
+                    if success:
+                        st.session_state['logged_in'] = True
+                        st.session_state['username'] = username
+                        st.session_state['role'] = role
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                        
+        # --- 註冊區塊 ---
+        with tab_register:
+            with st.form("register_form"):
+                new_username = st.text_input("設定帳號")
+                new_password = st.text_input("設定密碼", type="password")
+                confirm_password = st.text_input("確認密碼", type="password")
+                reg_submit = st.form_submit_button("註冊", use_container_width=True)
+                
+                if reg_submit:
+                    if not new_username or not new_password:
+                        st.error("⚠️ 帳號與密碼不能為空白")
+                    elif new_password != confirm_password:
+                        st.error("⚠️ 兩次輸入的密碼不一致，請重新確認")
+                    else:
+                        success, msg = register_user(new_username, new_password)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
 
 # ===========================
 # 3. DB 操作函式
@@ -135,7 +186,7 @@ def remove_stock_db(list_name, symbol, username):
         return True, "移除成功"
     except Exception as e: return False, str(e)
 
-# --- 🔥 ETL 資料讀取 (大幅簡化) ---
+# --- ETL 資料讀取 ---
 @st.cache_data(ttl=3600)
 def get_stock_mapping():
     try:
@@ -156,7 +207,6 @@ def resolve_stock_symbol(input_val, mapping):
 
 @st.cache_data(ttl=600)
 def load_precalculated_data():
-    """直接從 ETL 產出的資料表撈取算好的數據"""
     query = """
     SELECT date, symbol, name, industry, open, high, low, close, volume,
            pct_change, foreign_net, trust_net,
@@ -175,7 +225,7 @@ def load_precalculated_data():
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
         
-        # 🔥 優化 1：強制轉為整數型態 (去掉小數點)
+        # 🔥 保險機制：確保底層資料就是整數
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
 
@@ -384,12 +434,12 @@ def main_app():
 
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
 
-    # 🔥 優化 2：確保表格內的 Total_Score 強制不顯示小數點 ("{:.0f}")
+    # 🔥 終極去小數點機制：利用 {:.0f} 鎖死格式
     evt = st.dataframe(
         display_df.style.format({
-            "pct_change":"{:.2f}%",
-            "close":"{:.2f}",
-            "Total_Score":"{:.0f}" 
+            "pct_change": "{:.2f}%",
+            "close": "{:.2f}",
+            "Total_Score": "{:.0f}"
         }).background_gradient(subset=['Total_Score'], cmap='Reds'),
         on_select="rerun", selection_mode="single-row", use_container_width=True,
         column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
@@ -416,7 +466,6 @@ def main_app():
     st.session_state.last_viewed_symbol = cur_sym
 
     with c3:
-        # 🔥 優化 3：下方單檔股票資訊的標題強制轉為 int
         st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])}</h3>", unsafe_allow_html=True)
         st.info(f"⚡ {cur_info['Signal_List']}")
 
