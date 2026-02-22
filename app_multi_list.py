@@ -48,7 +48,6 @@ def check_login(username, password):
         return False, None, f"系統錯誤: {e}"
 
 def register_user(username, password):
-    """處理新使用者註冊，預設 active = 'no'"""
     try:
         with engine.begin() as conn:
             exists = conn.execute(
@@ -70,7 +69,6 @@ def register_user(username, password):
         return False, f"系統錯誤: {e}"
 
 def update_password(username, old_password, new_password):
-    """驗證舊密碼並更新為新密碼"""
     try:
         with engine.begin() as conn:
             result = conn.execute(
@@ -103,7 +101,6 @@ def login_page():
     with col2:
         tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊新帳號"])
         
-        # --- 登入區塊 ---
         with tab_login:
             with st.form("login_form"):
                 username = st.text_input("帳號")
@@ -120,7 +117,6 @@ def login_page():
                     else:
                         st.error(msg)
                         
-        # --- 註冊區塊 ---
         with tab_register:
             with st.form("register_form"):
                 new_username = st.text_input("設定帳號")
@@ -230,6 +226,7 @@ def resolve_stock_symbol(input_val, mapping):
 
 @st.cache_data(ttl=600)
 def load_precalculated_data():
+    # 🔥 優化：將抓取區間拉長到 160 天，預留計算 20MA 標準差所需的緩衝天數
     query = """
     SELECT date, symbol, name, industry, open, high, low, close, volume,
            pct_change, foreign_net, trust_net,
@@ -238,7 +235,7 @@ def load_precalculated_data():
            total_score as "Total_Score",
            signal_list as "Signal_List"
     FROM daily_stock_indicators
-    WHERE date >= current_date - INTERVAL '130 days'
+    WHERE date >= current_date - INTERVAL '160 days'
     ORDER BY symbol, date
     """
     with engine.connect() as conn:
@@ -254,7 +251,15 @@ def load_precalculated_data():
 
 # --- 繪圖輔助 ---
 def plot_stock_kline(df_stock, symbol, name, active_signals_text):
-    df_plot = df_stock.tail(130).copy()
+    df_calc = df_stock.copy()
+    
+    # 🔥 在這裡計算 20 日標準差與 3 倍布林通道上下軌
+    df_calc['std20'] = df_calc['close'].rolling(window=20).std()
+    df_calc['BB_up'] = df_calc['MA20'] + 3 * df_calc['std20']
+    df_calc['BB_low'] = df_calc['MA20'] - 3 * df_calc['std20']
+    
+    # 擷取最後的 130 筆顯示，這樣最左邊就不會出現因為 Rolling 產生的空缺(NaN)
+    df_plot = df_calc.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
     score_val = active_signals_text.count(',') + 1 if active_signals_text else 0
 
@@ -265,11 +270,29 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text):
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name} (評分:{score_val})", "量", "KD", "MACD", "訊號"))
 
+    # 1. 繪製 K 線
     fig.add_trace(go.Candlestick(
         x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'],
         name='K線', increasing_line_color='red', decreasing_line_color='green'
     ), row=1, col=1)
 
+    # 🔥 2. 繪製 3倍布林通道 (上軌與下軌)
+    fig.add_trace(go.Scatter(
+        x=df_plot['date_str'], y=df_plot['BB_up'], 
+        mode='lines', name='BB Upper', 
+        line=dict(color='rgba(180, 180, 180, 0.6)', width=1, dash='dash'),
+        hoverinfo='skip', showlegend=False
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df_plot['date_str'], y=df_plot['BB_low'], 
+        mode='lines', name='BB Lower', 
+        line=dict(color='rgba(180, 180, 180, 0.6)', width=1, dash='dash'),
+        fill='tonexty', fillcolor='rgba(180, 180, 180, 0.1)', # 淺灰色半透明填滿效果
+        hoverinfo='skip', showlegend=False
+    ), row=1, col=1)
+
+    # 3. 繪製均線
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         if ma in df_plot: fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot[ma], mode='lines', name=ma, line=dict(color=color, width=1)), row=1, col=1)
 
@@ -316,17 +339,13 @@ def action_add():
     code = resolve_stock_symbol(inp, mapping)
     
     if code:
-        # 🔥 優化：將完整的股票代號填回輸入框 (取代原先的模糊搜尋字眼)
         st.session_state.symbol_input_widget = code
-        
-        # 寫入資料庫
         if code not in get_list_data_db(sel_list, usr)['symbol'].tolist():
             if add_stock_db(sel_list, code, usr):
                 st.session_state.action_msg = ("success", f"✅ {code} 已成功加入群組")
         else: 
             st.session_state.action_msg = ("warning", f"⚠️ 查詢成功，但 {code} 已在群組中")
             
-        # 🔥 優化：確保返回「群組總覽模式」(取消單檔查詢的鎖定)
         st.session_state.query_mode_symbol = None
     else: 
         st.session_state.action_msg = ("warning", "❌ 找不到該股票")
