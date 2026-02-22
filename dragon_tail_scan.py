@@ -109,7 +109,7 @@ def load_data():
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
         df['Signal_List'] = df['Signal_List'].fillna("")
-        
+
         # 統一建立以「張」為單位的欄位
         if df['volume'].max() > 1000000:
             df['volume_sheets'] = df['volume'] / 1000
@@ -128,11 +128,11 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
     # === 基礎前置運算 ===
     # 昨高 (為條件5準備)
     df['prev_high'] = df.groupby('symbol')['high'].shift(1)
-    
+
     # 計算昨日均線，用於判斷趨勢箭頭 (上彎或下彎)
     for ma in [5, 10, 20, 60]:
         df[f'prev_MA{ma}'] = df.groupby('symbol')[f'MA{ma}'].shift(1)
-
+        
     # 半年低點
     df['Low_120'] = df.groupby('symbol')['low'].transform(lambda x: x.rolling(window=120, min_periods=60).min())
 
@@ -150,18 +150,17 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
 
     # === 動態套用條件 ===
     mask = pd.Series(True, index=today_df.index)
-    
     # 基礎過濾：最少成交量
     mask &= (today_df['volume_sheets'] >= min_volume)
 
-     # 條件 1：低位階
+    # 條件 1：低位階
     if use_cond1:
         mask &= (today_df['close'] <= (today_df['Low_120'] * 1.3))
-        
+
     # 條件 2：底部放量
     if use_cond2_vol:
         mask &= (today_df['vol_break_20d'] == 1)
-        
+
     # 條件 3：四線多排
     if use_cond3_ma:
         mask &= (
@@ -185,10 +184,17 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
     return result_df
 
 # ===========================
-# 5. K 線繪圖輔助
+# 5. K 線繪圖輔助 (加入布林通道)
 # ===========================
 def plot_stock_kline(df_stock, symbol, name):
-    df_plot = df_stock.tail(130).copy()
+    # 為了避免前 20 天出現 NaN，在切片前先計算布林通道 (20, 3)
+    df_calc = df_stock.copy()
+    bb_std = df_calc['close'].rolling(window=20).std()
+    df_calc['BB_Upper'] = df_calc['MA20'] + 3 * bb_std
+    df_calc['BB_Lower'] = df_calc['MA20'] - 3 * bb_std
+
+    # 取最近 130 天出來畫圖
+    df_plot = df_calc.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
 
     df_plot['prev_volume'] = df_plot['volume_sheets'].shift(1)
@@ -198,11 +204,30 @@ def plot_stock_kline(df_stock, symbol, name):
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name}", "量(張)", "KD", "MACD", "訊號"))
 
+    # 1. 布林上軌 (隱藏線段，準備填色)
+    fig.add_trace(go.Scatter(
+        x=df_plot['date_str'], y=df_plot['BB_Upper'], 
+        mode='lines', name='BB Upper (3)', 
+        line=dict(color='rgba(169, 169, 169, 0.5)', width=1, dash='dot'),
+        hoverinfo='skip'
+    ), row=1, col=1)
+
+    # 2. 布林下軌 (與上軌之間填滿半透明顏色)
+    fig.add_trace(go.Scatter(
+        x=df_plot['date_str'], y=df_plot['BB_Lower'], 
+        mode='lines', name='BB Lower (3)', 
+        line=dict(color='rgba(169, 169, 169, 0.5)', width=1, dash='dot'),
+        fill='tonexty', fillcolor='rgba(169, 169, 169, 0.08)',
+        hoverinfo='skip'
+    ), row=1, col=1)
+
+    # 3. K線
     fig.add_trace(go.Candlestick(
         x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'],
         name='K線', increasing_line_color='red', decreasing_line_color='green'
     ), row=1, col=1)
 
+    # 4. 各天期均線
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         if ma in df_plot: 
             fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot[ma], mode='lines', name=ma, line=dict(color=color, width=1)), row=1, col=1)
@@ -225,9 +250,9 @@ def plot_stock_kline(df_stock, symbol, name):
 def color_ma_trend(val):
     val_str = str(val)
     if '▲' in val_str:
-        return 'color: #FF4B4B; font-weight: bold;' # 上彎紅色
+        return 'color: #FF4B4B; font-weight: bold;'
     elif '▼' in val_str:
-        return 'color: #00CC96; font-weight: bold;' # 下彎綠色
+        return 'color: #00CC96; font-weight: bold;'
     return ''
 
 # ===========================
@@ -284,7 +309,7 @@ def main_app():
             if c5_red_k_break: active_conds.append("紅K過昨高")
             st.session_state.active_conds_text = " + ".join(active_conds)
 
-    st.title("🐉 神龍擺尾 - 策略開發版")
+    st.title("🐉 神龍擺尾")
     
     if 'active_conds_text' in st.session_state:
         st.markdown(f"目前啟用條件：**{st.session_state.active_conds_text}**")
@@ -300,10 +325,8 @@ def main_app():
         else:
             st.success(f"✅ {sel_date} 掃描完成！共找出 **{len(result_df)}** 檔股票。")
             
-            # --- 整理與格式化表格資料 ---
             display_df = result_df.copy()
             
-            # 計算均線箭頭字串
             for ma in [5, 10, 20, 60]:
                 ma_col = f'MA{ma}'
                 prev_ma_col = f'prev_MA{ma}'
@@ -313,7 +336,6 @@ def main_app():
                     ), axis=1
                 )
             
-            # 產生玩股網連結 (去除 .TW / .TWO)
             display_df['玩股網'] = display_df['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{str(x).split('.')[0]}")
             
             display_df['volume_sheets'] = display_df['volume_sheets'].astype(int)
@@ -321,13 +343,11 @@ def main_app():
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
             )
             
-            # 決定顯示欄位與順序
             final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '漲跌幅(%)']
             display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
             
             sym_list = display_df['symbol'].tolist()
 
-            # 套用顏色渲染與超連結設定
             styled_df = display_df.style.format({
                 "當日收盤": "{:.2f}",
                 "半年低點": "{:.2f}",
