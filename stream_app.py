@@ -65,16 +65,37 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
     except Exception as e:
         st.error(f"篩選失敗: {e}"); return pd.DataFrame(), pd.DataFrame()
 
-    # --- 步驟 2: 分批下載 ---
+    # --- 步驟 2: 分批下載歷史與基本面資料 ---
     start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y-%m-%d')
     all_dfs = []
     batch_size = 50 
     
     try:
         with engine.connect() as conn:
+            # 讀取股票名稱與產業
             df_info = pd.read_sql("SELECT symbol, name, industry FROM stock_info", conn)
             
-            dl_bar = st.progress(0, text="下載資料中...")
+            # 🔥 新增：讀取 EPS 與股本資料表 (stock_eps)
+            try:
+                # 撈取全部資料，避免因大小寫或特殊字元(如2026EPS)引發的 SQL 語法錯誤
+                df_eps_raw = pd.read_sql("SELECT * FROM stock_eps", conn)
+                
+                # 自動對應欄位名稱 (忽略大小寫)
+                col_mapping = {}
+                for c in df_eps_raw.columns:
+                    if c.lower() == 'symbol': col_mapping[c] = 'symbol'
+                    elif c.lower() == 'capital': col_mapping[c] = 'capital'
+                    elif c.lower() == '2026eps': col_mapping[c] = 'eps2026'
+                
+                df_eps = df_eps_raw.rename(columns=col_mapping)
+                if 'capital' not in df_eps.columns: df_eps['capital'] = np.nan
+                if 'eps2026' not in df_eps.columns: df_eps['eps2026'] = np.nan
+            except Exception as e:
+                # 萬一資料表不存在，則給予空值避免程式崩潰
+                st.toast("⚠️ 無法載入 stock_eps 資料表，將略過基本面數據。")
+                df_eps = pd.DataFrame(columns=['symbol', 'capital', 'eps2026'])
+            
+            dl_bar = st.progress(0, text="下載股價資料中...")
             total_batches = (len(target_symbols) // batch_size) + 1
             
             for i in range(0, len(target_symbols), batch_size):
@@ -118,19 +139,16 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
         last = df.iloc[-1]
         prev = df.iloc[-2]
         
-        # --- 條件 1: 長線多頭排列 (60MA > 120MA) ---
         if long_term_bull:
             if pd.isna(last['ma60']) or pd.isna(last['ma120']) or last['ma60'] <= last['ma120']:
                 continue
                 
-        # --- 條件 2: 短線多頭排列 (5MA > 10MA > 20MA) ---
         if short_term_bull:
             if pd.isna(last['ma5']) or pd.isna(last['ma10']) or pd.isna(last['ma20']):
                 continue
             if not (last['ma5'] > last['ma10'] and last['ma10'] > last['ma20']):
                 continue
             
-        # 條件 3: 均線糾結
         mas = [last['ma5'], last['ma10'], last['ma20']]
         if any(pd.isna(mas)): continue
         
@@ -182,7 +200,29 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
     if not results: return pd.DataFrame(), df_prices
     
     df_res = pd.DataFrame(results)
+    
+    # 整合股票名稱資訊
     df_final = pd.merge(df_res, df_info, on='symbol', how='left')
+    
+    # 🔥 整合基本面數據 (股本, 2026EPS)
+    if not df_eps.empty and 'symbol' in df_eps.columns:
+        df_final = pd.merge(df_final, df_eps[['symbol', 'capital', 'eps2026']], on='symbol', how='left')
+    else:
+        df_final['capital'] = np.nan
+        df_final['eps2026'] = np.nan
+
+    # 🔥 計算本益比 (PE Ratio = 收盤價 / 預估EPS)
+    # 確保數值型態正確
+    df_final['close'] = pd.to_numeric(df_final['close'], errors='coerce')
+    df_final['eps2026'] = pd.to_numeric(df_final['eps2026'], errors='coerce')
+    
+    # 若 EPS 大於 0 才計算，否則顯示 NaN
+    df_final['pe_ratio'] = np.where(
+        (df_final['eps2026'] > 0) & (df_final['eps2026'].notna()), 
+        df_final['close'] / df_final['eps2026'], 
+        np.nan
+    )
+
     df_final['name'] = df_final['name'].fillna('未知名稱')
     df_final['link'] = df_final['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{x.replace('.TW','').replace('.TWO','')}")
     
@@ -233,15 +273,11 @@ def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, short_term_bul
             
             st.sidebar.caption(f"{real_symbol} {name} | {last['date'].strftime('%Y-%m-%d')}")
             
-            # Checks
             v_ok = last['volume'] >= min_vol
-            
             is_long_bull = last['ma60'] > last['ma120']
             t_long_ok = is_long_bull if long_term_bull else True
-            
             is_short_bull = (last['ma5'] > last['ma10'] and last['ma10'] > last['ma20'])
             t_short_ok = is_short_bull if short_term_bull else True
-            
             s_ok = df.iloc[-1]['is_sq']
             d_ok = days >= min_days
             
@@ -293,10 +329,14 @@ if df_res.empty:
 else:
     c_sort1, c_sort2 = st.columns([1, 1])
     with c_sort1:
+        # 🔥 更新排序選單：加入股本、EPS、本益比
         sort_col_map = {
             "量增比": "vol_ratio", 
             "成交量": "volume",
             "糾結度": "squeeze_pct",
+            "本益比": "pe_ratio",
+            "2026EPS": "eps2026",
+            "股本": "capital",
             "天數": "days", 
             "代號": "symbol"
         }
@@ -338,7 +378,6 @@ else:
     c1.metric("符合檔數", f"{len(df_sorted)}")
     c2.metric("最長整理", f"{df_sorted['days'].max()} 天")
     
-    # --- 套用 Styler 樣式 ---
     def color_arrow(val):
         if '🔺' in str(val):
             return 'color: #ff4b4b; font-weight: bold' # 紅
@@ -348,10 +387,14 @@ else:
 
     styled_df = df_sorted.style.map(color_arrow, subset=['ma5_str', 'ma10_str', 'ma20_str', 'ma60_str'])
 
+    # 🔥 這裡更新了表格設定，加入股本、EPS、本益比
     selection_event = st.dataframe(
         styled_df,
         column_config={
             "symbol": "代號", "name": "名稱", "days": "天數",
+            "capital": st.column_config.NumberColumn("股本", format="%.1f"),
+            "eps2026": st.column_config.NumberColumn("2026EPS", format="%.2f"),
+            "pe_ratio": st.column_config.NumberColumn("本益比", format="%.2f"),
             "vol_str": st.column_config.TextColumn("量增比"),
             "squeeze_pct": st.column_config.NumberColumn("糾結度", format="%.2f%%"),
             "close": st.column_config.NumberColumn("收盤", format="$%.2f"),
@@ -362,8 +405,11 @@ else:
             "ma60_str": st.column_config.TextColumn("60MA"),
             "link": st.column_config.LinkColumn("連結", display_text="Go")
         },
-        column_order=["symbol", "name", "days", "vol_str", "squeeze_pct", "close", "volume", 
-                      "ma5_str", "ma10_str", "ma20_str", "ma60_str", "link"],
+        column_order=[
+            "symbol", "name", "capital", "eps2026", "pe_ratio", 
+            "days", "vol_str", "squeeze_pct", "close", "volume", 
+            "ma5_str", "ma10_str", "ma20_str", "ma60_str", "link"
+        ],
         hide_index=True, use_container_width=True, height=300,
         on_select="rerun", selection_mode="single-row"
     )
@@ -403,8 +449,6 @@ else:
             chart['MA60'] = chart['close'].rolling(60).mean()
             chart['MA120'] = chart['close'].rolling(120).mean()
 
-            # 🔥 關鍵修正：將日期轉換為字串格式，強制 Plotly 將 X 軸視為「類別 (Category)」
-            # 這樣就可以完美消滅週休二日與國定假日的空白斷層，讓 K 棒等距緊密排列！
             chart_dates = chart['date'].dt.strftime('%Y-%m-%d')
 
             fig = make_subplots(
@@ -415,7 +459,6 @@ else:
                 subplot_titles=(f"{current_sym_str} - 日K線圖", "成交量")
             )
 
-            # 將所有 X 軸資料換成 chart_dates
             fig.add_trace(go.Candlestick(
                 x=chart_dates, open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'], 
                 increasing_line_color='#ef5350', decreasing_line_color='#26a69a', name='K線'
@@ -431,7 +474,6 @@ else:
                 x=chart_dates, y=chart['volume'], marker_color=vol_colors, name='成交量'
             ), row=2, col=1)
 
-            # 設定 X 軸強制為類別 (type='category') 並限制標籤數量 (nticks) 避免太擠
             fig.update_xaxes(type='category', nticks=15)
 
             fig.update_layout(
