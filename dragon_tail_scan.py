@@ -121,7 +121,7 @@ def load_data():
 # ===========================
 # 4. 核心策略：動態條件驗證
 # ===========================
-def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2, use_cond3, use_cond4, use_cond5):
+def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol, use_cond3_ma, use_cond4, use_cond5):
     df = df_full[df_full['date'] <= pd.to_datetime(target_date)].copy()
     if df.empty: return pd.DataFrame()
     
@@ -154,17 +154,17 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2, us
     if use_cond1:
         mask &= (today_df['close'] <= (today_df['Low_120'] * 1.3))
     
-    # 條件 2：四線多排
-    if use_cond2:
+    # 條件 2：底部放量
+    if use_cond2_vol:
+        mask &= (today_df['vol_break_20d'] == 1)
+
+    # 條件 3：四線多排
+    if use_cond3_ma:
         mask &= (
             (today_df['MA5'] > today_df['MA10']) &
             (today_df['MA10'] > today_df['MA20']) &
             (today_df['MA20'] > today_df['MA60'])
         )
-
-    # 條件 3：底部放量
-    if use_cond3:
-        mask &= (today_df['vol_break_20d'] == 1)
 
     # 條件 4：回測月線後
     if use_cond4:
@@ -248,8 +248,9 @@ def main_app():
 
         st.markdown("---")
         c1_low_level = st.checkbox("✅ 條件 1：低位階 (距半年低點 <= 30%)", value=True)
-        c2_ma_bullish = st.checkbox("✅ 條件 2：四線多排 (5 > 10 > 20 > 60)", value=True)
-        c3_vol_break = st.checkbox("✅ 條件 3：底部放量 (近20日內曾爆量)", value=True)
+        # 對調順序並修改預設值
+        c2_vol_break = st.checkbox("✅ 條件 2：底部放量 (近20日內曾爆量)", value=True)
+        c3_ma_bullish = st.checkbox("✅ 條件 3：四線多排 (5 > 10 > 20 > 60)", value=False)
         c4_pullback = st.checkbox("✅ 條件 4：回測月線後 (近3日破月線, 今收上)", value=False)
         c5_red_k_break = st.checkbox("✅ 條件 5：紅K過昨日高 (收盤>開盤 且 收盤>昨高)", value=False)
         
@@ -258,15 +259,15 @@ def main_app():
             with st.spinner("掃描運算中..."):
                 st.session_state.scanned_df = run_strategy_scan(
                     df_full, sel_date, min_volume,
-                    c1_low_level, c2_ma_bullish, c3_vol_break, c4_pullback, c5_red_k_break
+                    c1_low_level, c2_vol_break, c3_ma_bullish, c4_pullback, c5_red_k_break
                 )
             st.session_state.has_scanned = True
             st.session_state.ticker_index = 0
             
             active_conds = [f"成交量 >= {min_volume}張"]
             if c1_low_level: active_conds.append("低位階")
-            if c2_ma_bullish: active_conds.append("四線多排")
-            if c3_vol_break: active_conds.append("底部放量")
+            if c2_vol_break: active_conds.append("底部放量")
+            if c3_ma_bullish: active_conds.append("四線多排")
             if c4_pullback: active_conds.append("回測月線")
             if c5_red_k_break: active_conds.append("紅K過昨高")
             st.session_state.active_conds_text = " + ".join(active_conds)
