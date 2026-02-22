@@ -75,12 +75,10 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
             # 讀取股票名稱與產業
             df_info = pd.read_sql("SELECT symbol, name, industry FROM stock_info", conn)
             
-            # 🔥 新增：讀取 EPS 與股本資料表 (stock_eps)
+            # 讀取 EPS 與股本資料表 (stock_eps)
             try:
-                # 撈取全部資料，避免因大小寫或特殊字元(如2026EPS)引發的 SQL 語法錯誤
                 df_eps_raw = pd.read_sql("SELECT * FROM stock_eps", conn)
                 
-                # 自動對應欄位名稱 (忽略大小寫)
                 col_mapping = {}
                 for c in df_eps_raw.columns:
                     if c.lower() == 'symbol': col_mapping[c] = 'symbol'
@@ -91,7 +89,6 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
                 if 'capital' not in df_eps.columns: df_eps['capital'] = np.nan
                 if 'eps2026' not in df_eps.columns: df_eps['eps2026'] = np.nan
             except Exception as e:
-                # 萬一資料表不存在，則給予空值避免程式崩潰
                 st.toast("⚠️ 無法載入 stock_eps 資料表，將略過基本面數據。")
                 df_eps = pd.DataFrame(columns=['symbol', 'capital', 'eps2026'])
             
@@ -204,19 +201,17 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
     # 整合股票名稱資訊
     df_final = pd.merge(df_res, df_info, on='symbol', how='left')
     
-    # 🔥 整合基本面數據 (股本, 2026EPS)
+    # 整合基本面數據 (股本, 2026EPS)
     if not df_eps.empty and 'symbol' in df_eps.columns:
         df_final = pd.merge(df_final, df_eps[['symbol', 'capital', 'eps2026']], on='symbol', how='left')
     else:
         df_final['capital'] = np.nan
         df_final['eps2026'] = np.nan
 
-    # 🔥 計算本益比 (PE Ratio = 收盤價 / 預估EPS)
-    # 確保數值型態正確
+    # 計算本益比 (PE Ratio)
     df_final['close'] = pd.to_numeric(df_final['close'], errors='coerce')
     df_final['eps2026'] = pd.to_numeric(df_final['eps2026'], errors='coerce')
     
-    # 若 EPS 大於 0 才計算，否則顯示 NaN
     df_final['pe_ratio'] = np.where(
         (df_final['eps2026'] > 0) & (df_final['eps2026'].notna()), 
         df_final['close'] / df_final['eps2026'], 
@@ -329,7 +324,6 @@ if df_res.empty:
 else:
     c_sort1, c_sort2 = st.columns([1, 1])
     with c_sort1:
-        # 🔥 更新排序選單：加入股本、EPS、本益比
         sort_col_map = {
             "量增比": "vol_ratio", 
             "成交量": "volume",
@@ -387,7 +381,6 @@ else:
 
     styled_df = df_sorted.style.map(color_arrow, subset=['ma5_str', 'ma10_str', 'ma20_str', 'ma60_str'])
 
-    # 🔥 這裡更新了表格設定，加入股本、EPS、本益比
     selection_event = st.dataframe(
         styled_df,
         column_config={
@@ -449,6 +442,11 @@ else:
             chart['MA60'] = chart['close'].rolling(60).mean()
             chart['MA120'] = chart['close'].rolling(120).mean()
 
+            # 🔥 新增: 計算 3 倍布林通道 (參數: 20MA, 3 Std)
+            chart['std20'] = chart['close'].rolling(20).std()
+            chart['BB_upper'] = chart['MA20'] + 3 * chart['std20']
+            chart['BB_lower'] = chart['MA20'] - 3 * chart['std20']
+
             chart_dates = chart['date'].dt.strftime('%Y-%m-%d')
 
             fig = make_subplots(
@@ -459,16 +457,34 @@ else:
                 subplot_titles=(f"{current_sym_str} - 日K線圖", "成交量")
             )
 
+            # 1. 加入 K 線
             fig.add_trace(go.Candlestick(
                 x=chart_dates, open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'], 
                 increasing_line_color='#ef5350', decreasing_line_color='#26a69a', name='K線'
             ), row=1, col=1)
             
+            # 2. 加入均線
             fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA5'], line=dict(color='orange', width=1), name='MA5'), row=1, col=1)
             fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA20'], line=dict(color='purple', width=1), name='MA20'), row=1, col=1)
             fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA60'], line=dict(color='blue', width=1), name='MA60'), row=1, col=1)
             fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA120'], line=dict(color='green', width=1, dash='dot'), name='MA120'), row=1, col=1)
             
+            # 🔥 3. 加入布林通道 (上軌與下軌 + 填色)
+            # 順序很重要，先加上軌，再加下軌並設定 fill='tonexty' 往上填滿
+            fig.add_trace(go.Scatter(
+                x=chart_dates, y=chart['BB_upper'], 
+                line=dict(color='rgba(150, 150, 150, 0.5)', width=1, dash='dash'), 
+                name='上軌 (3σ)', hoverinfo='skip', showlegend=False
+            ), row=1, col=1)
+            
+            fig.add_trace(go.Scatter(
+                x=chart_dates, y=chart['BB_lower'], 
+                line=dict(color='rgba(150, 150, 150, 0.5)', width=1, dash='dash'), 
+                name='下軌 (3σ)', fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)', 
+                hoverinfo='skip', showlegend=False
+            ), row=1, col=1)
+
+            # 4. 加入成交量柱狀圖
             vol_colors = ['#ef5350' if c >= o else '#26a69a' for c, o in zip(chart['close'], chart['open'])]
             fig.add_trace(go.Bar(
                 x=chart_dates, y=chart['volume'], marker_color=vol_colors, name='成交量'
