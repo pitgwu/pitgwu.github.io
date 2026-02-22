@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np  # 🔥 新增 numpy 用於數學運算
 import sqlalchemy
 from sqlalchemy import text
 import os
@@ -226,17 +227,19 @@ def resolve_stock_symbol(input_val, mapping):
 
 @st.cache_data(ttl=600)
 def load_precalculated_data():
-    # 🔥 優化：將抓取區間拉長到 160 天，預留計算 20MA 標準差所需的緩衝天數
+    # 🔥 優化：透過 LEFT JOIN 把 stock_eps 表的 Capital 與 2026EPS 撈出來
     query = """
-    SELECT date, symbol, name, industry, open, high, low, close, volume,
-           pct_change, foreign_net, trust_net,
-           "MA5", "MA10", "MA20", "MA60",
-           "K", "D", "MACD_OSC", "DIF",
-           total_score as "Total_Score",
-           signal_list as "Signal_List"
-    FROM daily_stock_indicators
-    WHERE date >= current_date - INTERVAL '160 days'
-    ORDER BY symbol, date
+    SELECT d.date, d.symbol, d.name, d.industry, d.open, d.high, d.low, d.close, d.volume,
+           d.pct_change, d.foreign_net, d.trust_net,
+           d."MA5", d."MA10", d."MA20", d."MA60",
+           d."K", d."D", d."MACD_OSC", d."DIF",
+           d.total_score as "Total_Score",
+           d.signal_list as "Signal_List",
+           e."Capital", e."2026EPS"
+    FROM daily_stock_indicators d
+    LEFT JOIN stock_eps e ON d.symbol = e."Symbol"
+    WHERE d.date >= current_date - INTERVAL '160 days'
+    ORDER BY d.symbol, d.date
     """
     with engine.connect() as conn:
         df = pd.read_sql(query, conn)
@@ -246,6 +249,18 @@ def load_precalculated_data():
         df['date'] = pd.to_datetime(df['date'])
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
+        
+        # 🔥 將新增的股本與EPS轉為數值型態
+        df['Capital'] = pd.to_numeric(df['Capital'], errors='coerce')
+        df['2026EPS'] = pd.to_numeric(df['2026EPS'], errors='coerce')
+        
+        # 🔥 計算本益比 (PE_Ratio = 收盤價 / 2026EPS) 
+        # 只在 EPS > 0 時計算，其餘設為 NaN，避免無限大或負數干擾
+        df['PE_Ratio'] = np.where(
+            (df['2026EPS'] > 0) & df['2026EPS'].notna(),
+            df['close'] / df['2026EPS'],
+            np.nan
+        )
 
     return df
 
@@ -253,12 +268,10 @@ def load_precalculated_data():
 def plot_stock_kline(df_stock, symbol, name, active_signals_text):
     df_calc = df_stock.copy()
     
-    # 🔥 在這裡計算 20 日標準差與 3 倍布林通道上下軌
     df_calc['std20'] = df_calc['close'].rolling(window=20).std()
     df_calc['BB_up'] = df_calc['MA20'] + 3 * df_calc['std20']
     df_calc['BB_low'] = df_calc['MA20'] - 3 * df_calc['std20']
     
-    # 擷取最後的 130 筆顯示，這樣最左邊就不會出現因為 Rolling 產生的空缺(NaN)
     df_plot = df_calc.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
     score_val = active_signals_text.count(',') + 1 if active_signals_text else 0
@@ -270,13 +283,11 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text):
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name} (評分:{score_val})", "量", "KD", "MACD", "訊號"))
 
-    # 1. 繪製 K 線
     fig.add_trace(go.Candlestick(
         x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'],
         name='K線', increasing_line_color='red', decreasing_line_color='green'
     ), row=1, col=1)
 
-    # 🔥 2. 繪製 3倍布林通道 (上軌與下軌)
     fig.add_trace(go.Scatter(
         x=df_plot['date_str'], y=df_plot['BB_up'], 
         mode='lines', name='BB Upper', 
@@ -288,11 +299,10 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text):
         x=df_plot['date_str'], y=df_plot['BB_low'], 
         mode='lines', name='BB Lower', 
         line=dict(color='rgba(180, 180, 180, 0.6)', width=1, dash='dash'),
-        fill='tonexty', fillcolor='rgba(180, 180, 180, 0.1)', # 淺灰色半透明填滿效果
+        fill='tonexty', fillcolor='rgba(180, 180, 180, 0.1)', 
         hoverinfo='skip', showlegend=False
     ), row=1, col=1)
 
-    # 3. 繪製均線
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         if ma in df_plot: fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot[ma], mode='lines', name=ma, line=dict(color=color, width=1)), row=1, col=1)
 
@@ -432,7 +442,6 @@ def main_app():
         st.session_state.action_msg = None
 
     with st.sidebar.expander("⚙️ 群組管理"):
-        # 1. 建立群組
         new_list_name = st.text_input("建立新群組名稱")
         if st.button("建立"):
             if new_list_name:
@@ -447,7 +456,6 @@ def main_app():
                 
         st.markdown("---") 
         
-        # 2. 改名群組
         rename_text = st.text_input("改名為")
         if st.button("改名"):
             if rename_text:
@@ -462,7 +470,6 @@ def main_app():
                 
         st.markdown("---")
         
-        # 3. 刪除群組
         if st.button("⚠️ 刪除", type="primary"):
             if len(all_lists) > 1:
                 if delete_list_db(selected_list, current_user): st.rerun()
@@ -516,7 +523,8 @@ def main_app():
         elif "投信" in sort_opt: df_day = df_day.sort_values(['trust_net','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
-    display_df = df_day[['symbol','name','added_date','industry','close','pct_change','Total_Score','Signal_List']].reset_index(drop=True)
+    # 🔥 將新的欄位 Capital、2026EPS、PE_Ratio 加入顯示清單中
+    display_df = df_day[['symbol','name','added_date','industry','close','pct_change', 'Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List']].reset_index(drop=True)
     sym_list = display_df['symbol'].tolist()
 
     if st.session_state.query_mode_symbol:
@@ -526,14 +534,23 @@ def main_app():
 
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
 
+    # 🔥 優化：為新欄位設定顯示格式與表頭中文
     evt = st.dataframe(
         display_df.style.format({
             "pct_change": "{:.2f}%",
             "close": "{:.2f}",
+            "Capital": "{:.1f}",
+            "2026EPS": "{:.2f}",
+            "PE_Ratio": "{:.2f}",
             "Total_Score": "{:.0f}"
-        }).background_gradient(subset=['Total_Score'], cmap='Reds'),
+        }, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
         on_select="rerun", selection_mode="single-row", use_container_width=True,
-        column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
+        column_config={
+            "Capital": "股本",
+            "2026EPS": "2026EPS",
+            "PE_Ratio": "本益比",
+            "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
+        }
     )
 
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
