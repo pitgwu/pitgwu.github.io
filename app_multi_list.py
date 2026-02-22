@@ -51,7 +51,6 @@ def register_user(username, password):
     """處理新使用者註冊，預設 active = 'no'"""
     try:
         with engine.begin() as conn:
-            # 1. 檢查帳號是否已存在
             exists = conn.execute(
                 text("SELECT 1 FROM users WHERE username = :u"), 
                 {"u": username}
@@ -60,10 +59,8 @@ def register_user(username, password):
             if exists:
                 return False, "❌ 此帳號已被註冊，請更換一個帳號名稱"
 
-            # 2. 密碼加密
             hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-            # 3. 寫入資料庫 (預設為一般 user，且未啟用)
             conn.execute(
                 text("INSERT INTO users (username, password_hash, role, active) VALUES (:u, :p, 'user', 'no')"),
                 {"u": username, "p": hashed_pw}
@@ -72,12 +69,42 @@ def register_user(username, password):
     except Exception as e:
         return False, f"系統錯誤: {e}"
 
+# 🔥 新增：修改密碼模組
+def update_password(username, old_password, new_password):
+    """驗證舊密碼並更新為新密碼"""
+    try:
+        with engine.begin() as conn:
+            # 1. 取得舊密碼 hash
+            result = conn.execute(
+                text("SELECT password_hash FROM users WHERE username = :u"),
+                {"u": username}
+            ).fetchone()
+            
+            if not result:
+                return False, "找不到使用者帳號"
+                
+            db_hash = result[0]
+            
+            # 2. 驗證舊密碼
+            if not bcrypt.checkpw(old_password.encode('utf-8'), db_hash.encode('utf-8')):
+                return False, "❌ 舊密碼輸入錯誤，請重新確認"
+                
+            # 3. 加密新密碼並更新
+            new_hashed_pw = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            conn.execute(
+                text("UPDATE users SET password_hash = :p WHERE username = :u"),
+                {"p": new_hashed_pw, "u": username}
+            )
+            return True, "✅ 密碼修改成功！下次請使用新密碼登入。"
+    except Exception as e:
+        return False, f"系統錯誤: {e}"
+
 def login_page():
     st.markdown("<h1 style='text-align: center;'>🔐 自選股戰情室</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        # 🔥 加入 Tabs 切換登入與註冊介面
         tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊新帳號"])
         
         # --- 登入區塊 ---
@@ -224,8 +251,6 @@ def load_precalculated_data():
     if not df.empty:
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
-        
-        # 🔥 保險機制：確保底層資料就是整數
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
 
@@ -317,7 +342,28 @@ def main_app():
 
     with st.sidebar:
         st.markdown(f"👤 **{current_user}** ({st.session_state['role']})")
-        if st.button("🚪 登出"):
+        
+        # 🔥 新增：修改密碼區塊 (利用 expander 收合)
+        with st.expander("⚙️ 帳號設定 (修改密碼)"):
+            with st.form("change_pwd_form"):
+                old_pw = st.text_input("輸入舊密碼", type="password")
+                new_pw = st.text_input("輸入新密碼", type="password")
+                confirm_pw = st.text_input("確認新密碼", type="password")
+                
+                if st.form_submit_button("儲存修改", use_container_width=True):
+                    if not old_pw or not new_pw or not confirm_pw:
+                        st.error("⚠️ 密碼欄位不可為空白")
+                    elif new_pw != confirm_pw:
+                        st.error("⚠️ 新密碼與確認密碼不一致")
+                    else:
+                        success, msg = update_password(current_user, old_pw, new_pw)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+        
+        # 登出按鈕
+        if st.button("🚪 登出", type="primary", use_container_width=True):
             st.session_state['logged_in'], st.session_state['role'] = False, None
             st.rerun()
         st.markdown("---")
@@ -434,7 +480,6 @@ def main_app():
 
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
 
-    # 🔥 終極去小數點機制：利用 {:.0f} 鎖死格式
     evt = st.dataframe(
         display_df.style.format({
             "pct_change": "{:.2f}%",
