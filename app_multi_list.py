@@ -99,7 +99,6 @@ def update_password(username, old_password, new_password):
 # 3. DB 操作函式
 # ===========================
 def get_all_users_db(current_username):
-    """🔥 新增：取得系統中除了自己以外的所有使用者帳號，供下拉選單使用"""
     try:
         with engine.connect() as conn:
             result = conn.execute(
@@ -182,65 +181,29 @@ def clone_list_db(list_name, source_username, target_username):
     
     try:
         with engine.begin() as conn:
-            # 1. 檢查目標使用者是否存在
-            target_exists = conn.execute(
-                text("SELECT 1 FROM users WHERE username = :u"),
-                {"u": target_username}
-            ).scalar()
-            
-            if not target_exists:
-                return False, f"❌ 找不到帳號 '{target_username}'，請確認對方已註冊"
+            target_exists = conn.execute(text("SELECT 1 FROM users WHERE username = :u"), {"u": target_username}).scalar()
+            if not target_exists: return False, f"❌ 找不到帳號 '{target_username}'"
 
-            # 2. 決定分享過去的群組名稱 (防呆：如果對方已有同名群組，加上後綴)
             target_list_name = list_name
-            name_conflict = conn.execute(
-                text("SELECT 1 FROM watchlist_menus WHERE name = :n AND username = :u"),
-                {"n": target_list_name, "u": target_username}
-            ).scalar()
-            
+            name_conflict = conn.execute(text("SELECT 1 FROM watchlist_menus WHERE name = :n AND username = :u"), {"n": target_list_name, "u": target_username}).scalar()
             if name_conflict:
                 target_list_name = f"{list_name}_來自{source_username}"
-                # 如果連後綴都撞名了，直接請使用者先請對方清理
-                double_conflict = conn.execute(
-                    text("SELECT 1 FROM watchlist_menus WHERE name = :n AND username = :u"),
-                    {"n": target_list_name, "u": target_username}
-                ).scalar()
-                if double_conflict:
-                    return False, f"❌ 對方已有 '{target_list_name}'，請先請對方更名或刪除。"
+                double_conflict = conn.execute(text("SELECT 1 FROM watchlist_menus WHERE name = :n AND username = :u"), {"n": target_list_name, "u": target_username}).scalar()
+                if double_conflict: return False, f"❌ 對方已有 '{target_list_name}'，請先請對方更名或刪除。"
 
-            # 3. 取得來源群組的 ID
-            source_menu_id = conn.execute(
-                text("SELECT id FROM watchlist_menus WHERE name = :n AND username = :u"),
-                {"n": list_name, "u": source_username}
-            ).scalar()
-            
-            if not source_menu_id:
-                return False, "❌ 找不到要分享的來源群組"
+            source_menu_id = conn.execute(text("SELECT id FROM watchlist_menus WHERE name = :n AND username = :u"), {"n": list_name, "u": source_username}).scalar()
+            if not source_menu_id: return False, "❌ 找不到要分享的來源群組"
 
-            # 4. 取得該群組內所有的股票代號
-            items = conn.execute(
-                text("SELECT symbol FROM watchlist_items WHERE menu_id = :mid"),
-                {"mid": source_menu_id}
-            ).fetchall()
+            items = conn.execute(text("SELECT symbol FROM watchlist_items WHERE menu_id = :mid"), {"mid": source_menu_id}).fetchall()
+            new_menu_id = conn.execute(text("INSERT INTO watchlist_menus (name, username) VALUES (:n, :u) RETURNING id"), {"n": target_list_name, "u": target_username}).scalar()
 
-            # 5. 幫目標使用者建立新群組，並使用 RETURNING id 立刻取得新 ID
-            new_menu_id = conn.execute(
-                text("INSERT INTO watchlist_menus (name, username) VALUES (:n, :u) RETURNING id"),
-                {"n": target_list_name, "u": target_username}
-            ).scalar()
-
-            # 6. 把股票清單寫入新群組中
             if items:
                 added_date = datetime.now().strftime('%Y-%m-%d')
                 insert_data = [{"mid": new_menu_id, "sym": row[0], "date": added_date} for row in items]
-                conn.execute(
-                    text("INSERT INTO watchlist_items (menu_id, symbol, added_date) VALUES (:mid, :sym, :date) ON CONFLICT DO NOTHING"),
-                    insert_data
-                )
+                conn.execute(text("INSERT INTO watchlist_items (menu_id, symbol, added_date) VALUES (:mid, :sym, :date) ON CONFLICT DO NOTHING"), insert_data)
         
         return True, f"✅ 已成功將「{list_name}」分享給 {target_username}！"
-    except Exception as e:
-        return False, f"系統錯誤: {str(e)}"
+    except Exception as e: return False, f"系統錯誤: {str(e)}"
 
 # --- ETL 資料讀取 ---
 @st.cache_data(ttl=3600)
@@ -516,7 +479,6 @@ def main_app():
         st.session_state.action_msg = None
 
     with st.sidebar.expander("⚙️ 群組管理"):
-        # 1. 建立群組
         new_list_name = st.text_input("建立新群組名稱")
         if st.button("建立"):
             if new_list_name:
@@ -531,7 +493,6 @@ def main_app():
                 
         st.markdown("---") 
         
-        # 2. 改名群組
         rename_text = st.text_input("改名為")
         if st.button("改名"):
             if rename_text:
@@ -546,7 +507,6 @@ def main_app():
                 
         st.markdown("---")
         
-        # 🔥 3. 分享/複製群組 (優化為下拉選單)
         other_users = get_all_users_db(current_user)
         if other_users:
             target_user = st.selectbox("分享目前群組給", options=other_users)
@@ -562,7 +522,6 @@ def main_app():
 
         st.markdown("---")
         
-        # 4. 刪除群組
         if st.button("⚠️ 刪除", type="primary"):
             if len(all_lists) > 1:
                 if delete_list_db(selected_list, current_user): st.rerun()
@@ -582,7 +541,16 @@ def main_app():
     avail_dates = sorted(df_full['date'].dt.date.unique(), reverse=True)
     st.sidebar.header("📅 戰情參數")
     sel_date = st.sidebar.selectbox("日期", avail_dates, 0)
-    sort_opt = st.sidebar.selectbox("排序", ["強勢總分", "加入日期", "漲跌幅", "外資買超", "投信買超"])
+    
+    # 🔥 判斷是否為過去日期，以決定是否顯示並排序「回測報酬率」
+    max_date = df_full['date'].max()
+    is_past_date = pd.Timestamp(sel_date) < max_date
+    
+    sort_opts = ["強勢總分", "加入日期", "漲跌幅", "外資買超", "投信買超"]
+    if is_past_date:
+        sort_opts.append("回測報酬率")
+        
+    sort_opt = st.sidebar.selectbox("排序", sort_opts)
     min_sc = st.sidebar.number_input("分數門檻", 0, 50, 4)
 
     df_day = df_full[df_full['date'] == pd.Timestamp(sel_date)].copy()
@@ -605,6 +573,13 @@ def main_app():
         st.warning("⚠️ 無符合資料")
         return
 
+    # 🔥 如果是過去日期，撈取每檔股票的「最新收盤價」並計算回測報酬率
+    if is_past_date:
+        idx_latest = df_full.groupby('symbol')['date'].idxmax()
+        latest_prices = df_full.loc[idx_latest, ['symbol', 'close']].rename(columns={'close': 'latest_close'})
+        df_day = pd.merge(df_day, latest_prices, on='symbol', how='left')
+        df_day['Backtest_Return'] = (df_day['latest_close'] - df_day['close']) / df_day['close'] * 100
+
     if min_sc > 0 and not st.session_state.query_mode_symbol:
         df_day = df_day[df_day['Total_Score'] >= min_sc]
 
@@ -614,9 +589,16 @@ def main_app():
         elif "漲跌" in sort_opt: df_day = df_day.sort_values(['pct_change','symbol'], ascending=[False,True])
         elif "外資" in sort_opt: df_day = df_day.sort_values(['foreign_net','symbol'], ascending=[False,True])
         elif "投信" in sort_opt: df_day = df_day.sort_values(['trust_net','symbol'], ascending=[False,True])
+        elif "回測報酬率" in sort_opt: df_day = df_day.sort_values(['Backtest_Return','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
-    display_df = df_day[['symbol','name','added_date','industry','close','pct_change', 'Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List']].reset_index(drop=True)
+    # 動態決定要顯示的欄位
+    display_cols = ['symbol','name','added_date','industry','close','pct_change']
+    if is_past_date:
+        display_cols.append('Backtest_Return')
+    display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List'])
+
+    display_df = df_day[display_cols].reset_index(drop=True)
     sym_list = display_df['symbol'].tolist()
 
     if st.session_state.query_mode_symbol:
@@ -626,22 +608,30 @@ def main_app():
 
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
 
+    # 設定數值格式與表頭中文
+    fmt_dict = {
+        "pct_change": "{:.2f}%",
+        "close": "{:.2f}",
+        "Capital": "{:.1f}",
+        "2026EPS": "{:.2f}",
+        "PE_Ratio": "{:.2f}",
+        "Total_Score": "{:.0f}"
+    }
+    col_cfg = {
+        "Capital": "股本",
+        "2026EPS": "2026EPS",
+        "PE_Ratio": "本益比",
+        "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
+    }
+
+    if is_past_date:
+        fmt_dict["Backtest_Return"] = "{:.2f}%"
+        col_cfg["Backtest_Return"] = "回測報酬率"
+
     evt = st.dataframe(
-        display_df.style.format({
-            "pct_change": "{:.2f}%",
-            "close": "{:.2f}",
-            "Capital": "{:.1f}",
-            "2026EPS": "{:.2f}",
-            "PE_Ratio": "{:.2f}",
-            "Total_Score": "{:.0f}"
-        }, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
+        display_df.style.format(fmt_dict, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
         on_select="rerun", selection_mode="single-row", use_container_width=True,
-        column_config={
-            "Capital": "股本",
-            "2026EPS": "2026EPS",
-            "PE_Ratio": "本益比",
-            "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
-        }
+        column_config=col_cfg
     )
 
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
@@ -665,7 +655,12 @@ def main_app():
     st.session_state.last_viewed_symbol = cur_sym
 
     with c3:
-        st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])}</h3>", unsafe_allow_html=True)
+        # 🔥 單檔個股標題也同步顯示回測報酬
+        if is_past_date and pd.notna(cur_info.get('Backtest_Return')):
+            st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])} | 回測: {cur_info['Backtest_Return']:.2f}%</h3>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])}</h3>", unsafe_allow_html=True)
+            
         st.info(f"⚡ {cur_info['Signal_List']}")
 
     chart_src = df_full[df_full['symbol']==cur_sym].sort_values('date')
