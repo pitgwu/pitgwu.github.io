@@ -121,7 +121,7 @@ def load_data():
 # ===========================
 # 4. 核心策略：動態條件驗證
 # ===========================
-def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond1, use_cond2_vol, use_cond3_ma, use_cond4, use_cond5):
+def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond1, use_cond2_vol, use_cond3_ma, use_cond4, use_cond5, use_cond6_bb):
     df = df_full[df_full['date'] <= pd.to_datetime(target_date)].copy()
     if df.empty: return pd.DataFrame()
     
@@ -132,24 +132,31 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
     # 計算昨日均線，用於判斷趨勢箭頭 (上彎或下彎)
     for ma in [5, 10, 20, 60]:
         df[f'prev_MA{ma}'] = df.groupby('symbol')[f'MA{ma}'].shift(1)
-
+    
     # 半年低點
     df['Low_120'] = df.groupby('symbol')['low'].transform(lambda x: x.rolling(window=120, min_periods=60).min())
-
-    # 底部放量運算 (將原本的 2 替換為 vol_multiplier)
+    
+    # 底部放量 (使用可調整的放量倍數 vol_multiplier)
     df['Vol_20MA'] = df.groupby('symbol')['volume_sheets'].transform(lambda x: x.rolling(window=20, min_periods=10).mean())
-    df['is_vol_break'] = df['volume_sheets'] > (df['Vol_20MA'] * vol_multiplier) # 👈 這裡改變了
+    df['is_vol_break'] = df['volume_sheets'] >= (df['Vol_20MA'] * vol_multiplier)
     df['vol_break_20d'] = df.groupby('symbol')['is_vol_break'].transform(lambda x: x.rolling(window=20, min_periods=1).max())
-
+    
     # 回測月線
     df['is_below_20ma'] = df['low'] <= df['MA20']
     df['below_20ma_3d'] = df.groupby('symbol')['is_below_20ma'].transform(lambda x: x.rolling(window=3, min_periods=1).max())
+
+    # 條件 6: 布林通道運算 (近20日高點是否碰觸 3倍布林上軌)
+    df['bb_std'] = df.groupby('symbol')['close'].transform(lambda x: x.rolling(window=20, min_periods=2).std())
+    df['BB_Upper_3x'] = df['MA20'] + 3 * df['bb_std']
+    df['is_bb_hit'] = df['high'] >= df['BB_Upper_3x']
+    df['bb_hit_20d'] = df.groupby('symbol')['is_bb_hit'].transform(lambda x: x.rolling(window=20, min_periods=1).max())
     
     today_df = df[df['date'] == pd.to_datetime(target_date)].copy()
     if today_df.empty: return pd.DataFrame()
 
     # === 動態套用條件 ===
     mask = pd.Series(True, index=today_df.index)
+    
     # 基礎過濾：最少成交量
     mask &= (today_df['volume_sheets'] >= min_volume)
 
@@ -177,6 +184,9 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
     if use_cond5:
         # 收盤 > 開盤 (紅K)，且 收盤 > 昨高
         mask &= (today_df['close'] > today_df['open']) & (today_df['close'] > today_df['prev_high'])
+
+    if use_cond6_bb:
+        mask &= (today_df['bb_hit_20d'] == 1)
 
     today_df['is_match'] = mask
     result_df = today_df[today_df['is_match']].copy()
@@ -303,33 +313,35 @@ def main_app():
         
         # 1. 原本的最少成交量滑桿
         min_volume = st.slider("📊 當日最少成交量 (張)", min_value=500, max_value=10000, value=1000, step=100)
-
         # 2. 🔥 新增：放量倍數滑桿 (預設為 2.0 倍，可調範圍 1.5 ~ 5.0 倍)
-        vol_multiplier = st.slider("📈 底部放量倍數 (大於20日均量)", min_value=1.5, max_value=5.0, value=2.0, step=0.1)
-        
+        vol_multiplier = st.slider("📈 底部放量倍數 (大於20MA均量)", min_value=1.5, max_value=5.0, value=2.0, step=0.1)
+
         st.markdown("---")
+        # 核心條件開關
         c1_low_level = st.checkbox("✅ 條件 1：低位階 (距半年低點 <= 30%)", value=True)
         c2_vol_break = st.checkbox("✅ 條件 2：底部放量 (近20日內曾爆量)", value=True)
         c3_ma_bullish = st.checkbox("✅ 條件 3：四線多排 (5 > 10 > 20 > 60)", value=False)
         c4_pullback = st.checkbox("✅ 條件 4：回測月線後 (近3日破月線, 今收上)", value=False)
         c5_red_k_break = st.checkbox("✅ 條件 5：紅K過昨日高 (收盤>開盤 且 收盤>昨高)", value=False)
+        c6_bb_hit = st.checkbox("✅ 條件 6：前方攻擊布林上緣 (近20日高點曾觸3倍上軌)", value=False)
         
         st.markdown("---")
         if st.button("🚀 執行掃描", type="primary", use_container_width=True):
             with st.spinner("掃描運算中..."):
                 st.session_state.scanned_df = run_strategy_scan(
                     df_full, sel_date, min_volume, vol_multiplier,
-                    c1_low_level, c2_vol_break, c3_ma_bullish, c4_pullback, c5_red_k_break
+                    c1_low_level, c2_vol_break, c3_ma_bullish, c4_pullback, c5_red_k_break, c6_bb_hit
                 )
             st.session_state.has_scanned = True
             st.session_state.ticker_index = 0
             
-            active_conds = [f"成交量 >= {min_volume}張"]
+            active_conds = [f"成交量 >= {min_volume}張", f"放量 >= {vol_multiplier}倍"]
             if c1_low_level: active_conds.append("低位階")
             if c2_vol_break: active_conds.append("底部放量")
             if c3_ma_bullish: active_conds.append("四線多排")
             if c4_pullback: active_conds.append("回測月線")
             if c5_red_k_break: active_conds.append("紅K過昨高")
+            if c6_bb_hit: active_conds.append("攻擊布林上緣")
             st.session_state.active_conds_text = " + ".join(active_conds)
 
     st.title("🐉 神龍擺尾")
@@ -365,7 +377,7 @@ def main_app():
             display_df = display_df.rename(
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
             )
-            
+
             # 判斷是否需要加入「回測報酬率(%)」
             final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '漲跌幅(%)']
             if sel_date < latest_date_in_db and '回測報酬率(%)' in display_df.columns:
@@ -386,7 +398,7 @@ def main_app():
                 format_dict['回測報酬率(%)'] = "{:.2f}%"
 
             styled_df = display_df.style.format(format_dict).map(color_ma_trend, subset=['5MA', '10MA', '20MA', '60MA'])
-            
+
             # 如果有回測報酬率，替它加上紅綠色
             if '回測報酬率(%)' in display_df.columns:
                 styled_df = styled_df.map(color_return_rate, subset=['回測報酬率(%)'])
