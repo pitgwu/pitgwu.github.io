@@ -312,25 +312,35 @@ def action_search():
 def action_add():
     sel_list, usr = st.session_state.get('selected_list_widget'), st.session_state.get('username')
     inp = st.session_state.get('symbol_input_widget', '').strip()
-    code = resolve_stock_symbol(inp, get_stock_mapping())
+    mapping = get_stock_mapping()
+    code = resolve_stock_symbol(inp, mapping)
+    
     if code:
+        # 🔥 優化：新增的同時，觸發「查詢」功能，切換戰情室畫面
+        st.session_state.query_mode_symbol = code
+        st.session_state.ticker_index = 0
+        st.session_state.symbol_input_widget = code
+        
+        # 接著寫入資料庫
         if code not in get_list_data_db(sel_list, usr)['symbol'].tolist():
             if add_stock_db(sel_list, code, usr):
-                st.session_state.symbol_input_widget = code
-                st.session_state.action_msg = ("success", f"✅ {code} 加入成功")
-        else: st.session_state.action_msg = ("warning", "❌ 該股票已在群組中")
-    else: st.session_state.action_msg = ("warning", "❌ 找不到該股票")
-    st.session_state.query_mode_symbol = None
+                st.session_state.action_msg = ("success", f"✅ {code} 已查詢並加入群組")
+        else: 
+            st.session_state.action_msg = ("warning", f"⚠️ {code} 查詢成功，但該股票已在群組中")
+    else: 
+        st.session_state.action_msg = ("warning", "❌ 找不到該股票")
+        st.session_state.query_mode_symbol = None
 
 def action_del():
     sel_list, usr = st.session_state.get('selected_list_widget'), st.session_state.get('username')
     inp = st.session_state.get('symbol_input_widget', '').strip()
-    code = resolve_stock_symbol(inp, get_stock_mapping()) or inp
+    mapping = get_stock_mapping()
+    code = resolve_stock_symbol(inp, mapping) or inp
     if code in get_list_data_db(sel_list, usr)['symbol'].tolist():
         if remove_stock_db(sel_list, code, usr):
             st.session_state.symbol_input_widget = ""
             st.session_state.action_msg = ("success", f"🗑️ {code} 移除成功")
-    else: st.session_state.action_msg = ("warning", "❌ 群組中無此股票")
+    else: st.session_state.action_msg = ("warning", f"❌ 群組中無 {code} 此股票")
     st.session_state.query_mode_symbol = None
 
 def main_app():
