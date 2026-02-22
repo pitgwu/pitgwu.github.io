@@ -273,8 +273,9 @@ min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 500000, 50000)
 min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 30, 5)
 
 st.sidebar.subheader("進階設定")
-short_term_bull = st.sidebar.checkbox("短線多頭排列 (5MA > 10MA > 20MA)", value=False)
-long_term_bull = st.sidebar.checkbox("長線多頭排列 (60MA > 120MA)", value=True)
+# 🔥 這裡修改了預設值：短線 True, 長線 False
+short_term_bull = st.sidebar.checkbox("短線多頭排列 (5MA > 10MA > 20MA)", value=True)
+long_term_bull = st.sidebar.checkbox("長線多頭排列 (60MA > 120MA)", value=False)
 min_days = st.sidebar.slider("最少整理天數", 1, 10, 2, 1)
 
 st.title("📈 均線糾結選股神器")
