@@ -14,7 +14,7 @@ import bcrypt # 需 pip install bcrypt
 # ===========================
 st.set_page_config(page_title="自選股戰情室", layout="wide")
 
-SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL") 
+SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 if not SUPABASE_DB_URL:
     st.error("❌ 未偵測到 SUPABASE_DB_URL，請設定環境變數。")
     st.stop()
@@ -26,7 +26,7 @@ def get_engine():
 engine = get_engine()
 
 # ===========================
-# 2. 身份驗證模組 (保持不變)
+# 2. 身份驗證模組
 # ===========================
 def check_login(username, password):
     try:
@@ -35,7 +35,7 @@ def check_login(username, password):
                 text("SELECT password_hash, role, active FROM users WHERE username = :u"),
                 {"u": username}
             ).fetchone()
-            
+
             if result:
                 db_hash, role, active = result
                 if bcrypt.checkpw(password.encode('utf-8'), db_hash.encode('utf-8')):
@@ -67,7 +67,7 @@ def login_page():
                     st.error(msg)
 
 # ===========================
-# 3. DB 操作函式 (保持不變)
+# 3. DB 操作函式
 # ===========================
 def get_all_lists_db(username):
     with engine.connect() as conn:
@@ -76,7 +76,7 @@ def get_all_lists_db(username):
 
 def get_list_data_db(list_name, username):
     query = """
-    SELECT i.symbol, i.added_date 
+    SELECT i.symbol, i.added_date
     FROM watchlist_items i
     JOIN watchlist_menus m ON i.menu_id = m.id
     WHERE m.name = :list_name AND m.username = :u
@@ -129,7 +129,7 @@ def remove_stock_db(list_name, symbol, username):
     try:
         with engine.begin() as conn:
             conn.execute(text("""
-                DELETE FROM watchlist_items 
+                DELETE FROM watchlist_items
                 WHERE symbol=:s AND menu_id=(SELECT id FROM watchlist_menus WHERE name=:n AND username=:u)
             """), {"s": symbol, "n": list_name, "u": username})
         return True, "移除成功"
@@ -144,9 +144,9 @@ def get_stock_mapping():
         mapping = {}
         for _, row in df.iterrows():
             sym, name = str(row['symbol']).strip(), str(row['name']).strip()
-            mapping[sym.upper()] = sym           
-            mapping[sym.split('.')[0].upper()] = sym    
-            mapping[name.upper()] = sym          
+            mapping[sym.upper()] = sym
+            mapping[sym.split('.')[0].upper()] = sym
+            mapping[name.upper()] = sym
         return mapping
     except: return {}
 
@@ -154,15 +154,15 @@ def resolve_stock_symbol(input_val, mapping):
     if not input_val: return None
     return mapping.get(str(input_val).strip().upper(), None)
 
-@st.cache_data(ttl=600) # 快取 10 分鐘即可，因為資料是輕量級的
+@st.cache_data(ttl=600)
 def load_precalculated_data():
-    """直接從 ETL 產出的資料表撈取算好的數據，不再做複雜的 Pandas 運算"""
+    """直接從 ETL 產出的資料表撈取算好的數據"""
     query = """
-    SELECT date, symbol, name, industry, open, high, low, close, volume, 
-           pct_change, foreign_net, trust_net, 
-           "MA5", "MA10", "MA20", "MA60", 
-           "K", "D", "MACD_OSC", "DIF", 
-           total_score as "Total_Score", 
+    SELECT date, symbol, name, industry, open, high, low, close, volume,
+           pct_change, foreign_net, trust_net,
+           "MA5", "MA10", "MA20", "MA60",
+           "K", "D", "MACD_OSC", "DIF",
+           total_score as "Total_Score",
            signal_list as "Signal_List"
     FROM daily_stock_indicators
     WHERE date >= current_date - INTERVAL '130 days'
@@ -170,52 +170,52 @@ def load_precalculated_data():
     """
     with engine.connect() as conn:
         df = pd.read_sql(query, conn)
-    
+
     if not df.empty:
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
-        # 確保分數與文字不為 null
-        df['Total_Score'] = df['Total_Score'].fillna(0)
-        df['Signal_List'] = df['Signal_List'].fillna("")
         
+        # 🔥 優化 1：強制轉為整數型態 (去掉小數點)
+        df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
+        df['Signal_List'] = df['Signal_List'].fillna("")
+
     return df
 
-# --- 繪圖輔助 (不變) ---
+# --- 繪圖輔助 ---
 def plot_stock_kline(df_stock, symbol, name, active_signals_text):
     df_plot = df_stock.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
     score_val = active_signals_text.count(',') + 1 if active_signals_text else 0
-    
-    # 為了圖表上的動態訊號，僅針對這一檔股票的 130 筆資料做微量運算，極度快速
+
     df_plot['prev_volume'] = df_plot['volume'].shift(1)
     df_plot['vol_ratio'] = df_plot['volume'] / (df_plot['volume'].rolling(5).mean() + 1e-9)
-    
+
     fig = make_subplots(rows=5, cols=1, shared_xaxes=True, vertical_spacing=0.01,
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name} (評分:{score_val})", "量", "KD", "MACD", "訊號"))
 
     fig.add_trace(go.Candlestick(
-        x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], 
+        x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'],
         name='K線', increasing_line_color='red', decreasing_line_color='green'
     ), row=1, col=1)
-    
+
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         if ma in df_plot: fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot[ma], mode='lines', name=ma, line=dict(color=color, width=1)), row=1, col=1)
 
     colors_vol = ['red' if c>=o else 'green' for c,o in zip(df_plot['close'], df_plot['open'])]
     fig.add_trace(go.Bar(x=df_plot['date_str'], y=df_plot['volume'], marker_color=colors_vol, name='量'), row=2, col=1)
-    
+
     fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot['K'], name='K', line=dict(color='orange')), row=3, col=1)
     fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot['D'], name='D', line=dict(color='cyan')), row=3, col=1)
-    
+
     osc_colors = ['red' if v>=0 else 'green' for v in df_plot['MACD_OSC']]
     fig.add_trace(go.Bar(x=df_plot['date_str'], y=df_plot['MACD_OSC'], marker_color=osc_colors, name='OSC'), row=4, col=1)
     fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot['DIF'], name='DIF', line=dict(color='orange')), row=4, col=1)
 
-    signals = [('KD金叉', (df_plot['K']>df_plot['D'])&(df_plot['K'].shift(1)<df_plot['D'].shift(1)), 'diamond','purple'), 
-               ('量攻', (df_plot['volume']>df_plot['prev_volume'])&(df_plot['vol_ratio']>1.2), 'triangle-up','gold'), 
+    signals = [('KD金叉', (df_plot['K']>df_plot['D'])&(df_plot['K'].shift(1)<df_plot['D'].shift(1)), 'diamond','purple'),
+               ('量攻', (df_plot['volume']>df_plot['prev_volume'])&(df_plot['vol_ratio']>1.2), 'triangle-up','gold'),
                ('MACD紅', (df_plot['MACD_OSC']>0)&(df_plot['MACD_OSC'].shift(1)<0), 'square','blue')]
-    
+
     for i, (lbl, mask, sym, clr) in enumerate(signals):
         sig_dates = df_plot[mask]['date_str']
         fig.add_trace(go.Scatter(x=sig_dates, y=[i]*len(sig_dates), mode='markers', name=lbl, marker=dict(symbol=sym, size=10, color=clr)), row=5, col=1)
@@ -234,7 +234,7 @@ def action_search():
     if code:
         st.session_state.query_mode_symbol = code
         st.session_state.ticker_index = 0
-        st.session_state.symbol_input_widget = code 
+        st.session_state.symbol_input_widget = code
         st.session_state.action_msg = ("info", f"🔍 成功查詢：{code}")
     else: st.session_state.action_msg = ("warning", "❌ 找不到該股票")
 
@@ -245,7 +245,7 @@ def action_add():
     if code:
         if code not in get_list_data_db(sel_list, usr)['symbol'].tolist():
             if add_stock_db(sel_list, code, usr):
-                st.session_state.symbol_input_widget = code 
+                st.session_state.symbol_input_widget = code
                 st.session_state.action_msg = ("success", f"✅ {code} 加入成功")
         else: st.session_state.action_msg = ("warning", "❌ 該股票已在清單中")
     else: st.session_state.action_msg = ("warning", "❌ 找不到該股票")
@@ -257,7 +257,7 @@ def action_del():
     code = resolve_stock_symbol(inp, get_stock_mapping()) or inp
     if code in get_list_data_db(sel_list, usr)['symbol'].tolist():
         if remove_stock_db(sel_list, code, usr):
-            st.session_state.symbol_input_widget = "" 
+            st.session_state.symbol_input_widget = ""
             st.session_state.action_msg = ("success", f"🗑️ {code} 移除成功")
     else: st.session_state.action_msg = ("warning", "❌ 清單中無此股票")
     st.session_state.query_mode_symbol = None
@@ -284,10 +284,10 @@ def main_app():
     if not all_lists:
         create_list_db("預設清單", current_user)
         all_lists = get_all_lists_db(current_user)
-    
+
     st.sidebar.selectbox("📂 選擇清單", all_lists, index=0, key="selected_list_widget")
     selected_list = st.session_state.selected_list_widget
-    
+
     watchlist_df = get_list_data_db(selected_list, current_user)
     current_symbols = watchlist_df['symbol'].tolist()
 
@@ -313,7 +313,7 @@ def main_app():
 
     with st.sidebar.expander("⚙️ 清單管理"):
         if new_list_name := st.text_input("建立新清單名稱"):
-            if st.button("建立"): 
+            if st.button("建立"):
                 success, msg = create_list_db(new_list_name, current_user)
                 if success: st.success(msg); st.rerun()
                 else: st.error(msg)
@@ -329,7 +329,7 @@ def main_app():
 
     st.sidebar.markdown("---")
 
-    # --- 🔥 主畫面資料載入與過濾 (極度輕量化) ---
+    # --- 主畫面資料載入 ---
     with st.spinner("載入戰情數據..."):
         df_full = load_precalculated_data()
 
@@ -342,7 +342,7 @@ def main_app():
     sel_date = st.sidebar.selectbox("日期", avail_dates, 0)
     sort_opt = st.sidebar.selectbox("排序", ["強勢總分", "加入日期", "漲跌幅", "外資買超", "投信買超"])
     min_sc = st.sidebar.number_input("分數門檻", 0, 50, 4)
-    
+
     df_day = df_full[df_full['date'] == pd.Timestamp(sel_date)].copy()
 
     if st.session_state.query_mode_symbol:
@@ -353,7 +353,7 @@ def main_app():
         title = f"📊 {selected_list}：{len(target_syms)} 檔"
 
     df_day = df_day[df_day['symbol'].astype(str).isin(target_syms)]
-    
+
     if not st.session_state.query_mode_symbol:
         df_day = pd.merge(df_day, watchlist_df, on='symbol', how='left')
     else:
@@ -363,8 +363,7 @@ def main_app():
         st.warning("⚠️ 無符合資料")
         return
 
-    # 直接使用預先算好的分數進行過濾，不需再跑上百行策略邏輯
-    if min_sc > 0 and not st.session_state.query_mode_symbol: 
+    if min_sc > 0 and not st.session_state.query_mode_symbol:
         df_day = df_day[df_day['Total_Score'] >= min_sc]
 
     if not st.session_state.query_mode_symbol:
@@ -382,16 +381,23 @@ def main_app():
         if st.button("🔙 返回清單"):
             st.session_state.query_mode_symbol = None
             st.rerun()
-    
+
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
-    
-    evt = st.dataframe(display_df.style.format({"pct_change":"{:.2f}%","close":"{:.2f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
-                       on_select="rerun", selection_mode="single-row", use_container_width=True,
-                       column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")})
-    
+
+    # 🔥 優化 2：確保表格內的 Total_Score 強制不顯示小數點 ("{:.0f}")
+    evt = st.dataframe(
+        display_df.style.format({
+            "pct_change":"{:.2f}%",
+            "close":"{:.2f}",
+            "Total_Score":"{:.0f}" 
+        }).background_gradient(subset=['Total_Score'], cmap='Reds'),
+        on_select="rerun", selection_mode="single-row", use_container_width=True,
+        column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
+    )
+
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
-    
-    if not sym_list: 
+
+    if not sym_list:
         st.warning("目前無符合過濾條件的股票。您可以降低「分數門檻」查看更多。")
         return
 
@@ -410,12 +416,13 @@ def main_app():
     st.session_state.last_viewed_symbol = cur_sym
 
     with c3:
-        st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{cur_info['Total_Score']}</h3>", unsafe_allow_html=True)
+        # 🔥 優化 3：下方單檔股票資訊的標題強制轉為 int
+        st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])}</h3>", unsafe_allow_html=True)
         st.info(f"⚡ {cur_info['Signal_List']}")
 
     chart_src = df_full[df_full['symbol']==cur_sym].sort_values('date')
     chart_src = chart_src[chart_src['date'] <= pd.Timestamp(sel_date)]
-    
+
     if len(chart_src)<30: st.error("資料不足")
     else:
         fig = plot_stock_kline(chart_src, cur_sym, cur_info['name'], cur_info['Signal_List'])
