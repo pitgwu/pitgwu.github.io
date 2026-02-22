@@ -121,7 +121,7 @@ def load_data():
 # ===========================
 # 4. 核心策略：動態條件驗證
 # ===========================
-def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol, use_cond3_ma, use_cond4, use_cond5):
+def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond1, use_cond2_vol, use_cond3_ma, use_cond4, use_cond5):
     df = df_full[df_full['date'] <= pd.to_datetime(target_date)].copy()
     if df.empty: return pd.DataFrame()
     
@@ -136,9 +136,9 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
     # 半年低點
     df['Low_120'] = df.groupby('symbol')['low'].transform(lambda x: x.rolling(window=120, min_periods=60).min())
 
-    # 底部放量
+    # 底部放量運算 (將原本的 2 替換為 vol_multiplier)
     df['Vol_20MA'] = df.groupby('symbol')['volume_sheets'].transform(lambda x: x.rolling(window=20, min_periods=10).mean())
-    df['is_vol_break'] = df['volume_sheets'] > (df['Vol_20MA'] * 2)
+    df['is_vol_break'] = df['volume_sheets'] > (df['Vol_20MA'] * vol_multiplier) # 👈 這裡改變了
     df['vol_break_20d'] = df.groupby('symbol')['is_vol_break'].transform(lambda x: x.rolling(window=20, min_periods=1).max())
 
     # 回測月線
@@ -301,8 +301,12 @@ def main_app():
         st.markdown("---")
         st.header("⚙️ 篩選條件設定")
         
+        # 1. 原本的最少成交量滑桿
         min_volume = st.slider("📊 當日最少成交量 (張)", min_value=500, max_value=10000, value=1000, step=100)
 
+        # 2. 🔥 新增：放量倍數滑桿 (預設為 2.0 倍，可調範圍 1.5 ~ 5.0 倍)
+        vol_multiplier = st.slider("📈 底部放量倍數 (大於20日均量)", min_value=1.5, max_value=5.0, value=2.0, step=0.1)
+        
         st.markdown("---")
         c1_low_level = st.checkbox("✅ 條件 1：低位階 (距半年低點 <= 30%)", value=True)
         c2_vol_break = st.checkbox("✅ 條件 2：底部放量 (近20日內曾爆量)", value=True)
@@ -314,7 +318,7 @@ def main_app():
         if st.button("🚀 執行掃描", type="primary", use_container_width=True):
             with st.spinner("掃描運算中..."):
                 st.session_state.scanned_df = run_strategy_scan(
-                    df_full, sel_date, min_volume,
+                    df_full, sel_date, min_volume, vol_multiplier,
                     c1_low_level, c2_vol_break, c3_ma_bullish, c4_pullback, c5_red_k_break
                 )
             st.session_state.has_scanned = True
