@@ -69,12 +69,10 @@ def register_user(username, password):
     except Exception as e:
         return False, f"系統錯誤: {e}"
 
-# 🔥 新增：修改密碼模組
 def update_password(username, old_password, new_password):
     """驗證舊密碼並更新為新密碼"""
     try:
         with engine.begin() as conn:
-            # 1. 取得舊密碼 hash
             result = conn.execute(
                 text("SELECT password_hash FROM users WHERE username = :u"),
                 {"u": username}
@@ -85,11 +83,9 @@ def update_password(username, old_password, new_password):
                 
             db_hash = result[0]
             
-            # 2. 驗證舊密碼
             if not bcrypt.checkpw(old_password.encode('utf-8'), db_hash.encode('utf-8')):
                 return False, "❌ 舊密碼輸入錯誤，請重新確認"
                 
-            # 3. 加密新密碼並更新
             new_hashed_pw = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
             conn.execute(
@@ -343,7 +339,6 @@ def main_app():
     with st.sidebar:
         st.markdown(f"👤 **{current_user}** ({st.session_state['role']})")
         
-        # 🔥 新增：修改密碼區塊 (利用 expander 收合)
         with st.expander("⚙️ 帳號設定 (修改密碼)"):
             with st.form("change_pwd_form"):
                 old_pw = st.text_input("輸入舊密碼", type="password")
@@ -362,7 +357,6 @@ def main_app():
                         else:
                             st.error(msg)
         
-        # 登出按鈕
         if st.button("🚪 登出", type="primary", use_container_width=True):
             st.session_state['logged_in'], st.session_state['role'] = False, None
             st.rerun()
@@ -407,21 +401,44 @@ def main_app():
         elif m_type == "info": st.sidebar.info(m_txt)
         st.session_state.action_msg = None
 
+    # 🔥 修正清單管理的 Bug (移除巢狀的 if，讓按鈕常駐顯示)
     with st.sidebar.expander("⚙️ 清單管理"):
-        if new_list_name := st.text_input("建立新清單名稱"):
-            if st.button("建立"):
+        # 1. 建立清單
+        new_list_name = st.text_input("建立新清單名稱")
+        if st.button("建立"):
+            if new_list_name:
                 success, msg = create_list_db(new_list_name, current_user)
-                if success: st.success(msg); st.rerun()
-                else: st.error(msg)
-        if rename_text := st.text_input("改名為"):
-            if st.button("改名"):
+                if success: 
+                    st.success(msg)
+                    st.rerun()
+                else: 
+                    st.error(msg)
+            else:
+                st.warning("⚠️ 請輸入清單名稱")
+                
+        st.markdown("---") # 加上分隔線增加美觀
+        
+        # 2. 改名清單
+        rename_text = st.text_input("改名為")
+        if st.button("改名"):
+            if rename_text:
                 success, msg = rename_list_db(selected_list, rename_text, current_user)
-                if success: st.success(msg); st.rerun()
-                else: st.error(msg)
+                if success: 
+                    st.success(msg)
+                    st.rerun()
+                else: 
+                    st.error(msg)
+            else:
+                st.warning("⚠️ 請輸入新名稱")
+                
+        st.markdown("---")
+        
+        # 3. 刪除清單
         if st.button("⚠️ 刪除", type="primary"):
             if len(all_lists) > 1:
                 if delete_list_db(selected_list, current_user): st.rerun()
-            else: st.warning("至少保留一個清單")
+            else: 
+                st.warning("至少保留一個清單")
 
     st.sidebar.markdown("---")
 
