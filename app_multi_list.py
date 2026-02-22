@@ -316,17 +316,18 @@ def action_add():
     code = resolve_stock_symbol(inp, mapping)
     
     if code:
-        # 🔥 優化：新增的同時，觸發「查詢」功能，切換戰情室畫面
-        st.session_state.query_mode_symbol = code
-        st.session_state.ticker_index = 0
+        # 🔥 優化：將完整的股票代號填回輸入框 (取代原先的模糊搜尋字眼)
         st.session_state.symbol_input_widget = code
         
-        # 接著寫入資料庫
+        # 寫入資料庫
         if code not in get_list_data_db(sel_list, usr)['symbol'].tolist():
             if add_stock_db(sel_list, code, usr):
-                st.session_state.action_msg = ("success", f"✅ {code} 已查詢並加入群組")
+                st.session_state.action_msg = ("success", f"✅ {code} 已成功加入群組")
         else: 
-            st.session_state.action_msg = ("warning", f"⚠️ {code} 查詢成功，但該股票已在群組中")
+            st.session_state.action_msg = ("warning", f"⚠️ 查詢成功，但 {code} 已在群組中")
+            
+        # 🔥 優化：確保返回「群組總覽模式」(取消單檔查詢的鎖定)
+        st.session_state.query_mode_symbol = None
     else: 
         st.session_state.action_msg = ("warning", "❌ 找不到該股票")
         st.session_state.query_mode_symbol = None
