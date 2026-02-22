@@ -443,8 +443,31 @@ def main_app():
     min_sc = st.sidebar.number_input("分數門檻", 0, 50, 4)
     
     target_date_ts = pd.Timestamp(sel_date)
-    df_day = df_full[df_full['date'] == target_date_ts].copy()
+    
+    # 🔥 修正點 1: 在切割出「自選清單」之前，先對「全市場當日資料」進行排名計算
+    df_day_all_market = df_full[df_full['date'] == target_date_ts].copy()
 
+    # 針對真正有「買超(>0)」的股票進行排名，賣超或沒買賣的股票設為 NaN (不參與排名)
+    # 外資
+    f_net_positive = df_day_all_market['foreign_net'].where(df_day_all_market['foreign_net'] > 0)
+    f_sum5_positive = df_day_all_market['f_sum_5d'].where(df_day_all_market['f_sum_5d'] > 0)
+    # 投信
+    t_net_positive = df_day_all_market['trust_net'].where(df_day_all_market['trust_net'] > 0)
+    t_sum5_positive = df_day_all_market['t_sum_5d'].where(df_day_all_market['t_sum_5d'] > 0)
+
+    # 計算全市場排名
+    df_day_all_market['global_rank_pct_1d'] = df_day_all_market['pct_change'].rank(ascending=False, method='min')
+    df_day_all_market['global_rank_pct_5d'] = df_day_all_market['pct_change_5d'].rank(ascending=False, method='min')
+    
+    # 只針對大於0的數值給予名次，其他的會保持 NaN
+    df_day_all_market['global_rank_f_1d'] = f_net_positive.rank(ascending=False, method='min')
+    df_day_all_market['global_rank_f_5d'] = f_sum5_positive.rank(ascending=False, method='min')
+    df_day_all_market['global_rank_t_1d'] = t_net_positive.rank(ascending=False, method='min')
+    df_day_all_market['global_rank_t_5d'] = t_sum5_positive.rank(ascending=False, method='min')
+
+    # ------------------------------------------------------------------
+
+    # 🔥 修正點 2: 將計算好「全市場排名」的 df_day_all_market 濾出自選清單，指派給 df_day
     if st.session_state.query_mode_symbol:
         target_syms = [st.session_state.query_mode_symbol]
         title = f"🔍 查詢：{target_syms[0]}"
@@ -452,7 +475,7 @@ def main_app():
         target_syms = current_symbols
         title = f"📊 {selected_list}：{len(target_syms)} 檔"
 
-    df_day = df_day[df_day['symbol'].astype(str).isin(target_syms)]
+    df_day = df_day_all_market[df_day_all_market['symbol'].astype(str).isin(target_syms)].copy()
     
     if not st.session_state.query_mode_symbol:
         df_day = pd.merge(df_day, watchlist_df, on='symbol', how='left')
@@ -463,14 +486,7 @@ def main_app():
         st.warning("⚠️ 無符合資料")
         return
 
-    # --- 🔥 動態訊號產生與排名計算 ---
-    df_day['rank_pct_1d'] = df_day['pct_change'].rank(ascending=False, method='min')
-    df_day['rank_pct_5d'] = df_day['pct_change_5d'].rank(ascending=False, method='min')
-    df_day['rank_f_1d'] = df_day['foreign_net'].rank(ascending=False, method='min')
-    df_day['rank_f_5d'] = df_day['f_sum_5d'].rank(ascending=False, method='min')
-    df_day['rank_t_1d'] = df_day['trust_net'].rank(ascending=False, method='min')
-    df_day['rank_t_5d'] = df_day['t_sum_5d'].rank(ascending=False, method='min')
-
+    # --- 🔥 動態訊號產生 ---
     df_day['signals_str'] = [[] for _ in range(len(df_day))]
     score = pd.Series(0, index=df_day.index)
 
@@ -482,13 +498,20 @@ def main_app():
     txt_vol_5 = fmt(df_day['vol_bias_ma5'], "較5日量增{:.1f}%")
     
     txt_f_buy = df_day['f_buy_streak'].fillna(0).astype(int).apply(lambda x: f"外資連買超{x}天")
-    txt_f_rank_1d = df_day['rank_f_1d'].fillna(999).astype(int).apply(lambda x: f"外資今日買超第{x}名")
-    txt_f_rank_5d = df_day['rank_f_5d'].fillna(999).astype(int).apply(lambda x: f"外資近5日買超第{x}名")
+    
+    # 🔥 修正點 3: 使用全市場排名 (global_rank) 來產生文字。若為 NaN (沒買超)，則不產生名次文字
+    # 建立輔助函式，處理有排名的才產生文字
+    def fmt_rank(val_series, template):
+         return val_series.apply(lambda x: template.format(int(x)) if pd.notna(x) else "")
+
+    txt_f_rank_1d = fmt_rank(df_day['global_rank_f_1d'], "外資今日買超第{}名")
+    txt_f_rank_5d = fmt_rank(df_day['global_rank_f_5d'], "外資近5日買超第{}名")
 
     txt_t_buy = df_day['t_buy_streak'].fillna(0).astype(int).apply(lambda x: f"投信連買超{x}天")
-    txt_t_rank_1d = df_day['rank_t_1d'].fillna(999).astype(int).apply(lambda x: f"投信今日買超第{x}名")
-    txt_t_rank_5d = df_day['rank_t_5d'].fillna(999).astype(int).apply(lambda x: f"投信近5日買超第{x}名")
+    txt_t_rank_1d = fmt_rank(df_day['global_rank_t_1d'], "投信今日買超第{}名")
+    txt_t_rank_5d = fmt_rank(df_day['global_rank_t_5d'], "投信近5日買超第{}名")
     
+    # 策略判斷邏輯
     strategies = [
         # 價格與均線
         (df_day['close'] > df_day['MA5'], txt_bias_w),
@@ -516,26 +539,27 @@ def main_app():
 
         # 籌碼 (外資)
         (df_day['f_buy_streak'] >= 3, txt_f_buy),
-        (df_day['rank_f_1d'] <= 12, txt_f_rank_1d),
-        (df_day['rank_f_5d'] <= 22, txt_f_rank_5d),
+        # 條件改為：若有全市場排名，且名次小於等於 12 (或 22) 才給分
+        (df_day['global_rank_f_1d'] <= 12, txt_f_rank_1d),
+        (df_day['global_rank_f_5d'] <= 22, txt_f_rank_5d),
 
         # 籌碼 (投信)
         (df_day['t_buy_streak'] >= 3, txt_t_buy),
-        (df_day['rank_t_1d'] <= 12, txt_t_rank_1d),
-        (df_day['rank_t_5d'] <= 22, txt_t_rank_5d),
+        (df_day['global_rank_t_1d'] <= 12, txt_t_rank_1d),
+        (df_day['global_rank_t_5d'] <= 22, txt_t_rank_5d),
     ]
 
     for mask, txt in strategies:
-        score += mask.astype(int)
-        if mask.any():
+        score += mask.fillna(False).astype(int) # 確保 NaN 被轉為 False
+        if mask.fillna(False).any():
             if isinstance(txt, pd.Series):
-                vals = txt[mask]
-                df_day.loc[mask, 'signals_str'] = df_day.loc[mask].apply(
-                    lambda row: row['signals_str'] + [vals[row.name]] if row.name in vals.index else row['signals_str'], 
+                vals = txt[mask.fillna(False)]
+                df_day.loc[mask.fillna(False), 'signals_str'] = df_day.loc[mask.fillna(False)].apply(
+                    lambda row: row['signals_str'] + [vals[row.name]] if row.name in vals.index and vals[row.name] != "" else row['signals_str'], 
                     axis=1
                 )
             else:
-                df_day.loc[mask, 'signals_str'] = df_day.loc[mask, 'signals_str'].apply(lambda x: x + [txt])
+                df_day.loc[mask.fillna(False), 'signals_str'] = df_day.loc[mask.fillna(False), 'signals_str'].apply(lambda x: x + [txt])
 
     df_day['Total_Score'] = score
     df_day['Signal_List'] = df_day['signals_str'].apply(lambda x: ", ".join(x))
