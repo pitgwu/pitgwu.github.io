@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np  # 🔥 新增 numpy 用於數學運算
+import numpy as np
 import sqlalchemy
 from sqlalchemy import text
 import os
@@ -95,51 +95,21 @@ def update_password(username, old_password, new_password):
     except Exception as e:
         return False, f"系統錯誤: {e}"
 
-def login_page():
-    st.markdown("<h1 style='text-align: center;'>🔐 自選股戰情室</h1>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊新帳號"])
-        
-        with tab_login:
-            with st.form("login_form"):
-                username = st.text_input("帳號")
-                password = st.text_input("密碼", type="password")
-                submit = st.form_submit_button("登入", use_container_width=True)
-                if submit:
-                    success, role, msg = check_login(username, password)
-                    if success:
-                        st.session_state['logged_in'] = True
-                        st.session_state['username'] = username
-                        st.session_state['role'] = role
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                        
-        with tab_register:
-            with st.form("register_form"):
-                new_username = st.text_input("設定帳號")
-                new_password = st.text_input("設定密碼", type="password")
-                confirm_password = st.text_input("確認密碼", type="password")
-                reg_submit = st.form_submit_button("註冊", use_container_width=True)
-                
-                if reg_submit:
-                    if not new_username or not new_password:
-                        st.error("⚠️ 帳號與密碼不能為空白")
-                    elif new_password != confirm_password:
-                        st.error("⚠️ 兩次輸入的密碼不一致，請重新確認")
-                    else:
-                        success, msg = register_user(new_username, new_password)
-                        if success:
-                            st.success(msg)
-                        else:
-                            st.error(msg)
-
 # ===========================
 # 3. DB 操作函式
 # ===========================
+def get_all_users_db(current_username):
+    """🔥 新增：取得系統中除了自己以外的所有使用者帳號，供下拉選單使用"""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT username FROM users WHERE username != :u ORDER BY username"),
+                {"u": current_username}
+            ).fetchall()
+            return [row[0] for row in result]
+    except Exception as e:
+        return []
+
 def get_all_lists_db(username):
     with engine.connect() as conn:
         result = conn.execute(text("SELECT name FROM watchlist_menus WHERE username = :u ORDER BY name"), {"u": username})
@@ -206,6 +176,72 @@ def remove_stock_db(list_name, symbol, username):
         return True, "移除成功"
     except Exception as e: return False, str(e)
 
+def clone_list_db(list_name, source_username, target_username):
+    if source_username == target_username:
+        return False, "⚠️ 不能分享給自己喔！"
+    
+    try:
+        with engine.begin() as conn:
+            # 1. 檢查目標使用者是否存在
+            target_exists = conn.execute(
+                text("SELECT 1 FROM users WHERE username = :u"),
+                {"u": target_username}
+            ).scalar()
+            
+            if not target_exists:
+                return False, f"❌ 找不到帳號 '{target_username}'，請確認對方已註冊"
+
+            # 2. 決定分享過去的群組名稱 (防呆：如果對方已有同名群組，加上後綴)
+            target_list_name = list_name
+            name_conflict = conn.execute(
+                text("SELECT 1 FROM watchlist_menus WHERE name = :n AND username = :u"),
+                {"n": target_list_name, "u": target_username}
+            ).scalar()
+            
+            if name_conflict:
+                target_list_name = f"{list_name}_來自{source_username}"
+                # 如果連後綴都撞名了，直接請使用者先請對方清理
+                double_conflict = conn.execute(
+                    text("SELECT 1 FROM watchlist_menus WHERE name = :n AND username = :u"),
+                    {"n": target_list_name, "u": target_username}
+                ).scalar()
+                if double_conflict:
+                    return False, f"❌ 對方已有 '{target_list_name}'，請先請對方更名或刪除。"
+
+            # 3. 取得來源群組的 ID
+            source_menu_id = conn.execute(
+                text("SELECT id FROM watchlist_menus WHERE name = :n AND username = :u"),
+                {"n": list_name, "u": source_username}
+            ).scalar()
+            
+            if not source_menu_id:
+                return False, "❌ 找不到要分享的來源群組"
+
+            # 4. 取得該群組內所有的股票代號
+            items = conn.execute(
+                text("SELECT symbol FROM watchlist_items WHERE menu_id = :mid"),
+                {"mid": source_menu_id}
+            ).fetchall()
+
+            # 5. 幫目標使用者建立新群組，並使用 RETURNING id 立刻取得新 ID
+            new_menu_id = conn.execute(
+                text("INSERT INTO watchlist_menus (name, username) VALUES (:n, :u) RETURNING id"),
+                {"n": target_list_name, "u": target_username}
+            ).scalar()
+
+            # 6. 把股票清單寫入新群組中
+            if items:
+                added_date = datetime.now().strftime('%Y-%m-%d')
+                insert_data = [{"mid": new_menu_id, "sym": row[0], "date": added_date} for row in items]
+                conn.execute(
+                    text("INSERT INTO watchlist_items (menu_id, symbol, added_date) VALUES (:mid, :sym, :date) ON CONFLICT DO NOTHING"),
+                    insert_data
+                )
+        
+        return True, f"✅ 已成功將「{list_name}」分享給 {target_username}！"
+    except Exception as e:
+        return False, f"系統錯誤: {str(e)}"
+
 # --- ETL 資料讀取 ---
 @st.cache_data(ttl=3600)
 def get_stock_mapping():
@@ -227,7 +263,6 @@ def resolve_stock_symbol(input_val, mapping):
 
 @st.cache_data(ttl=600)
 def load_precalculated_data():
-    # 🔥 優化：透過 LEFT JOIN 把 stock_eps 表的 Capital 與 2026EPS 撈出來
     query = """
     SELECT d.date, d.symbol, d.name, d.industry, d.open, d.high, d.low, d.close, d.volume,
            d.pct_change, d.foreign_net, d.trust_net,
@@ -250,12 +285,9 @@ def load_precalculated_data():
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
         
-        # 🔥 將新增的股本與EPS轉為數值型態
         df['Capital'] = pd.to_numeric(df['Capital'], errors='coerce')
         df['2026EPS'] = pd.to_numeric(df['2026EPS'], errors='coerce')
         
-        # 🔥 計算本益比 (PE_Ratio = 收盤價 / 2026EPS) 
-        # 只在 EPS > 0 時計算，其餘設為 NaN，避免無限大或負數干擾
         df['PE_Ratio'] = np.where(
             (df['2026EPS'] > 0) & df['2026EPS'].notna(),
             df['close'] / df['2026EPS'],
@@ -373,6 +405,48 @@ def action_del():
     else: st.session_state.action_msg = ("warning", f"❌ 群組中無 {code} 此股票")
     st.session_state.query_mode_symbol = None
 
+def login_page():
+    st.markdown("<h1 style='text-align: center;'>🔐 自選股戰情室</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊新帳號"])
+        
+        with tab_login:
+            with st.form("login_form"):
+                username = st.text_input("帳號")
+                password = st.text_input("密碼", type="password")
+                submit = st.form_submit_button("登入", use_container_width=True)
+                if submit:
+                    success, role, msg = check_login(username, password)
+                    if success:
+                        st.session_state['logged_in'] = True
+                        st.session_state['username'] = username
+                        st.session_state['role'] = role
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                        
+        with tab_register:
+            with st.form("register_form"):
+                new_username = st.text_input("設定帳號")
+                new_password = st.text_input("設定密碼", type="password")
+                confirm_password = st.text_input("確認密碼", type="password")
+                reg_submit = st.form_submit_button("註冊", use_container_width=True)
+                
+                if reg_submit:
+                    if not new_username or not new_password:
+                        st.error("⚠️ 帳號與密碼不能為空白")
+                    elif new_password != confirm_password:
+                        st.error("⚠️ 兩次輸入的密碼不一致，請重新確認")
+                    else:
+                        success, msg = register_user(new_username, new_password)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+
 def main_app():
     current_user = st.session_state['username']
 
@@ -442,6 +516,7 @@ def main_app():
         st.session_state.action_msg = None
 
     with st.sidebar.expander("⚙️ 群組管理"):
+        # 1. 建立群組
         new_list_name = st.text_input("建立新群組名稱")
         if st.button("建立"):
             if new_list_name:
@@ -456,6 +531,7 @@ def main_app():
                 
         st.markdown("---") 
         
+        # 2. 改名群組
         rename_text = st.text_input("改名為")
         if st.button("改名"):
             if rename_text:
@@ -470,6 +546,23 @@ def main_app():
                 
         st.markdown("---")
         
+        # 🔥 3. 分享/複製群組 (優化為下拉選單)
+        other_users = get_all_users_db(current_user)
+        if other_users:
+            target_user = st.selectbox("分享目前群組給", options=other_users)
+            if st.button("分享"):
+                if target_user:
+                    success, msg = clone_list_db(selected_list, current_user, target_user)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+        else:
+            st.info("系統中目前沒有其他帳號可供分享。")
+
+        st.markdown("---")
+        
+        # 4. 刪除群組
         if st.button("⚠️ 刪除", type="primary"):
             if len(all_lists) > 1:
                 if delete_list_db(selected_list, current_user): st.rerun()
@@ -523,7 +616,6 @@ def main_app():
         elif "投信" in sort_opt: df_day = df_day.sort_values(['trust_net','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
-    # 🔥 將新的欄位 Capital、2026EPS、PE_Ratio 加入顯示清單中
     display_df = df_day[['symbol','name','added_date','industry','close','pct_change', 'Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List']].reset_index(drop=True)
     sym_list = display_df['symbol'].tolist()
 
@@ -534,7 +626,6 @@ def main_app():
 
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
 
-    # 🔥 優化：為新欄位設定顯示格式與表頭中文
     evt = st.dataframe(
         display_df.style.format({
             "pct_change": "{:.2f}%",
