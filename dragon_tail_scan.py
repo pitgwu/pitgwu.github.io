@@ -132,7 +132,7 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
     # 計算昨日均線，用於判斷趨勢箭頭 (上彎或下彎)
     for ma in [5, 10, 20, 60]:
         df[f'prev_MA{ma}'] = df.groupby('symbol')[f'MA{ma}'].shift(1)
-        
+
     # 半年低點
     df['Low_120'] = df.groupby('symbol')['low'].transform(lambda x: x.rolling(window=120, min_periods=60).min())
 
@@ -179,12 +179,22 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
         mask &= (today_df['close'] > today_df['open']) & (today_df['close'] > today_df['prev_high'])
 
     today_df['is_match'] = mask
-    result_df = today_df[today_df['is_match']]
+    result_df = today_df[today_df['is_match']].copy()
+    
+    # === 計算回測報酬率 ===
+    latest_date_in_db = df_full['date'].max()
+    if pd.to_datetime(target_date) < latest_date_in_db:
+        # 取得最新一天的資料
+        latest_df = df_full[df_full['date'] == latest_date_in_db].set_index('symbol')
+        # 把最新收盤價對應回結果表
+        result_df['latest_close'] = result_df['symbol'].map(latest_df['close'])
+        # 計算報酬率 ((最新收盤 - 掃描日收盤) / 掃描日收盤) * 100
+        result_df['回測報酬率(%)'] = ((result_df['latest_close'] - result_df['close']) / result_df['close']) * 100
     
     return result_df
 
 # ===========================
-# 5. K 線繪圖輔助 (加入布林通道)
+# 5. K 線繪圖輔助
 # ===========================
 def plot_stock_kline(df_stock, symbol, name):
     # 為了避免前 20 天出現 NaN，在切片前先計算布林通道 (20, 3)
@@ -255,6 +265,14 @@ def color_ma_trend(val):
         return 'color: #00CC96; font-weight: bold;'
     return ''
 
+def color_return_rate(val):
+    if pd.isna(val): return ''
+    if val > 0:
+        return 'color: #FF4B4B; font-weight: bold;'
+    elif val < 0:
+        return 'color: #00CC96; font-weight: bold;'
+    return ''
+
 # ===========================
 # 6. 主程式介面
 # ===========================
@@ -275,6 +293,7 @@ def main_app():
             st.stop()
 
         avail_dates = sorted(df_full['date'].dt.date.unique(), reverse=True)
+        latest_date_in_db = avail_dates[0]
         
         st.header("📅 日期設定")
         sel_date = st.selectbox("請選擇掃描日期", avail_dates, 0)
@@ -343,17 +362,30 @@ def main_app():
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
             )
             
+            # 判斷是否需要加入「回測報酬率(%)」
             final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '漲跌幅(%)']
+            if sel_date < latest_date_in_db and '回測報酬率(%)' in display_df.columns:
+                final_cols.append('回測報酬率(%)')
+
+            # 排序：如果有回測報酬率，可以優先用回測報酬率排序，或者維持漲跌幅排序。這裡維持你的原設定：以當日漲跌幅為主。
             display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
             
             sym_list = display_df['symbol'].tolist()
 
-            styled_df = display_df.style.format({
+            format_dict = {
                 "當日收盤": "{:.2f}",
                 "半年低點": "{:.2f}",
                 "成交量(張)": "{:,}",
                 "漲跌幅(%)": "{:.2f}%"
-            }).map(color_ma_trend, subset=['5MA', '10MA', '20MA', '60MA'])
+            }
+            if '回測報酬率(%)' in display_df.columns:
+                format_dict['回測報酬率(%)'] = "{:.2f}%"
+
+            styled_df = display_df.style.format(format_dict).map(color_ma_trend, subset=['5MA', '10MA', '20MA', '60MA'])
+            
+            # 如果有回測報酬率，替它加上紅綠色
+            if '回測報酬率(%)' in display_df.columns:
+                styled_df = styled_df.map(color_return_rate, subset=['回測報酬率(%)'])
 
             evt = st.dataframe(
                 styled_df,
@@ -381,7 +413,13 @@ def main_app():
             cur_info = display_df.iloc[st.session_state.ticker_index]
 
             with c3:
-                st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']}</h3>", unsafe_allow_html=True)
+                # 標題加上最新回測結果顯示
+                title_html = f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']}</h3>"
+                if '回測報酬率(%)' in cur_info and not pd.isna(cur_info['回測報酬率(%)']):
+                    ret_val = cur_info['回測報酬率(%)']
+                    color = '#FF4B4B' if ret_val > 0 else '#00CC96'
+                    title_html = f"<h3 style='text-align:center;'>{cur_sym} {cur_info['name']} <span style='color:{color}; font-size:0.8em;'>(回測: {ret_val:.2f}%)</span></h3>"
+                st.markdown(title_html, unsafe_allow_html=True)
 
             chart_src = df_full[df_full['symbol'] == cur_sym].sort_values('date')
             chart_src = chart_src[chart_src['date'] <= pd.Timestamp(sel_date)]
