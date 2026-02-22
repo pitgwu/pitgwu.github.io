@@ -273,7 +273,6 @@ min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 500000, 50000)
 min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 30, 5)
 
 st.sidebar.subheader("進階設定")
-# 🔥 這裡修改了預設值：短線 True, 長線 False
 short_term_bull = st.sidebar.checkbox("短線多頭排列 (5MA > 10MA > 20MA)", value=True)
 long_term_bull = st.sidebar.checkbox("長線多頭排列 (60MA > 120MA)", value=False)
 min_days = st.sidebar.slider("最少整理天數", 1, 10, 2, 1)
@@ -404,6 +403,10 @@ else:
             chart['MA60'] = chart['close'].rolling(60).mean()
             chart['MA120'] = chart['close'].rolling(120).mean()
 
+            # 🔥 關鍵修正：將日期轉換為字串格式，強制 Plotly 將 X 軸視為「類別 (Category)」
+            # 這樣就可以完美消滅週休二日與國定假日的空白斷層，讓 K 棒等距緊密排列！
+            chart_dates = chart['date'].dt.strftime('%Y-%m-%d')
+
             fig = make_subplots(
                 rows=2, cols=1, 
                 shared_xaxes=True, 
@@ -412,20 +415,24 @@ else:
                 subplot_titles=(f"{current_sym_str} - 日K線圖", "成交量")
             )
 
+            # 將所有 X 軸資料換成 chart_dates
             fig.add_trace(go.Candlestick(
-                x=chart['date'], open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'], 
+                x=chart_dates, open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'], 
                 increasing_line_color='#ef5350', decreasing_line_color='#26a69a', name='K線'
             ), row=1, col=1)
             
-            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA5'], line=dict(color='orange', width=1), name='MA5'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA20'], line=dict(color='purple', width=1), name='MA20'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA60'], line=dict(color='blue', width=1), name='MA60'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=chart['date'], y=chart['MA120'], line=dict(color='green', width=1, dash='dot'), name='MA120'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA5'], line=dict(color='orange', width=1), name='MA5'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA20'], line=dict(color='purple', width=1), name='MA20'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA60'], line=dict(color='blue', width=1), name='MA60'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=chart_dates, y=chart['MA120'], line=dict(color='green', width=1, dash='dot'), name='MA120'), row=1, col=1)
             
             vol_colors = ['#ef5350' if c >= o else '#26a69a' for c, o in zip(chart['close'], chart['open'])]
             fig.add_trace(go.Bar(
-                x=chart['date'], y=chart['volume'], marker_color=vol_colors, name='成交量'
+                x=chart_dates, y=chart['volume'], marker_color=vol_colors, name='成交量'
             ), row=2, col=1)
+
+            # 設定 X 軸強制為類別 (type='category') 並限制標籤數量 (nticks) 避免太擠
+            fig.update_xaxes(type='category', nticks=15)
 
             fig.update_layout(
                 xaxis_rangeslider_visible=False, 
