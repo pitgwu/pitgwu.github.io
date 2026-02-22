@@ -162,7 +162,7 @@ def get_list_data_db(list_name, username):
 
 def create_list_db(new_name, username):
     current_lists = get_all_lists_db(username)
-    if len(current_lists) >= 200: return False, "清單數量已達上限"
+    if len(current_lists) >= 200: return False, "群組數量已達上限"
     if new_name in current_lists: return False, "名稱已存在"
     try:
         with engine.begin() as conn:
@@ -191,7 +191,7 @@ def add_stock_db(list_name, symbol, username):
     try:
         with engine.begin() as conn:
             menu_id = conn.execute(text("SELECT id FROM watchlist_menus WHERE name = :name AND username = :u"), {"name": list_name, "u": username}).scalar()
-            if not menu_id: return False, "清單不存在"
+            if not menu_id: return False, "群組不存在"
             conn.execute(text("""
                 INSERT INTO watchlist_items (menu_id, symbol, added_date) VALUES (:mid, :sym, :date)
                 ON CONFLICT (menu_id, symbol) DO NOTHING
@@ -318,7 +318,7 @@ def action_add():
             if add_stock_db(sel_list, code, usr):
                 st.session_state.symbol_input_widget = code
                 st.session_state.action_msg = ("success", f"✅ {code} 加入成功")
-        else: st.session_state.action_msg = ("warning", "❌ 該股票已在清單中")
+        else: st.session_state.action_msg = ("warning", "❌ 該股票已在群組中")
     else: st.session_state.action_msg = ("warning", "❌ 找不到該股票")
     st.session_state.query_mode_symbol = None
 
@@ -330,7 +330,7 @@ def action_del():
         if remove_stock_db(sel_list, code, usr):
             st.session_state.symbol_input_widget = ""
             st.session_state.action_msg = ("success", f"🗑️ {code} 移除成功")
-    else: st.session_state.action_msg = ("warning", "❌ 清單中無此股票")
+    else: st.session_state.action_msg = ("warning", "❌ 群組中無此股票")
     st.session_state.query_mode_symbol = None
 
 def main_app():
@@ -372,16 +372,16 @@ def main_app():
     st.sidebar.header("📝 股票管理")
     all_lists = get_all_lists_db(current_user)
     if not all_lists:
-        create_list_db("預設清單", current_user)
+        create_list_db("預設群組", current_user)
         all_lists = get_all_lists_db(current_user)
 
-    st.sidebar.selectbox("📂 選擇清單", all_lists, index=0, key="selected_list_widget")
+    st.sidebar.selectbox("📂 選擇群組", all_lists, index=0, key="selected_list_widget")
     selected_list = st.session_state.selected_list_widget
 
     watchlist_df = get_list_data_db(selected_list, current_user)
     current_symbols = watchlist_df['symbol'].tolist()
 
-    with st.sidebar.expander(f"📋 查看清單 ({len(current_symbols)})", expanded=True):
+    with st.sidebar.expander(f"📋 查看群組 ({len(current_symbols)})", expanded=True):
         event = st.dataframe(watchlist_df, hide_index=True, on_select="rerun", selection_mode="single-row", use_container_width=True)
         if event.selection.rows != st.session_state.last_df_selection:
             st.session_state.last_df_selection = event.selection.rows
@@ -401,10 +401,9 @@ def main_app():
         elif m_type == "info": st.sidebar.info(m_txt)
         st.session_state.action_msg = None
 
-    # 🔥 修正清單管理的 Bug (移除巢狀的 if，讓按鈕常駐顯示)
-    with st.sidebar.expander("⚙️ 清單管理"):
-        # 1. 建立清單
-        new_list_name = st.text_input("建立新清單名稱")
+    with st.sidebar.expander("⚙️ 群組管理"):
+        # 1. 建立群組
+        new_list_name = st.text_input("建立新群組名稱")
         if st.button("建立"):
             if new_list_name:
                 success, msg = create_list_db(new_list_name, current_user)
@@ -414,11 +413,11 @@ def main_app():
                 else: 
                     st.error(msg)
             else:
-                st.warning("⚠️ 請輸入清單名稱")
+                st.warning("⚠️ 請輸入群組名稱")
                 
-        st.markdown("---") # 加上分隔線增加美觀
+        st.markdown("---") 
         
-        # 2. 改名清單
+        # 2. 改名群組
         rename_text = st.text_input("改名為")
         if st.button("改名"):
             if rename_text:
@@ -433,12 +432,12 @@ def main_app():
                 
         st.markdown("---")
         
-        # 3. 刪除清單
+        # 3. 刪除群組
         if st.button("⚠️ 刪除", type="primary"):
             if len(all_lists) > 1:
                 if delete_list_db(selected_list, current_user): st.rerun()
             else: 
-                st.warning("至少保留一個清單")
+                st.warning("至少保留一個群組")
 
     st.sidebar.markdown("---")
 
@@ -491,7 +490,7 @@ def main_app():
     sym_list = display_df['symbol'].tolist()
 
     if st.session_state.query_mode_symbol:
-        if st.button("🔙 返回清單"):
+        if st.button("🔙 返回群組"):
             st.session_state.query_mode_symbol = None
             st.rerun()
 
