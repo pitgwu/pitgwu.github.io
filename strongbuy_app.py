@@ -25,7 +25,7 @@ def get_engine():
 engine = get_engine()
 
 # ===========================
-# 2. 身份驗證
+# 2. 身份驗證與註冊模組
 # ===========================
 def check_login(username, password):
     try:
@@ -37,25 +37,100 @@ def check_login(username, password):
                 db_hash, role, active = result
                 if bcrypt.checkpw(password.encode('utf-8'), db_hash.encode('utf-8')):
                     if active == 'yes': return True, role, "登入成功"
-                    else: return False, None, "⚠️ 帳號尚未開通"
+                    else: return False, None, "⚠️ 您的帳號尚未開通，請聯繫管理員"
             return False, None, "❌ 帳號或密碼錯誤"
     except Exception as e: return False, None, f"系統錯誤: {e}"
+
+def register_user(username, password):
+    """處理新使用者註冊，預設 active = 'no'"""
+    try:
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM users WHERE username = :u"), 
+                {"u": username}
+            ).scalar()
+            
+            if exists:
+                return False, "❌ 此帳號已被註冊，請更換一個帳號名稱"
+
+            hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+            conn.execute(
+                text("INSERT INTO users (username, password_hash, role, active) VALUES (:u, :p, 'user', 'no')"),
+                {"u": username, "p": hashed_pw}
+            )
+            return True, f"✅ 帳號 {username} 已新增，請等待管理者開通帳號"
+    except Exception as e:
+        return False, f"系統錯誤: {e}"
+
+def update_password(username, old_password, new_password):
+    """驗證舊密碼並更新為新密碼"""
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("SELECT password_hash FROM users WHERE username = :u"),
+                {"u": username}
+            ).fetchone()
+            
+            if not result:
+                return False, "找不到使用者帳號"
+                
+            db_hash = result[0]
+            
+            if not bcrypt.checkpw(old_password.encode('utf-8'), db_hash.encode('utf-8')):
+                return False, "❌ 舊密碼輸入錯誤，請重新確認"
+                
+            new_hashed_pw = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            conn.execute(
+                text("UPDATE users SET password_hash = :p WHERE username = :u"),
+                {"p": new_hashed_pw, "u": username}
+            )
+            return True, "✅ 密碼修改成功！下次請使用新密碼登入。"
+    except Exception as e:
+        return False, f"系統錯誤: {e}"
 
 def login_page():
     st.markdown("<h1 style='text-align: center;'>🔐 尾盤神探系統</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
+    
     with col2:
-        with st.form("login"):
-            u = st.text_input("帳號")
-            p = st.text_input("密碼", type="password")
-            if st.form_submit_button("登入", use_container_width=True):
-                success, role, msg = check_login(u, p)
-                if success:
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = u
-                    st.session_state['role'] = role
-                    st.rerun()
-                else: st.error(msg)
+        tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊新帳號"])
+        
+        # --- 登入區塊 ---
+        with tab_login:
+            with st.form("login_form"):
+                u = st.text_input("帳號")
+                p = st.text_input("密碼", type="password")
+                if st.form_submit_button("登入", use_container_width=True):
+                    success, role, msg = check_login(u, p)
+                    if success:
+                        st.session_state['logged_in'] = True
+                        st.session_state['username'] = u
+                        st.session_state['role'] = role
+                        st.success(msg)
+                        st.rerun()
+                    else: st.error(msg)
+        
+        # --- 註冊區塊 ---
+        with tab_register:
+            with st.form("register_form"):
+                new_username = st.text_input("設定帳號")
+                new_password = st.text_input("設定密碼", type="password")
+                confirm_password = st.text_input("確認密碼", type="password")
+                reg_submit = st.form_submit_button("註冊", use_container_width=True)
+                
+                if reg_submit:
+                    if not new_username or not new_password:
+                        st.error("⚠️ 帳號與密碼不能為空白")
+                    elif new_password != confirm_password:
+                        st.error("⚠️ 兩次輸入的密碼不一致，請重新確認")
+                    else:
+                        success, msg = register_user(new_username, new_password)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
 
 # ===========================
 # 3. ETL 資料讀取 (極度簡化)
@@ -79,8 +154,6 @@ def load_precalculated_data():
     if not df.empty:
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
-        
-        # 🔥 優化 1：強制轉為整數型態 (去掉小數點)
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
     return df
@@ -119,9 +192,31 @@ def plot_chart(df, symbol, name):
 # 5. 主程式邏輯
 # ===========================
 def main_app():
+    current_user = st.session_state['username']
+    
     with st.sidebar:
-        st.markdown(f"👤 **{st.session_state['username']}** ({st.session_state['role']})")
-        if st.button("🚪 登出", key="logout"):
+        st.markdown(f"👤 **{current_user}** ({st.session_state['role']})")
+        
+        # 🔥 修改密碼區塊
+        with st.expander("⚙️ 帳號設定 (修改密碼)"):
+            with st.form("change_pwd_form"):
+                old_pw = st.text_input("輸入舊密碼", type="password")
+                new_pw = st.text_input("輸入新密碼", type="password")
+                confirm_pw = st.text_input("確認新密碼", type="password")
+                
+                if st.form_submit_button("儲存修改", use_container_width=True):
+                    if not old_pw or not new_pw or not confirm_pw:
+                        st.error("⚠️ 密碼欄位不可為空白")
+                    elif new_pw != confirm_pw:
+                        st.error("⚠️ 新密碼與確認密碼不一致")
+                    else:
+                        success, msg = update_password(current_user, old_pw, new_pw)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+        
+        if st.button("🚪 登出", key="logout", type="primary", use_container_width=True):
             st.session_state['logged_in'] = False; st.rerun()
         st.markdown("---")
 
@@ -150,7 +245,6 @@ def main_app():
     if df_day.empty:
         st.warning("該日無資料"); return
 
-    # --- 透過分數直接篩選，省略所有迴圈運算 ---
     res = df_day[df_day['Total_Score'] >= min_sc].copy()
     
     if sort_opt == "總分": res = res.sort_values(['Total_Score','symbol'], ascending=[False,True])
@@ -163,7 +257,6 @@ def main_app():
 
     st.success(f"篩選出 {len(syms)} 檔 (門檻:{min_sc})")
     
-    # 🔥 優化 2：確保表格內的 Total_Score 強制不顯示小數點 ("{:.0f}")
     evt = st.dataframe(disp.style.format({"pct_change":"{:.2f}%","close":"{:.2f}", "Total_Score":"{:.0f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
                        on_select="rerun", selection_mode="single-row", use_container_width=True,
                        column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")})
@@ -181,7 +274,6 @@ def main_app():
     cur_sym = syms[st.session_state.ticker_index]
     cur_row = res[res['symbol']==cur_sym].iloc[0]
     
-    # 🔥 優化 3：下方單檔股票資訊的標題強制轉為 int
     st.markdown(f"### {cur_sym} {cur_row['name']} | 分數: {int(cur_row['Total_Score'])}")
     st.info(f"💡 {cur_row['Signal_List']}")
 
