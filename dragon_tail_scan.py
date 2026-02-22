@@ -129,14 +129,18 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
     # 昨高 (為條件5準備)
     df['prev_high'] = df.groupby('symbol')['high'].shift(1)
     
+    # 計算昨日均線，用於判斷趨勢箭頭 (上彎或下彎)
+    for ma in [5, 10, 20, 60]:
+        df[f'prev_MA{ma}'] = df.groupby('symbol')[f'MA{ma}'].shift(1)
+
     # 半年低點
     df['Low_120'] = df.groupby('symbol')['low'].transform(lambda x: x.rolling(window=120, min_periods=60).min())
-    
+
     # 底部放量
     df['Vol_20MA'] = df.groupby('symbol')['volume_sheets'].transform(lambda x: x.rolling(window=20, min_periods=10).mean())
     df['is_vol_break'] = df['volume_sheets'] > (df['Vol_20MA'] * 2)
     df['vol_break_20d'] = df.groupby('symbol')['is_vol_break'].transform(lambda x: x.rolling(window=20, min_periods=1).max())
-    
+
     # 回測月線
     df['is_below_20ma'] = df['low'] <= df['MA20']
     df['below_20ma_3d'] = df.groupby('symbol')['is_below_20ma'].transform(lambda x: x.rolling(window=3, min_periods=1).max())
@@ -146,18 +150,18 @@ def run_strategy_scan(df_full, target_date, min_volume, use_cond1, use_cond2_vol
 
     # === 動態套用條件 ===
     mask = pd.Series(True, index=today_df.index)
-
+    
     # 基礎過濾：最少成交量
     mask &= (today_df['volume_sheets'] >= min_volume)
 
-    # 條件 1：低位階
+     # 條件 1：低位階
     if use_cond1:
         mask &= (today_df['close'] <= (today_df['Low_120'] * 1.3))
-    
+        
     # 條件 2：底部放量
     if use_cond2_vol:
         mask &= (today_df['vol_break_20d'] == 1)
-
+        
     # 條件 3：四線多排
     if use_cond3_ma:
         mask &= (
@@ -217,6 +221,15 @@ def plot_stock_kline(df_stock, symbol, name):
     fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(t=30,l=10,r=10,b=10))
     return fig
 
+# --- 資料表顏色渲染器 ---
+def color_ma_trend(val):
+    val_str = str(val)
+    if '▲' in val_str:
+        return 'color: #FF4B4B; font-weight: bold;' # 上彎紅色
+    elif '▼' in val_str:
+        return 'color: #00CC96; font-weight: bold;' # 下彎綠色
+    return ''
+
 # ===========================
 # 6. 主程式介面
 # ===========================
@@ -248,7 +261,6 @@ def main_app():
 
         st.markdown("---")
         c1_low_level = st.checkbox("✅ 條件 1：低位階 (距半年低點 <= 30%)", value=True)
-        # 對調順序並修改預設值
         c2_vol_break = st.checkbox("✅ 條件 2：底部放量 (近20日內曾爆量)", value=True)
         c3_ma_bullish = st.checkbox("✅ 條件 3：四線多排 (5 > 10 > 20 > 60)", value=False)
         c4_pullback = st.checkbox("✅ 條件 4：回測月線後 (近3日破月線, 今收上)", value=False)
@@ -288,22 +300,47 @@ def main_app():
         else:
             st.success(f"✅ {sel_date} 掃描完成！共找出 **{len(result_df)}** 檔股票。")
             
-            display_df = result_df[['symbol', 'name', 'close', 'Low_120', 'volume_sheets', 'pct_change']].copy()
+            # --- 整理與格式化表格資料 ---
+            display_df = result_df.copy()
+            
+            # 計算均線箭頭字串
+            for ma in [5, 10, 20, 60]:
+                ma_col = f'MA{ma}'
+                prev_ma_col = f'prev_MA{ma}'
+                display_df[f'{ma}MA'] = display_df.apply(
+                    lambda row: f"{row[ma_col]:.2f} ▲" if row[ma_col] > row[prev_ma_col] else (
+                                f"{row[ma_col]:.2f} ▼" if row[ma_col] < row[prev_ma_col] else f"{row[ma_col]:.2f} -"
+                    ), axis=1
+                )
+            
+            # 產生玩股網連結 (去除 .TW / .TWO)
+            display_df['玩股網'] = display_df['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{str(x).split('.')[0]}")
+            
             display_df['volume_sheets'] = display_df['volume_sheets'].astype(int)
             display_df = display_df.rename(
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
-            ).sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
+            )
+            
+            # 決定顯示欄位與順序
+            final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '漲跌幅(%)']
+            display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
             
             sym_list = display_df['symbol'].tolist()
 
+            # 套用顏色渲染與超連結設定
+            styled_df = display_df.style.format({
+                "當日收盤": "{:.2f}",
+                "半年低點": "{:.2f}",
+                "成交量(張)": "{:,}",
+                "漲跌幅(%)": "{:.2f}%"
+            }).map(color_ma_trend, subset=['5MA', '10MA', '20MA', '60MA'])
+
             evt = st.dataframe(
-                display_df.style.format({
-                    "當日收盤": "{:.2f}",
-                    "半年低點": "{:.2f}",
-                    "成交量(張)": "{:,}",
-                    "漲跌幅(%)": "{:.2f}%"
-                }),
-                on_select="rerun", selection_mode="single-row", use_container_width=True, height=250
+                styled_df,
+                on_select="rerun", selection_mode="single-row", use_container_width=True, height=300,
+                column_config={
+                    "玩股網": st.column_config.LinkColumn("玩股網", display_text="看線圖 🔗")
+                }
             )
 
             if evt.selection.rows: 
