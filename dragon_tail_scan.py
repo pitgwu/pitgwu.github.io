@@ -11,7 +11,7 @@ import uuid
 # ===========================
 # 1. 資料庫連線與全域設定
 # ===========================
-st.set_page_config(page_title="神龍擺尾 - 策略開發版", layout="wide")
+st.set_page_config(page_title="神龍擺尾", layout="wide")
 
 SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 if not SUPABASE_DB_URL:
@@ -60,7 +60,7 @@ def register_user(username, password):
     except Exception as e: return False, f"系統錯誤: {e}"
 
 def login_page():
-    st.markdown("<h1 style='text-align: center;'>🐉 神龍擺尾 (開發版)</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🐉 神龍擺尾</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         tab_login, tab_register = st.tabs(["🔑 登入", "📝 註冊"])
