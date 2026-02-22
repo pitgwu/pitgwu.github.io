@@ -43,7 +43,7 @@ def get_db_engine():
 # 3. 核心邏輯
 # ===========================
 @st.cache_data(ttl=3600)
-def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshold, strict_trend, min_days):
+def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshold, short_term_bull, long_term_bull, min_days):
     engine = get_db_engine()
     
     # --- 步驟 1: 快速篩選 ---
@@ -118,10 +118,19 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
         last = df.iloc[-1]
         prev = df.iloc[-2]
         
-        if strict_trend:
+        # --- 條件 1: 長線多頭排列 (60MA > 120MA) ---
+        if long_term_bull:
             if pd.isna(last['ma60']) or pd.isna(last['ma120']) or last['ma60'] <= last['ma120']:
                 continue
+                
+        # --- 條件 2: 短線多頭排列 (5MA > 10MA > 20MA) ---
+        if short_term_bull:
+            if pd.isna(last['ma5']) or pd.isna(last['ma10']) or pd.isna(last['ma20']):
+                continue
+            if not (last['ma5'] > last['ma10'] and last['ma10'] > last['ma20']):
+                continue
             
+        # 條件 3: 均線糾結
         mas = [last['ma5'], last['ma10'], last['ma20']]
         if any(pd.isna(mas)): continue
         
@@ -182,7 +191,7 @@ def load_and_process_data(lookback_days, min_volume, min_price, squeeze_threshol
 # ===========================
 # 4. 診斷工具
 # ===========================
-def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, min_days):
+def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, short_term_bull, long_term_bull, min_days):
     engine = get_db_engine()
     symbol_code = symbol_code.strip().upper()
     
@@ -224,8 +233,15 @@ def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, 
             
             st.sidebar.caption(f"{real_symbol} {name} | {last['date'].strftime('%Y-%m-%d')}")
             
+            # Checks
             v_ok = last['volume'] >= min_vol
-            t_ok = (last['ma60'] > last['ma120']) if strict_trend else True
+            
+            is_long_bull = last['ma60'] > last['ma120']
+            t_long_ok = is_long_bull if long_term_bull else True
+            
+            is_short_bull = (last['ma5'] > last['ma10'] and last['ma10'] > last['ma20'])
+            t_short_ok = is_short_bull if short_term_bull else True
+            
             s_ok = df.iloc[-1]['is_sq']
             d_ok = days >= min_days
             
@@ -234,10 +250,11 @@ def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, 
                 cls = "diag-pass" if ok else "diag-fail"
                 st.sidebar.markdown(f"{label}: <span class='{cls}'>{icon} {val}</span> / {target}", unsafe_allow_html=True)
                 
-            show_check("1.成交量", v_ok, int(last['volume']), min_vol)
-            show_check("2.趨勢(60>120)", t_ok, "多頭" if last['ma60']>last['ma120'] else "非多頭", "必要" if strict_trend else "不拘")
-            show_check("3.糾結度", s_ok, f"{last['sq_pct']*100:.2f}%", f"{sq_threshold*100:.1f}%")
-            show_check("4.連續天數", d_ok, f"{days} 天", f"{min_days} 天")
+            show_check("1. 成交量", v_ok, int(last['volume']), min_vol)
+            show_check("2. 長線多頭(60>120)", t_long_ok, "是" if is_long_bull else "否", "必要" if long_term_bull else "不拘")
+            show_check("3. 短線多頭(5>10>20)", t_short_ok, "是" if is_short_bull else "否", "必要" if short_term_bull else "不拘")
+            show_check("4. 糾結度", s_ok, f"{last['sq_pct']*100:.2f}%", f"{sq_threshold*100:.1f}%")
+            show_check("5. 連續天數", d_ok, f"{days} 天", f"{min_days} 天")
             
             v_r = last['vol_ratio']
             if pd.isna(v_r) or np.isinf(v_r): v_r = 0.0
@@ -252,22 +269,24 @@ def diagnose_stock(symbol_code, min_vol, min_price, sq_threshold, strict_trend, 
 # ===========================
 st.sidebar.header("⚙️ 篩選參數")
 threshold_pct = st.sidebar.slider("均線糾結度 (%)", 1.0, 10.0, 3.0, 0.5)
-# 修正預設值為 500,000 (500張)
 min_vol = st.sidebar.slider("最小成交量 (股)", 0, 5000000, 500000, 50000)
 min_price = st.sidebar.slider("最低股價 (元)", 0, 1000, 30, 5)
-strict_trend = st.sidebar.checkbox("只看多頭排列 (MA60 > MA120)", value=True)
+
+st.sidebar.subheader("進階設定")
+short_term_bull = st.sidebar.checkbox("短線多頭排列 (5MA > 10MA > 20MA)", value=False)
+long_term_bull = st.sidebar.checkbox("長線多頭排列 (60MA > 120MA)", value=True)
 min_days = st.sidebar.slider("最少整理天數", 1, 10, 2, 1)
 
 st.title("📈 均線糾結選股神器")
 
 with st.spinner("🚀 運算中..."):
-    df_res, df_raw = load_and_process_data(400, min_vol, min_price, threshold_pct/100, strict_trend, min_days)
+    df_res, df_raw = load_and_process_data(400, min_vol, min_price, threshold_pct/100, short_term_bull, long_term_bull, min_days)
 
 st.sidebar.divider()
 st.sidebar.subheader("🔍 為什麼找不到？")
 diag_code = st.sidebar.text_input("輸入代號 (如 3563)")
 if diag_code:
-    diagnose_stock(diag_code, min_vol, min_price, threshold_pct/100, strict_trend, min_days)
+    diagnose_stock(diag_code, min_vol, min_price, threshold_pct/100, short_term_bull, long_term_bull, min_days)
 
 if df_res.empty:
     st.warning("⚠️ 無符合條件股票")
