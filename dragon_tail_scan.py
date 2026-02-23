@@ -90,18 +90,20 @@ def login_page():
                         else: st.error(msg)
 
 # ===========================
-# 3. 資料載入
+# 3. 資料載入 (已加入基本面 LEFT JOIN)
 # ===========================
 @st.cache_data(ttl=600)
 def load_data():
     query = """
-    SELECT date, symbol, name, industry, open, high, low, close, volume, pct_change,
-           "MA5", "MA10", "MA20", "MA60",
-           "K", "D", "MACD_OSC", "DIF",
-           signal_list as "Signal_List"
-    FROM daily_stock_indicators
-    WHERE date >= current_date - INTERVAL '200 days'
-    ORDER BY symbol, date
+    SELECT d.date, d.symbol, d.name, d.industry, d.open, d.high, d.low, d.close, d.volume, d.pct_change,
+           d."MA5", d."MA10", d."MA20", d."MA60",
+           d."K", d."D", d."MACD_OSC", d."DIF",
+           d.signal_list as "Signal_List",
+           e."Capital", e."2026EPS"
+    FROM daily_stock_indicators d
+    LEFT JOIN stock_eps e ON d.symbol = e."Symbol"
+    WHERE d.date >= current_date - INTERVAL '200 days'
+    ORDER BY d.symbol, d.date
     """
     with engine.connect() as conn:
         df = pd.read_sql(query, conn)
@@ -275,6 +277,12 @@ def format_vol_ratio(x):
     except:
         return "-"
 
+# 安全輸出格式函數，避免 DataFrame Render ValueError 
+def safe_fmt(val, fmt_str):
+    if pd.isna(val) or val is None: return "None"
+    try: return fmt_str.format(float(val))
+    except: return "None"
+
 # ===========================
 # 6. 主程式介面
 # ===========================
@@ -351,12 +359,22 @@ def main_app():
             
             display_df = result_df.copy()
             
-            # 安全防呆機制：確保欄位一定存在
+            # --- 安全防呆機制：確保基本面等新舊欄位一定存在 ---
             if '量增比' not in display_df.columns: display_df['量增比'] = np.nan
             if 'volume_sheets' not in display_df.columns: display_df['volume_sheets'] = 0
             if 'pct_change' not in display_df.columns: display_df['pct_change'] = 0
             if 'Low_120' not in display_df.columns: display_df['Low_120'] = 0
+            if 'Capital' not in display_df.columns: display_df['Capital'] = np.nan
+            if '2026EPS' not in display_df.columns: display_df['2026EPS'] = np.nan
             
+            # 計算本益比
+            display_df['本益比'] = np.where(
+                (display_df['2026EPS'] > 0) & display_df['2026EPS'].notna(),
+                display_df['close'] / display_df['2026EPS'],
+                np.nan
+            )
+            
+            # 計算均線箭頭
             for ma in [5, 10, 20, 60]:
                 ma_col = f'MA{ma}'
                 prev_ma_col = f'prev_MA{ma}'
@@ -371,20 +389,27 @@ def main_app():
             
             display_df['玩股網'] = display_df['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{str(x).split('.')[0]}")
             display_df['volume_sheets'] = display_df['volume_sheets'].fillna(0).astype(int)
-            
-            # 🔥 解法關鍵：直接把量增比轉換成字串，不要依賴 style.format，徹底杜絕 Streamlit 的 None Bug
             display_df['量增比'] = display_df['量增比'].apply(format_vol_ratio)
 
+            # 欄位重新命名
             display_df = display_df.rename(
-                columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
+                columns={
+                    'close': '當日收盤', 
+                    'Low_120': '半年低點', 
+                    'volume_sheets': '成交量(張)', 
+                    'pct_change': '漲跌幅(%)',
+                    'Capital': '股本'
+                }
             )
             
-            desired_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '量增比', '漲跌幅(%)']
+            # 定義顯示欄位順序 (加入新欄位)
+            desired_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '量增比', '股本', '2026EPS', '本益比', '漲跌幅(%)']
             if sel_date < latest_date_in_db and '回測報酬率(%)' in display_df.columns:
                 desired_cols.append('回測報酬率(%)')
 
             final_cols = [col for col in desired_cols if col in display_df.columns]
 
+            # 防呆排序
             if '漲跌幅(%)' in display_df.columns:
                 display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
             else:
@@ -392,16 +417,20 @@ def main_app():
             
             sym_list = display_df['symbol'].tolist()
 
+            # 設定表格顯示格式
             format_dict = {
                 "當日收盤": "{:.2f}",
                 "半年低點": "{:.2f}",
                 "成交量(張)": "{:,}",
+                "股本": lambda x: safe_fmt(x, "{:.1f}"),
+                "2026EPS": lambda x: safe_fmt(x, "{:.2f}"),
+                "本益比": lambda x: safe_fmt(x, "{:.2f}"),
                 "漲跌幅(%)": "{:.2f}%"
-                # 量增比 已經在上方直接被 apply 轉成字串，所以這邊不需要再 format
             }
             if '回測報酬率(%)' in display_df.columns:
                 format_dict['回測報酬率(%)'] = "{:.2f}%"
 
+            # 套用渲染與超連結
             styled_df = display_df.style.format(format_dict).map(color_ma_trend, subset=['5MA', '10MA', '20MA', '60MA'])
             
             if '回測報酬率(%)' in display_df.columns:
