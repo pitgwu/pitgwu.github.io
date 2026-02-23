@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np  # 🔥 新增 numpy 用於數學運算
 import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.pool import NullPool
@@ -133,7 +134,7 @@ def login_page():
                             st.error(msg)
 
 # ===========================
-# 3. ETL 資料讀取 (極度簡化)
+# 3. ETL 資料讀取
 # ===========================
 @st.cache_data(ttl=600)
 def load_precalculated_data():
@@ -156,6 +157,16 @@ def load_precalculated_data():
         df['date'] = pd.to_datetime(df['date'])
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
+        
+        # 🔥 新增：計算量增比 (今日量 / 昨日量)
+        df = df.sort_values(['symbol', 'date'])
+        df['prev_volume'] = df.groupby('symbol')['volume'].shift(1)
+        df['Vol_Ratio'] = np.where(
+            (df['prev_volume'] > 0) & df['prev_volume'].notna(),
+            df['volume'] / df['prev_volume'],
+            np.nan
+        )
+
     return df
 
 # ===========================
@@ -236,7 +247,9 @@ def main_app():
     
     st.sidebar.header("篩選條件")
     sel_date = st.sidebar.selectbox("📅 日期", dates, 0)
-    sort_opt = st.sidebar.selectbox("排序", ["總分", "漲跌幅", "外資買超", "營收YOY"])
+    
+    # 🔥 在排序選項中加入「量增比」
+    sort_opt = st.sidebar.selectbox("排序", ["總分", "漲跌幅", "外資買超", "營收YOY", "量增比"])
     min_sc = st.sidebar.number_input("最低分", 0, 50, 3)
 
     target_ts = pd.Timestamp(sel_date)
@@ -251,15 +264,35 @@ def main_app():
     elif sort_opt == "漲跌幅": res = res.sort_values(['pct_change','symbol'], ascending=[False,True])
     elif sort_opt == "外資買超": res = res.sort_values(['foreign_net','symbol'], ascending=[False,True])
     elif sort_opt == "營收YOY": res = res.sort_values(['yoy_pct','symbol'], ascending=[False,True])
+    elif sort_opt == "量增比": res = res.sort_values(['Vol_Ratio','symbol'], ascending=[False,True])
 
-    disp = res[['symbol','name','close','pct_change','Total_Score','Signal_List']].reset_index(drop=True)
+    # 🔥 將 Vol_Ratio 放進要顯示的 DataFrame 中
+    disp = res[['symbol','name','close','pct_change','Vol_Ratio','Total_Score','Signal_List']].reset_index(drop=True)
     syms = disp['symbol'].tolist()
 
     st.success(f"篩選出 {len(syms)} 檔 (門檻:{min_sc})")
     
-    evt = st.dataframe(disp.style.format({"pct_change":"{:.2f}%","close":"{:.2f}", "Total_Score":"{:.0f}"}).background_gradient(subset=['Total_Score'], cmap='Reds'),
-                       on_select="rerun", selection_mode="single-row", use_container_width=True,
-                       column_config={"Signal_List": st.column_config.TextColumn("觸發訊號", width="large")})
+    # 🔥 定義量增比的格式化函數 (大於2倍給火焰)
+    def format_vol_ratio(x):
+        if pd.isna(x):
+            return "-"
+        if x >= 2.0:
+            return f"🔥 {x:.1f}x"
+        return f"{x:.1f}x"
+
+    evt = st.dataframe(
+        disp.style.format({
+            "pct_change":"{:.2f}%",
+            "close":"{:.2f}", 
+            "Total_Score":"{:.0f}",
+            "Vol_Ratio": format_vol_ratio
+        }).background_gradient(subset=['Total_Score'], cmap='Reds'),
+        on_select="rerun", selection_mode="single-row", use_container_width=True,
+        column_config={
+            "Vol_Ratio": "量增比",
+            "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
+        }
+    )
     
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
     if not syms: return
