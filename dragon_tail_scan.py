@@ -109,8 +109,7 @@ def load_data():
         df['symbol'] = df['symbol'].astype(str).str.strip()
         df['date'] = pd.to_datetime(df['date'])
         df['Signal_List'] = df['Signal_List'].fillna("")
-
-        # 統一建立以「張」為單位的欄位
+        
         if df['volume'].max() > 1000000:
             df['volume_sheets'] = df['volume'] / 1000
         else:
@@ -126,49 +125,42 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
     if df.empty: return pd.DataFrame()
     
     # === 基礎前置運算 ===
-    # 昨高 (為條件5準備)
     df['prev_high'] = df.groupby('symbol')['high'].shift(1)
-
-    # 計算昨日均線，用於判斷趨勢箭頭 (上彎或下彎)
+    
+    # 計算昨日量與量增比
+    df['prev_volume_sheets'] = df.groupby('symbol')['volume_sheets'].shift(1)
+    df['量增比'] = df['volume_sheets'] / df['prev_volume_sheets'].replace(0, float('nan'))
+    
     for ma in [5, 10, 20, 60]:
         df[f'prev_MA{ma}'] = df.groupby('symbol')[f'MA{ma}'].shift(1)
     
-    # 半年低點
     df['Low_120'] = df.groupby('symbol')['low'].transform(lambda x: x.rolling(window=120, min_periods=60).min())
     
-    # 底部放量 (使用可調整的放量倍數 vol_multiplier)
     df['Vol_20MA'] = df.groupby('symbol')['volume_sheets'].transform(lambda x: x.rolling(window=20, min_periods=10).mean())
     df['is_vol_break'] = df['volume_sheets'] >= (df['Vol_20MA'] * vol_multiplier)
     df['vol_break_20d'] = df.groupby('symbol')['is_vol_break'].transform(lambda x: x.rolling(window=20, min_periods=1).max())
     
-    # 回測月線
     df['is_below_20ma'] = df['low'] <= df['MA20']
     df['below_20ma_3d'] = df.groupby('symbol')['is_below_20ma'].transform(lambda x: x.rolling(window=3, min_periods=1).max())
-
-    # 條件 6: 布林通道運算 (近20日高點是否碰觸 3倍布林上軌)
+    
     df['bb_std'] = df.groupby('symbol')['close'].transform(lambda x: x.rolling(window=20, min_periods=2).std())
     df['BB_Upper_3x'] = df['MA20'] + 3 * df['bb_std']
     df['is_bb_hit'] = df['high'] >= df['BB_Upper_3x']
     df['bb_hit_20d'] = df.groupby('symbol')['is_bb_hit'].transform(lambda x: x.rolling(window=20, min_periods=1).max())
-    
+
     today_df = df[df['date'] == pd.to_datetime(target_date)].copy()
     if today_df.empty: return pd.DataFrame()
 
     # === 動態套用條件 ===
     mask = pd.Series(True, index=today_df.index)
-    
-    # 基礎過濾：最少成交量
     mask &= (today_df['volume_sheets'] >= min_volume)
 
-    # 條件 1：低位階
     if use_cond1:
         mask &= (today_df['close'] <= (today_df['Low_120'] * 1.3))
-
-    # 條件 2：底部放量
+    
     if use_cond2_vol:
         mask &= (today_df['vol_break_20d'] == 1)
 
-    # 條件 3：四線多排
     if use_cond3_ma:
         mask &= (
             (today_df['MA5'] > today_df['MA10']) &
@@ -176,15 +168,12 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
             (today_df['MA20'] > today_df['MA60'])
         )
 
-    # 條件 4：回測月線後
     if use_cond4:
         mask &= (today_df['below_20ma_3d'] == 1) & (today_df['close'] > today_df['MA20'])
 
-    # 條件 5：紅K過昨日高
     if use_cond5:
-        # 收盤 > 開盤 (紅K)，且 收盤 > 昨高
         mask &= (today_df['close'] > today_df['open']) & (today_df['close'] > today_df['prev_high'])
-
+        
     if use_cond6_bb:
         mask &= (today_df['bb_hit_20d'] == 1)
 
@@ -194,11 +183,8 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
     # === 計算回測報酬率 ===
     latest_date_in_db = df_full['date'].max()
     if pd.to_datetime(target_date) < latest_date_in_db:
-        # 取得最新一天的資料
         latest_df = df_full[df_full['date'] == latest_date_in_db].set_index('symbol')
-        # 把最新收盤價對應回結果表
         result_df['latest_close'] = result_df['symbol'].map(latest_df['close'])
-        # 計算報酬率 ((最新收盤 - 掃描日收盤) / 掃描日收盤) * 100
         result_df['回測報酬率(%)'] = ((result_df['latest_close'] - result_df['close']) / result_df['close']) * 100
     
     return result_df
@@ -207,13 +193,11 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
 # 5. K 線繪圖輔助
 # ===========================
 def plot_stock_kline(df_stock, symbol, name):
-    # 為了避免前 20 天出現 NaN，在切片前先計算布林通道 (20, 3)
     df_calc = df_stock.copy()
     bb_std = df_calc['close'].rolling(window=20).std()
     df_calc['BB_Upper'] = df_calc['MA20'] + 3 * bb_std
     df_calc['BB_Lower'] = df_calc['MA20'] - 3 * bb_std
 
-    # 取最近 130 天出來畫圖
     df_plot = df_calc.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
 
@@ -224,7 +208,6 @@ def plot_stock_kline(df_stock, symbol, name):
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
                         subplot_titles=(f"{symbol} {name}", "量(張)", "KD", "MACD", "訊號"))
 
-    # 1. 布林上軌 (隱藏線段，準備填色)
     fig.add_trace(go.Scatter(
         x=df_plot['date_str'], y=df_plot['BB_Upper'], 
         mode='lines', name='BB Upper (3)', 
@@ -232,7 +215,6 @@ def plot_stock_kline(df_stock, symbol, name):
         hoverinfo='skip'
     ), row=1, col=1)
 
-    # 2. 布林下軌 (與上軌之間填滿半透明顏色)
     fig.add_trace(go.Scatter(
         x=df_plot['date_str'], y=df_plot['BB_Lower'], 
         mode='lines', name='BB Lower (3)', 
@@ -241,13 +223,11 @@ def plot_stock_kline(df_stock, symbol, name):
         hoverinfo='skip'
     ), row=1, col=1)
 
-    # 3. K線
     fig.add_trace(go.Candlestick(
         x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'],
         name='K線', increasing_line_color='red', decreasing_line_color='green'
     ), row=1, col=1)
 
-    # 4. 各天期均線
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         if ma in df_plot: 
             fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot[ma], mode='lines', name=ma, line=dict(color=color, width=1)), row=1, col=1)
@@ -266,7 +246,7 @@ def plot_stock_kline(df_stock, symbol, name):
     fig.update_layout(height=800, xaxis_rangeslider_visible=False, showlegend=False, margin=dict(t=30,l=10,r=10,b=10))
     return fig
 
-# --- 資料表顏色渲染器 ---
+# --- 資料表顏色與格式渲染器 ---
 def color_ma_trend(val):
     val_str = str(val)
     if '▲' in val_str:
@@ -282,6 +262,16 @@ def color_return_rate(val):
     elif val < 0:
         return 'color: #00CC96; font-weight: bold;'
     return ''
+
+def format_vol_ratio(x):
+    try:
+        val = float(x)
+        if pd.isna(val): return "-"
+        if val >= 1.5:
+            return f"🔥 {val:.1f}x"
+        return f"{val:.1f}x"
+    except:
+        return "-"
 
 # ===========================
 # 6. 主程式介面
@@ -311,13 +301,10 @@ def main_app():
         st.markdown("---")
         st.header("⚙️ 篩選條件設定")
         
-        # 1. 原本的最少成交量滑桿
         min_volume = st.slider("📊 當日最少成交量 (張)", min_value=500, max_value=10000, value=1000, step=100)
-        # 2. 🔥 新增：放量倍數滑桿 (預設為 2.0 倍，可調範圍 1.5 ~ 5.0 倍)
         vol_multiplier = st.slider("📈 底部放量倍數 (大於20MA均量)", min_value=1.5, max_value=5.0, value=2.0, step=0.1)
 
         st.markdown("---")
-        # 核心條件開關
         c1_low_level = st.checkbox("✅ 條件 1：低位階 (距半年低點 <= 30%)", value=True)
         c2_vol_break = st.checkbox("✅ 條件 2：底部放量 (近20日內曾爆量)", value=True)
         c3_ma_bullish = st.checkbox("✅ 條件 3：四線多排 (5 > 10 > 20 > 60)", value=False)
@@ -377,13 +364,11 @@ def main_app():
             display_df = display_df.rename(
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
             )
-
-            # 判斷是否需要加入「回測報酬率(%)」
-            final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '漲跌幅(%)']
+            
+            final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '量增比', '漲跌幅(%)']
             if sel_date < latest_date_in_db and '回測報酬率(%)' in display_df.columns:
                 final_cols.append('回測報酬率(%)')
 
-            # 排序：如果有回測報酬率，可以優先用回測報酬率排序，或者維持漲跌幅排序。這裡維持你的原設定：以當日漲跌幅為主。
             display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
             
             sym_list = display_df['symbol'].tolist()
@@ -392,14 +377,14 @@ def main_app():
                 "當日收盤": "{:.2f}",
                 "半年低點": "{:.2f}",
                 "成交量(張)": "{:,}",
+                "量增比": format_vol_ratio,
                 "漲跌幅(%)": "{:.2f}%"
             }
             if '回測報酬率(%)' in display_df.columns:
                 format_dict['回測報酬率(%)'] = "{:.2f}%"
 
             styled_df = display_df.style.format(format_dict).map(color_ma_trend, subset=['5MA', '10MA', '20MA', '60MA'])
-
-            # 如果有回測報酬率，替它加上紅綠色
+            
             if '回測報酬率(%)' in display_df.columns:
                 styled_df = styled_df.map(color_return_rate, subset=['回測報酬率(%)'])
 
@@ -429,7 +414,6 @@ def main_app():
             cur_info = display_df.iloc[st.session_state.ticker_index]
 
             with c3:
-                # 標題加上最新回測結果顯示
                 title_html = f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']}</h3>"
                 if '回測報酬率(%)' in cur_info and not pd.isna(cur_info['回測報酬率(%)']):
                     ret_val = cur_info['回測報酬率(%)']
