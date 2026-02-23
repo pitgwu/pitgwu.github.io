@@ -138,6 +138,7 @@ def login_page():
 # ===========================
 @st.cache_data(ttl=600)
 def load_precalculated_data():
+    # 🔥 優化：將歷史資料撈取範圍拉長到 160 天，以便計算安全的 20 日標準差
     query = """
     SELECT date, symbol, name, industry, open, high, low, close, volume, 
            pct_change, foreign_net, trust_net, yoy_pct,
@@ -146,7 +147,7 @@ def load_precalculated_data():
            total_score as "Total_Score", 
            signal_list as "Signal_List"
     FROM strongbuy_indicators
-    WHERE date >= current_date - INTERVAL '130 days'
+    WHERE date >= current_date - INTERVAL '160 days'
     ORDER BY symbol, date
     """
     with engine.connect() as conn:
@@ -158,7 +159,7 @@ def load_precalculated_data():
         df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
         df['Signal_List'] = df['Signal_List'].fillna("")
         
-        # 🔥 新增：計算量增比 (今日量 / 昨日量)
+        # 計算量增比 (今日量 / 昨日量)
         df = df.sort_values(['symbol', 'date'])
         df['prev_volume'] = df.groupby('symbol')['volume'].shift(1)
         df['Vol_Ratio'] = np.where(
@@ -173,13 +174,38 @@ def load_precalculated_data():
 # 4. 繪圖
 # ===========================
 def plot_chart(df, symbol, name):
-    d = df[df['symbol'] == symbol].tail(100).copy()
+    df_calc = df.copy()
+    
+    # 🔥 計算 20日標準差與 3倍布林通道上下軌
+    df_calc['std20'] = df_calc['close'].rolling(window=20).std()
+    df_calc['BB_up'] = df_calc['MA20'] + 3 * df_calc['std20']
+    df_calc['BB_low'] = df_calc['MA20'] - 3 * df_calc['std20']
+    
+    d = df_calc.tail(100).copy()
     d['date_str'] = d['date'].dt.strftime('%Y-%m-%d')
     
     fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2],
                         subplot_titles=(f"{symbol} {name}", "成交量", "KD", "MACD"), vertical_spacing=0.03)
     
+    # K線
     fig.add_trace(go.Candlestick(x=d['date_str'], open=d['open'], high=d['high'], low=d['low'], close=d['close'], name='Price', increasing_line_color='red', decreasing_line_color='green'), row=1, col=1)
+    
+    # 🔥 加入布林通道上軌
+    fig.add_trace(go.Scatter(
+        x=d['date_str'], y=d['BB_up'], 
+        mode='lines', name='BB Upper', 
+        line=dict(color='rgba(180, 180, 180, 0.6)', width=1, dash='dash'),
+        hoverinfo='skip', showlegend=False
+    ), row=1, col=1)
+
+    # 🔥 加入布林通道下軌與半透明填滿
+    fig.add_trace(go.Scatter(
+        x=d['date_str'], y=d['BB_low'], 
+        mode='lines', name='BB Lower', 
+        line=dict(color='rgba(180, 180, 180, 0.6)', width=1, dash='dash'),
+        fill='tonexty', fillcolor='rgba(180, 180, 180, 0.1)', 
+        hoverinfo='skip', showlegend=False
+    ), row=1, col=1)
     
     for ma, color in zip(['MA5','MA10','MA20','MA60'], ['#FFA500','#00FFFF','#BA55D3','#4169E1']):
         fig.add_trace(go.Scatter(x=d['date_str'], y=d[ma], line=dict(color=color, width=1), name=ma), row=1, col=1)
@@ -208,7 +234,7 @@ def main_app():
     with st.sidebar:
         st.markdown(f"👤 **{current_user}** ({st.session_state['role']})")
         
-        # 🔥 修改密碼區塊
+        # 修改密碼區塊
         with st.expander("⚙️ 帳號設定 (修改密碼)"):
             with st.form("change_pwd_form"):
                 old_pw = st.text_input("輸入舊密碼", type="password")
@@ -248,7 +274,6 @@ def main_app():
     st.sidebar.header("篩選條件")
     sel_date = st.sidebar.selectbox("📅 日期", dates, 0)
     
-    # 🔥 在排序選項中加入「量增比」
     sort_opt = st.sidebar.selectbox("排序", ["總分", "漲跌幅", "外資買超", "營收YOY", "量增比"])
     min_sc = st.sidebar.number_input("最低分", 0, 50, 3)
 
@@ -266,13 +291,11 @@ def main_app():
     elif sort_opt == "營收YOY": res = res.sort_values(['yoy_pct','symbol'], ascending=[False,True])
     elif sort_opt == "量增比": res = res.sort_values(['Vol_Ratio','symbol'], ascending=[False,True])
 
-    # 🔥 將 Vol_Ratio 放進要顯示的 DataFrame 中
     disp = res[['symbol','name','close','pct_change','Vol_Ratio','Total_Score','Signal_List']].reset_index(drop=True)
     syms = disp['symbol'].tolist()
 
     st.success(f"篩選出 {len(syms)} 檔 (門檻:{min_sc})")
     
-    # 🔥 定義量增比的格式化函數 (大於2倍給火焰)
     def format_vol_ratio(x):
         if pd.isna(x):
             return "-"
