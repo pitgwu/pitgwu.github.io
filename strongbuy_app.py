@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np  # 🔥 新增 numpy 用於數學運算
+import numpy as np  # 用於數學運算
 import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.pool import NullPool
@@ -138,7 +138,6 @@ def login_page():
 # ===========================
 @st.cache_data(ttl=600)
 def load_precalculated_data():
-    # 🔥 優化：將歷史資料撈取範圍拉長到 160 天，以便計算安全的 20 日標準差
     query = """
     SELECT date, symbol, name, industry, open, high, low, close, volume, 
            pct_change, foreign_net, trust_net, yoy_pct,
@@ -176,7 +175,6 @@ def load_precalculated_data():
 def plot_chart(df, symbol, name):
     df_calc = df.copy()
     
-    # 🔥 計算 20日標準差與 3倍布林通道上下軌
     df_calc['std20'] = df_calc['close'].rolling(window=20).std()
     df_calc['BB_up'] = df_calc['MA20'] + 3 * df_calc['std20']
     df_calc['BB_low'] = df_calc['MA20'] - 3 * df_calc['std20']
@@ -187,10 +185,8 @@ def plot_chart(df, symbol, name):
     fig = make_subplots(rows=4, cols=1, shared_xaxes=True, row_heights=[0.5, 0.15, 0.15, 0.2],
                         subplot_titles=(f"{symbol} {name}", "成交量", "KD", "MACD"), vertical_spacing=0.03)
     
-    # K線
     fig.add_trace(go.Candlestick(x=d['date_str'], open=d['open'], high=d['high'], low=d['low'], close=d['close'], name='Price', increasing_line_color='red', decreasing_line_color='green'), row=1, col=1)
     
-    # 🔥 加入布林通道上軌
     fig.add_trace(go.Scatter(
         x=d['date_str'], y=d['BB_up'], 
         mode='lines', name='BB Upper', 
@@ -198,7 +194,6 @@ def plot_chart(df, symbol, name):
         hoverinfo='skip', showlegend=False
     ), row=1, col=1)
 
-    # 🔥 加入布林通道下軌與半透明填滿
     fig.add_trace(go.Scatter(
         x=d['date_str'], y=d['BB_low'], 
         mode='lines', name='BB Lower', 
@@ -234,7 +229,6 @@ def main_app():
     with st.sidebar:
         st.markdown(f"👤 **{current_user}** ({st.session_state['role']})")
         
-        # 修改密碼區塊
         with st.expander("⚙️ 帳號設定 (修改密碼)"):
             with st.form("change_pwd_form"):
                 old_pw = st.text_input("輸入舊密碼", type="password")
@@ -274,24 +268,47 @@ def main_app():
     st.sidebar.header("篩選條件")
     sel_date = st.sidebar.selectbox("📅 日期", dates, 0)
     
-    sort_opt = st.sidebar.selectbox("排序", ["總分", "漲跌幅", "外資買超", "營收YOY", "量增比"])
+    # 🔥 判斷是否為過去日期，以決定是否顯示並排序「回測報酬率」
+    target_ts = pd.Timestamp(sel_date)
+    max_date = df_full['date'].max()
+    is_past_date = target_ts < max_date
+    
+    sort_opts = ["總分", "漲跌幅", "外資買超", "營收YOY", "量增比"]
+    if is_past_date:
+        sort_opts.append("回測報酬率")
+        
+    sort_opt = st.sidebar.selectbox("排序", sort_opts)
     min_sc = st.sidebar.number_input("最低分", 0, 50, 3)
 
-    target_ts = pd.Timestamp(sel_date)
     df_day = df_full[df_full['date'] == target_ts].copy()
     
     if df_day.empty:
         st.warning("該日無資料"); return
 
+    # 🔥 如果是過去日期，撈取每檔股票的「最新收盤價」並計算回測報酬率
+    if is_past_date:
+        idx_latest = df_full.groupby('symbol')['date'].idxmax()
+        latest_prices = df_full.loc[idx_latest, ['symbol', 'close']].rename(columns={'close': 'latest_close'})
+        df_day = pd.merge(df_day, latest_prices, on='symbol', how='left')
+        df_day['Backtest_Return'] = (df_day['latest_close'] - df_day['close']) / df_day['close'] * 100
+
     res = df_day[df_day['Total_Score'] >= min_sc].copy()
     
+    # 執行排序邏輯
     if sort_opt == "總分": res = res.sort_values(['Total_Score','symbol'], ascending=[False,True])
     elif sort_opt == "漲跌幅": res = res.sort_values(['pct_change','symbol'], ascending=[False,True])
     elif sort_opt == "外資買超": res = res.sort_values(['foreign_net','symbol'], ascending=[False,True])
     elif sort_opt == "營收YOY": res = res.sort_values(['yoy_pct','symbol'], ascending=[False,True])
     elif sort_opt == "量增比": res = res.sort_values(['Vol_Ratio','symbol'], ascending=[False,True])
+    elif sort_opt == "回測報酬率" and is_past_date: res = res.sort_values(['Backtest_Return','symbol'], ascending=[False,True])
 
-    disp = res[['symbol','name','close','pct_change','Vol_Ratio','Total_Score','Signal_List']].reset_index(drop=True)
+    # 動態決定要顯示的欄位
+    display_cols = ['symbol','name','close','pct_change','Vol_Ratio']
+    if is_past_date:
+        display_cols.append('Backtest_Return')
+    display_cols.extend(['Total_Score','Signal_List'])
+
+    disp = res[display_cols].reset_index(drop=True)
     syms = disp['symbol'].tolist()
 
     st.success(f"篩選出 {len(syms)} 檔 (門檻:{min_sc})")
@@ -303,18 +320,27 @@ def main_app():
             return f"🔥 {x:.1f}x"
         return f"{x:.1f}x"
 
+    # 設定顯示格式與表頭中文
+    fmt_dict = {
+        "pct_change":"{:.2f}%",
+        "close":"{:.2f}", 
+        "Total_Score":"{:.0f}",
+        "Vol_Ratio": format_vol_ratio
+    }
+    
+    col_cfg = {
+        "Vol_Ratio": "量增比",
+        "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
+    }
+
+    if is_past_date:
+        fmt_dict["Backtest_Return"] = "{:.2f}%"
+        col_cfg["Backtest_Return"] = "回測報酬率"
+
     evt = st.dataframe(
-        disp.style.format({
-            "pct_change":"{:.2f}%",
-            "close":"{:.2f}", 
-            "Total_Score":"{:.0f}",
-            "Vol_Ratio": format_vol_ratio
-        }).background_gradient(subset=['Total_Score'], cmap='Reds'),
+        disp.style.format(fmt_dict, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
         on_select="rerun", selection_mode="single-row", use_container_width=True,
-        column_config={
-            "Vol_Ratio": "量增比",
-            "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
-        }
+        column_config=col_cfg
     )
     
     if evt.selection.rows: st.session_state.ticker_index = evt.selection.rows[0]
@@ -330,8 +356,14 @@ def main_app():
     cur_sym = syms[st.session_state.ticker_index]
     cur_row = res[res['symbol']==cur_sym].iloc[0]
     
-    st.markdown(f"### {cur_sym} {cur_row['name']} | 分數: {int(cur_row['Total_Score'])}")
-    st.info(f"💡 {cur_row['Signal_List']}")
+    # 🔥 單檔個股標題也同步顯示回測報酬
+    with st.container():
+        if is_past_date and pd.notna(cur_row.get('Backtest_Return')):
+            st.markdown(f"<h3 style='color:#FF4B4B'>{cur_sym} {cur_row['name']} | 分數: {int(cur_row['Total_Score'])} | 回測: {cur_row['Backtest_Return']:.2f}%</h3>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<h3 style='color:#FF4B4B'>{cur_sym} {cur_row['name']} | 分數: {int(cur_row['Total_Score'])}</h3>", unsafe_allow_html=True)
+            
+        st.info(f"💡 {cur_row['Signal_List']}")
 
     chart_data = df_full[df_full['symbol']==cur_sym].sort_values('date')
     chart_data = chart_data[chart_data['date']<=target_ts]
