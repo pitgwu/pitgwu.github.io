@@ -257,6 +257,16 @@ def load_precalculated_data():
             np.nan
         )
 
+        # 🔥 優化：計算量增比 (今日量 / 昨日量)
+        # 必須確保資料依股票代號與日期排序
+        df = df.sort_values(['symbol', 'date'])
+        df['prev_volume'] = df.groupby('symbol')['volume'].shift(1)
+        df['Vol_Ratio'] = np.where(
+            (df['prev_volume'] > 0) & df['prev_volume'].notna(),
+            df['volume'] / df['prev_volume'],
+            np.nan
+        )
+
     return df
 
 # --- 繪圖輔助 ---
@@ -271,8 +281,8 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text):
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
     score_val = active_signals_text.count(',') + 1 if active_signals_text else 0
 
-    df_plot['prev_volume'] = df_plot['volume'].shift(1)
-    df_plot['vol_ratio'] = df_plot['volume'] / (df_plot['volume'].rolling(5).mean() + 1e-9)
+    df_plot['prev_volume_ma'] = df_plot['volume'].shift(1)
+    df_plot['vol_ratio_ma'] = df_plot['volume'] / (df_plot['volume'].rolling(5).mean() + 1e-9)
 
     fig = make_subplots(rows=5, cols=1, shared_xaxes=True, vertical_spacing=0.01,
                         row_heights=[0.45, 0.1, 0.1, 0.1, 0.15],
@@ -312,7 +322,7 @@ def plot_stock_kline(df_stock, symbol, name, active_signals_text):
     fig.add_trace(go.Scatter(x=df_plot['date_str'], y=df_plot['DIF'], name='DIF', line=dict(color='orange')), row=4, col=1)
 
     signals = [('KD金叉', (df_plot['K']>df_plot['D'])&(df_plot['K'].shift(1)<df_plot['D'].shift(1)), 'diamond','purple'),
-               ('量攻', (df_plot['volume']>df_plot['prev_volume'])&(df_plot['vol_ratio']>1.2), 'triangle-up','gold'),
+               ('量攻', (df_plot['volume']>df_plot['prev_volume_ma'])&(df_plot['vol_ratio_ma']>1.2), 'triangle-up','gold'),
                ('MACD紅', (df_plot['MACD_OSC']>0)&(df_plot['MACD_OSC'].shift(1)<0), 'square','blue')]
 
     for i, (lbl, mask, sym, clr) in enumerate(signals):
@@ -542,11 +552,11 @@ def main_app():
     st.sidebar.header("📅 戰情參數")
     sel_date = st.sidebar.selectbox("日期", avail_dates, 0)
     
-    # 🔥 判斷是否為過去日期，以決定是否顯示並排序「回測報酬率」
     max_date = df_full['date'].max()
     is_past_date = pd.Timestamp(sel_date) < max_date
     
-    sort_opts = ["強勢總分", "加入日期", "漲跌幅", "外資買超", "投信買超"]
+    # 🔥 將「量增比」加入排序選項
+    sort_opts = ["強勢總分", "加入日期", "漲跌幅", "外資買超", "投信買超", "量增比"]
     if is_past_date:
         sort_opts.append("回測報酬率")
         
@@ -573,7 +583,6 @@ def main_app():
         st.warning("⚠️ 無符合資料")
         return
 
-    # 🔥 如果是過去日期，撈取每檔股票的「最新收盤價」並計算回測報酬率
     if is_past_date:
         idx_latest = df_full.groupby('symbol')['date'].idxmax()
         latest_prices = df_full.loc[idx_latest, ['symbol', 'close']].rename(columns={'close': 'latest_close'})
@@ -589,11 +598,12 @@ def main_app():
         elif "漲跌" in sort_opt: df_day = df_day.sort_values(['pct_change','symbol'], ascending=[False,True])
         elif "外資" in sort_opt: df_day = df_day.sort_values(['foreign_net','symbol'], ascending=[False,True])
         elif "投信" in sort_opt: df_day = df_day.sort_values(['trust_net','symbol'], ascending=[False,True])
+        elif "量增比" in sort_opt: df_day = df_day.sort_values(['Vol_Ratio','symbol'], ascending=[False,True])
         elif "回測報酬率" in sort_opt: df_day = df_day.sort_values(['Backtest_Return','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
-    # 動態決定要顯示的欄位
-    display_cols = ['symbol','name','added_date','industry','close','pct_change']
+    # 🔥 將 Vol_Ratio (量增比) 放入顯示欄位中
+    display_cols = ['symbol','name','added_date','industry','close','pct_change', 'Vol_Ratio']
     if is_past_date:
         display_cols.append('Backtest_Return')
     display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List'])
@@ -608,19 +618,29 @@ def main_app():
 
     st.success(f"{title} (符合門檻剩 {len(sym_list)} 檔)")
 
-    # 設定數值格式與表頭中文
+    # 🔥 定義量增比的專屬格式化函數：超過 2.0 倍就加火焰
+    def format_vol_ratio(x):
+        if pd.isna(x):
+            return "-"
+        if x >= 2.0:
+            return f"🔥 {x:.1f}x"
+        return f"{x:.1f}x"
+
     fmt_dict = {
         "pct_change": "{:.2f}%",
         "close": "{:.2f}",
         "Capital": "{:.1f}",
         "2026EPS": "{:.2f}",
         "PE_Ratio": "{:.2f}",
-        "Total_Score": "{:.0f}"
+        "Total_Score": "{:.0f}",
+        "Vol_Ratio": format_vol_ratio
     }
+    
     col_cfg = {
         "Capital": "股本",
         "2026EPS": "2026EPS",
         "PE_Ratio": "本益比",
+        "Vol_Ratio": "量增比",
         "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")
     }
 
@@ -655,7 +675,6 @@ def main_app():
     st.session_state.last_viewed_symbol = cur_sym
 
     with c3:
-        # 🔥 單檔個股標題也同步顯示回測報酬
         if is_past_date and pd.notna(cur_info.get('Backtest_Return')):
             st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])} | 回測: {cur_info['Backtest_Return']:.2f}%</h3>", unsafe_allow_html=True)
         else:
