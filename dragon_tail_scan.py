@@ -7,6 +7,7 @@ import bcrypt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import uuid
+import numpy as np
 
 # ===========================
 # 1. 資料庫連線與全域設定
@@ -127,9 +128,9 @@ def run_strategy_scan(df_full, target_date, min_volume, vol_multiplier, use_cond
     # === 基礎前置運算 ===
     df['prev_high'] = df.groupby('symbol')['high'].shift(1)
     
-    # 計算昨日量與量增比
+    # 計算昨日量與量增比 (確保計算過程有正確的 NaN 處理)
     df['prev_volume_sheets'] = df.groupby('symbol')['volume_sheets'].shift(1)
-    df['量增比'] = df['volume_sheets'] / df['prev_volume_sheets'].replace(0, float('nan'))
+    df['量增比'] = df['volume_sheets'] / df['prev_volume_sheets'].replace(0, np.nan)
     
     for ma in [5, 10, 20, 60]:
         df[f'prev_MA{ma}'] = df.groupby('symbol')[f'MA{ma}'].shift(1)
@@ -266,7 +267,8 @@ def color_return_rate(val):
 def format_vol_ratio(x):
     try:
         val = float(x)
-        if pd.isna(val): return "-"
+        if pd.isna(val) or val == 0 or np.isinf(val): 
+            return "-"
         if val >= 1.5:
             return f"🔥 {val:.1f}x"
         return f"{val:.1f}x"
@@ -349,8 +351,8 @@ def main_app():
             
             display_df = result_df.copy()
             
-            # 安全防呆機制：確保必要欄位都存在才不報錯
-            if '量增比' not in display_df.columns: display_df['量增比'] = float('nan')
+            # 安全防呆機制：確保欄位一定存在
+            if '量增比' not in display_df.columns: display_df['量增比'] = np.nan
             if 'volume_sheets' not in display_df.columns: display_df['volume_sheets'] = 0
             if 'pct_change' not in display_df.columns: display_df['pct_change'] = 0
             if 'Low_120' not in display_df.columns: display_df['Low_120'] = 0
@@ -358,7 +360,6 @@ def main_app():
             for ma in [5, 10, 20, 60]:
                 ma_col = f'MA{ma}'
                 prev_ma_col = f'prev_MA{ma}'
-                # 若無歷史MA資料，預設呈現 "-"
                 if ma_col in display_df.columns and prev_ma_col in display_df.columns:
                     display_df[f'{ma}MA'] = display_df.apply(
                         lambda row: f"{row[ma_col]:.2f} ▲" if row[ma_col] > row[prev_ma_col] else (
@@ -369,20 +370,21 @@ def main_app():
                     display_df[f'{ma}MA'] = "-"
             
             display_df['玩股網'] = display_df['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{str(x).split('.')[0]}")
-            
             display_df['volume_sheets'] = display_df['volume_sheets'].fillna(0).astype(int)
+            
+            # 🔥 解法關鍵：直接把量增比轉換成字串，不要依賴 style.format，徹底杜絕 Streamlit 的 None Bug
+            display_df['量增比'] = display_df['量增比'].apply(format_vol_ratio)
+
             display_df = display_df.rename(
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
             )
             
-            # 建立動態安全提取的欄位名單
             desired_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '量增比', '漲跌幅(%)']
             if sel_date < latest_date_in_db and '回測報酬率(%)' in display_df.columns:
                 desired_cols.append('回測報酬率(%)')
 
             final_cols = [col for col in desired_cols if col in display_df.columns]
 
-            # 防呆排序
             if '漲跌幅(%)' in display_df.columns:
                 display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
             else:
@@ -394,8 +396,8 @@ def main_app():
                 "當日收盤": "{:.2f}",
                 "半年低點": "{:.2f}",
                 "成交量(張)": "{:,}",
-                "量增比": format_vol_ratio,
                 "漲跌幅(%)": "{:.2f}%"
+                # 量增比 已經在上方直接被 apply 轉成字串，所以這邊不需要再 format
             }
             if '回測報酬率(%)' in display_df.columns:
                 format_dict['回測報酬率(%)'] = "{:.2f}%"
