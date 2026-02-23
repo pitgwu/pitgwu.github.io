@@ -349,27 +349,44 @@ def main_app():
             
             display_df = result_df.copy()
             
+            # 安全防呆機制：確保必要欄位都存在才不報錯
+            if '量增比' not in display_df.columns: display_df['量增比'] = float('nan')
+            if 'volume_sheets' not in display_df.columns: display_df['volume_sheets'] = 0
+            if 'pct_change' not in display_df.columns: display_df['pct_change'] = 0
+            if 'Low_120' not in display_df.columns: display_df['Low_120'] = 0
+            
             for ma in [5, 10, 20, 60]:
                 ma_col = f'MA{ma}'
                 prev_ma_col = f'prev_MA{ma}'
-                display_df[f'{ma}MA'] = display_df.apply(
-                    lambda row: f"{row[ma_col]:.2f} ▲" if row[ma_col] > row[prev_ma_col] else (
-                                f"{row[ma_col]:.2f} ▼" if row[ma_col] < row[prev_ma_col] else f"{row[ma_col]:.2f} -"
-                    ), axis=1
-                )
+                # 若無歷史MA資料，預設呈現 "-"
+                if ma_col in display_df.columns and prev_ma_col in display_df.columns:
+                    display_df[f'{ma}MA'] = display_df.apply(
+                        lambda row: f"{row[ma_col]:.2f} ▲" if row[ma_col] > row[prev_ma_col] else (
+                                    f"{row[ma_col]:.2f} ▼" if row[ma_col] < row[prev_ma_col] else f"{row[ma_col]:.2f} -"
+                        ), axis=1
+                    )
+                else:
+                    display_df[f'{ma}MA'] = "-"
             
             display_df['玩股網'] = display_df['symbol'].apply(lambda x: f"https://www.wantgoo.com/stock/{str(x).split('.')[0]}")
             
-            display_df['volume_sheets'] = display_df['volume_sheets'].astype(int)
+            display_df['volume_sheets'] = display_df['volume_sheets'].fillna(0).astype(int)
             display_df = display_df.rename(
                 columns={'close': '當日收盤', 'Low_120': '半年低點', 'volume_sheets': '成交量(張)', 'pct_change': '漲跌幅(%)'}
             )
             
-            final_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '量增比', '漲跌幅(%)']
+            # 建立動態安全提取的欄位名單
+            desired_cols = ['symbol', 'name', '玩股網', '當日收盤', '5MA', '10MA', '20MA', '60MA', '半年低點', '成交量(張)', '量增比', '漲跌幅(%)']
             if sel_date < latest_date_in_db and '回測報酬率(%)' in display_df.columns:
-                final_cols.append('回測報酬率(%)')
+                desired_cols.append('回測報酬率(%)')
 
-            display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
+            final_cols = [col for col in desired_cols if col in display_df.columns]
+
+            # 防呆排序
+            if '漲跌幅(%)' in display_df.columns:
+                display_df = display_df[final_cols].sort_values('漲跌幅(%)', ascending=False).reset_index(drop=True)
+            else:
+                display_df = display_df[final_cols].reset_index(drop=True)
             
             sym_list = display_df['symbol'].tolist()
 
