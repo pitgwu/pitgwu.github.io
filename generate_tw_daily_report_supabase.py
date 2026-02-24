@@ -45,17 +45,17 @@ def get_db_engine():
     """
     取得資料庫引擎 (Singleton 模式)
     避免重複 create_engine 導致連線數爆滿 (MaxClientsInSessionMode)
+    加入 statement_timeout=60000 避免大量歷史資料撈取超時
     """
     global _db_engine
     if _db_engine is None:
         try:
-            # pool_pre_ping=True 可自動重連斷掉的連線
-            # pool_size=5 限制連線池大小，避免超過 Supabase 上限
             _db_engine = create_engine(
                 SUPABASE_DB_URL, 
                 pool_size=5, 
                 max_overflow=0,
-                pool_pre_ping=True
+                pool_pre_ping=True,
+                connect_args={'options': '-c statement_timeout=60000'}
             )
         except Exception as e:
             print(f"❌ 資料庫連線設定錯誤: {e}")
@@ -115,7 +115,6 @@ def fetch_tw_vix_taifex():
     }
     session.headers.update(headers)
 
-    # Plan C: HiStock (最穩定)
     try:
         url_hi = "https://histock.tw/index/VIX"
         res = requests.get(url_hi, headers=headers, timeout=10)
@@ -158,7 +157,7 @@ def fetch_indices_data():
     return pd.DataFrame(data_list)
 
 # ===========================
-# 4. 資料庫讀取
+# 4. 資料庫讀取 (基本資料)
 # ===========================
 def load_db_data(period_type):
     engine = get_db_engine()
@@ -173,7 +172,6 @@ def load_db_data(period_type):
                 res = conn.execute(text("SELECT MAX(date) FROM stock_prices")).fetchone()
                 if res and res[0]:
                     latest_date_str = str(res[0])
-                    print(f"   [DEBUG] 資料庫最新日期: {latest_date_str}")
                     
                     df = pd.read_sql(text(f"SELECT * FROM stock_prices WHERE date = '{latest_date_str}'"), conn)
                     
@@ -195,7 +193,7 @@ def load_db_data(period_type):
                         df = pd.read_sql(text(f"SELECT * FROM {table} WHERE period = '{latest_date_str}'"), conn)
                         df['change_pct'] = ((df['close'] - df['open']) / df['open']) * 100
                 except Exception as e:
-                    print(f"   [DEBUG] 週/月資料讀取異常 (可能未執行聚合): {e}")
+                    print(f"   [DEBUG] 週/月資料讀取異常: {e}")
 
             if df is None or df.empty:
                 return None, "無資料"
@@ -209,7 +207,6 @@ def load_db_data(period_type):
                 df['name'] = df['symbol']
                 df['industry'] = '其他'
 
-            # 讀取法人 (僅日報)
             try:
                 if period_type == 'D':
                     inst = pd.read_sql(text(f"SELECT symbol, foreign_net, trust_net, dealer_net FROM institutional_investors WHERE date = '{latest_date_str}'"), conn)
@@ -229,13 +226,14 @@ def load_db_data(period_type):
     return df, latest_date_str
 
 # ===========================
-# 5. 計算 & 圖表
+# 5. 市場寬度運算 (MA排列 + 200日新高低)
 # ===========================
 def calculate_market_breadth_html():
-    print("📊 正在計算全市場多空排列...")
+    print("📊 正在計算全市場多空排列 (MA)...")
     engine = get_db_engine()
     if not engine: return "<p>資料庫連線失敗</p>"
 
+    # 往前多抓 120 天作為均線的「暖機期」
     start_date = (datetime.now() - timedelta(days=LOOKBACK_DAYS + 120)).strftime("%Y-%m-%d")
     
     try:
@@ -246,28 +244,37 @@ def calculate_market_breadth_html():
 
     if df.empty: return "<p>資料不足</p>"
 
-    df['date'] = pd.to_datetime(df['date'])
+    # 確保時間格式乾淨 (去除可能的時區干擾)
+    df['date'] = pd.to_datetime(df['date']).dt.normalize()
     close_matrix = df.pivot(index='date', columns='symbol', values='close')
     
-    ma5 = close_matrix.rolling(window=5).mean()
-    ma10 = close_matrix.rolling(window=10).mean()
-    ma20 = close_matrix.rolling(window=20).mean()
-    ma60 = close_matrix.rolling(window=60).mean()
+    # 【關鍵修復 1】向前填充 (Forward Fill)
+    # 如果某天某檔股票沒有收盤價(NaN)，自動延用前一天的價格，避免 rolling 產生長達數十天的斷層
+    close_matrix = close_matrix.ffill()
+
+    # 【關鍵修復 2】加入 min_periods=1
+    # 就算剛開始資料筆數不夠，也能及早給出均線數值，不會全部都是 NaN
+    ma5 = close_matrix.rolling(window=5, min_periods=1).mean()
+    ma10 = close_matrix.rolling(window=10, min_periods=1).mean()
+    ma20 = close_matrix.rolling(window=20, min_periods=1).mean()
+    ma60 = close_matrix.rolling(window=60, min_periods=1).mean()
 
     short_bull = ((ma5 > ma10) & (ma10 > ma20)).sum(axis=1)
     short_bear = ((ma5 < ma10) & (ma10 < ma20)).sum(axis=1)
     long_bull = ((ma10 > ma20) & (ma20 > ma60)).sum(axis=1)
     long_bear = ((ma10 < ma20) & (ma20 < ma60)).sum(axis=1)
     
-    total_stocks = close_matrix.count(axis=1).replace(0, 1)
+    # 計算有效股票總數 (排除完全沒資料的股票)
+    total_stocks = close_matrix.notna().sum(axis=1).replace(0, 1)
     
     res = pd.DataFrame({
         'short_bull_pct': (short_bull / total_stocks) * 100,
         'short_bear_pct': (short_bear / total_stocks) * 100,
         'long_bull_pct': (long_bull / total_stocks) * 100,
         'long_bear_pct': (long_bear / total_stocks) * 100
-    }).dropna()
+    })
     
+    # 【關鍵修復 3】安全合併加權指數 (TWII)
     try:
         twii = yf.download("^TWII", start=start_date, progress=False)
         if not twii.empty:
@@ -277,11 +284,21 @@ def calculate_market_breadth_html():
             else: twii_close = twii['Close']
             
             if isinstance(twii_close, pd.DataFrame): twii_close = twii_close.iloc[:, 0]
-            if twii_close.index.tz is not None: twii_close.index = twii_close.index.tz_localize(None)
+            
+            # 確保 yfinance 的日期格式與資料庫完全一致
+            twii_close.index = pd.to_datetime(twii_close.index).normalize()
             res = res.join(twii_close.rename("TWII"))
+            
+            # 將大盤缺漏的日期 (例如台股補班日美股休市) 向前填充，避免 dropna 把有效資料刪除
+            res['TWII'] = res['TWII'].ffill().fillna(0)
         else: res['TWII'] = 0
     except: res['TWII'] = 0
     
+    # 移除暖機期的資料，只保留我們真正要畫圖的區間 (LOOKBACK_DAYS)
+    target_start = pd.to_datetime((datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d"))
+    res = res[res.index >= target_start]
+    
+    # 確保最終沒有異常的 NaN
     res = res.dropna()
 
     fig = make_subplots(
@@ -307,6 +324,150 @@ def calculate_market_breadth_html():
     )
     return fig.to_html(full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
 
+def update_market_breadth_db():
+    print("🔍 [200日寬度] 正在智慧更新 200日新高/低資料庫...")
+    engine = get_db_engine()
+    if not engine: return False
+    
+    try:
+        with engine.connect() as conn:
+            dates_df = pd.read_sql("SELECT DISTINCT date FROM stock_prices ORDER BY date DESC LIMIT 300", conn)
+            if dates_df.empty:
+                print("⚠️ 股價資料庫無資料，跳過寬度計算。")
+                return False
+                
+            available_dates = pd.to_datetime(dates_df['date']).sort_values().tolist()
+            
+            check_table = text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'market_breadth')")
+            table_exists = conn.execute(check_table).scalar()
+            
+            latest_calc_date = None
+            if table_exists:
+                latest_df = pd.read_sql("SELECT MAX(date) as max_date FROM market_breadth", conn)
+                if not latest_df.empty and pd.notnull(latest_df.iloc[0]['max_date']):
+                    latest_calc_date = pd.to_datetime(latest_df.iloc[0]['max_date'])
+            
+            if latest_calc_date is None:
+                print("   🆕 找不到歷史計算紀錄，初始化 (計算近60天)...")
+                target_dates = available_dates[-60:]
+            else:
+                target_dates = [d for d in available_dates if d > latest_calc_date]
+                
+            if not target_dates:
+                print("   ✨ 200日市場寬度已是最新，無需更新。")
+                return True
+                
+            print(f"   ⚙️ 發現 {len(target_dates)} 天新數據需要計算。")
+            
+            first_target = target_dates[0]
+            first_target_idx = available_dates.index(first_target)
+            start_idx = max(0, first_target_idx - 200)
+            
+            fetch_start_date = available_dates[start_idx].strftime('%Y-%m-%d')
+            fetch_end_date = target_dates[-1].strftime('%Y-%m-%d')
+            
+            query_prices = text(f"""
+                SELECT symbol, date, close
+                FROM stock_prices
+                WHERE date >= '{fetch_start_date}' AND date <= '{fetch_end_date}'
+            """)
+            
+            chunks = []
+            for chunk in pd.read_sql(query_prices, conn, chunksize=50000):
+                chunks.append(chunk)
+                
+            if not chunks: return False
+                
+            df_raw = pd.concat(chunks, ignore_index=True)
+
+        # 進行運算 (不需要放在 connection block 內)
+        df_raw['date'] = pd.to_datetime(df_raw['date'])
+        pivot_df = df_raw.pivot(index='date', columns='symbol', values='close').sort_index()
+
+        max_200 = pivot_df.rolling(window=200, min_periods=1).max()
+        min_200 = pivot_df.rolling(window=200, min_periods=1).min()
+
+        is_new_high = (pivot_df >= max_200) & pivot_df.notna()
+        is_new_low = (pivot_df <= min_200) & pivot_df.notna()
+
+        result_df = pd.DataFrame({
+            'date': pivot_df.index,
+            'new_highs': is_new_high.sum(axis=1),
+            'new_lows': is_new_low.sum(axis=1),
+            'total_stocks': pivot_df.notna().sum(axis=1)
+        })
+
+        result_df['total_signals'] = result_df['new_highs'] + result_df['new_lows']
+        result_df['net_ratio'] = ((result_df['new_highs'] - result_df['new_lows']) / result_df['total_signals'].replace(0, pd.NA)) * 100
+        result_df['net_ratio'] = result_df['net_ratio'].fillna(0).round(2)
+
+        final_insert_df = result_df[result_df['date'].isin(target_dates)].copy()
+        final_insert_df = final_insert_df.drop(columns=['total_signals'])
+        final_insert_df['date'] = final_insert_df['date'].dt.date
+
+        print(f"   💾 將 {len(final_insert_df)} 筆寬度結果寫入資料庫...")
+        final_insert_df.to_sql('market_breadth', engine, if_exists='append', index=False)
+        return True
+    except Exception as e:
+        print(f"❌ 更新200日寬度資料庫失敗: {e}")
+        return False
+
+def generate_200d_breadth_html():
+    engine = get_db_engine()
+    if not engine: return ""
+    
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql("SELECT * FROM market_breadth ORDER BY date DESC LIMIT 60", conn)
+        
+        if df.empty: return "<p>無市場寬度數據</p>"
+            
+        df = df.iloc[::-1].reset_index(drop=True)
+        df['date_str'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        # 紅色線：200日高
+        fig.add_trace(go.Scatter(
+            x=df['date_str'], y=df['new_highs'], 
+            mode='lines', name='200日新高(紅)', 
+            line=dict(color='#FF3333', width=2)
+        ), secondary_y=False)
+
+        # 綠色線：200日低
+        fig.add_trace(go.Scatter(
+            x=df['date_str'], y=df['new_lows'], 
+            mode='lines', name='200日新低(綠)', 
+            line=dict(color='#00CC66', width=2)
+        ), secondary_y=False)
+
+        # 藍色線：多空比
+        fig.add_trace(go.Scatter(
+            x=df['date_str'], y=df['net_ratio'], 
+            mode='lines', name='多空比(淨新高%)', 
+            line=dict(color='#3498db', width=2)
+        ), secondary_y=True)
+
+        fig.update_layout(
+            title='<b>近3個月創200日新高/新低家數 與 多空比走勢</b>',
+            template="plotly_dark", height=450,
+            hovermode='x unified', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=50, r=40, t=50, b=40),
+            legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center", bgcolor="rgba(0,0,0,0)")
+        )
+
+        fig.update_yaxes(title_text="家數", showgrid=True, gridcolor='#333', secondary_y=False)
+        fig.update_yaxes(title_text="多空比 (%)", showgrid=False, zeroline=True, zerolinecolor='rgba(52, 152, 219, 0.5)', zerolinewidth=2, secondary_y=True)
+
+        # 此處 include_plotlyjs=False，因為上面的 MA 圖已經載入過了
+        return fig.to_html(full_html=False, include_plotlyjs=False, config={'displayModeBar': False})
+    except Exception as e:
+        print(f"❌ 產生200日寬度圖表失敗: {e}")
+        return ""
+
+# ===========================
+# 6. 生成報表與排版
+# ===========================
 def generate_sector_turnover_html(df):
     if df is None or df.empty or 'industry' not in df.columns:
         return "<div class='card'>無產業數據</div>"
@@ -497,18 +658,26 @@ def generate_tab_content(period_type):
     final_html += '<div class="grid-container">' + "".join(html_parts) + '</div>'
     return final_html
 
+# ===========================
+# 7. 主程式
+# ===========================
 def main():
-    print("🚀 正在生成台股戰情日報 (Supabase + VIX救援版)...")
+    print("🚀 正在生成台股戰情日報 (整合 200日新高/低 寬度)...")
     
-    # 1. 取得當日日期字串
+    # 步驟一：確保 200日寬度資料庫是最新的
+    update_market_breadth_db()
+    
+    # 取得當日日期字串
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
     
-    market_breadth_chart = calculate_market_breadth_html()
+    # 生成各區塊圖表
+    market_breadth_ma_chart = calculate_market_breadth_html()
+    market_breadth_200d_chart = generate_200d_breadth_html()
     
     html_template = f"""
     <!DOCTYPE html>
-    <html lang="zh-TW">
+    <html ="zh-TW">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -516,7 +685,7 @@ def main():
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <style>
             :root {{ --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --red: #ff5252; --green: #4caf50; --accent: #2196f3; --border: #333; }}
-            body {{ background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }}
+            body {{ background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-seri; padding: 20px; }}
             h1 {{ text-align: center; color: var(--accent); letter-spacing: 1px; margin-bottom: 20px; }}
             
             .tabs {{ display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }}
@@ -571,14 +740,19 @@ def main():
         
         <div class="tabs">
             <button class="tab-btn active" onclick="openTab('daily')">今日戰報</button>
-            <button class="tab-btn" onclick="openTab('weekly')">本週趨勢</button>
+            <butass="tab-btn" onclick="openTab('weekly')">本週趨勢</button>
             <button class="tab-btn" onclick="openTab('monthly')">本月月報</button>
         </div>
         
         <div id="daily" class="tab-content active">
             <div class="chart-container">
-                {market_breadth_chart}
+                {market_breadth_ma_chart}
             </div>
+            
+            <div class="chart-container">
+                {market_breadth_200d_chart}
+            </div>
+            
             {generate_tab_content('D')}
         </div>
         
@@ -598,7 +772,6 @@ def main():
     """
     
     # 輸出邏輯
-    # now 已經在上面定義過
     yyyy = now.strftime("%Y")
     mm = now.strftime("%m")
     yyyymmdd = now.strftime("%Y%m%d")
@@ -610,8 +783,7 @@ def main():
     # 2. 定義檔名
     archive_filename = f"tw_market_dashboard_{yyyymmdd}.html"
     archive_path = os.path.join(archive_dir, archive_filename)
-    
-    # 3. 寫入報表
+ # 3. 寫入報表
     with open(archive_path, "w", encoding="utf-8") as f:
         f.write(html_template)
     
@@ -627,7 +799,7 @@ def main():
     <head>
         <meta charset="UTF-8">
         <meta http-equiv="refresh" content="0; url={rel_path}" />
-        <title>Redirecting...</title>
+      <title>Redirecting.</title>
     </head>
     <body>
         <p>正在載入今日最新報表... <a href="{rel_path}">點擊這裡</a></p>
