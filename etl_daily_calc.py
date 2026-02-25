@@ -40,6 +40,15 @@ def transform_data(df):
     
     df['prev_close'] = grouped['close'].shift(1)
     df['prev_volume'] = grouped['volume'].shift(1)
+
+    # 加入這段算 Vol_Ratio
+    import numpy as np
+    df['Vol_Ratio'] = np.where(
+        (df['prev_volume'] > 0) & df['prev_volume'].notna(),
+        df['volume'] / df['prev_volume'],
+        np.nan
+    )
+
     df['pct_change'] = (df['close'] - df['prev_close']) / df['prev_close'] * 100
     df['pct_change_5d'] = grouped['close'].pct_change(5) * 100
     df['close_max_3d'] = grouped['close'].transform(lambda x: x.rolling(3).max())
@@ -143,7 +152,7 @@ def load_data(df):
     # 只取需要存入資料庫的欄位
     cols_to_keep = ['date', 'symbol', 'name', 'industry', 'open', 'high', 'low', 'close', 'volume', 
                     'pct_change', 'foreign_net', 'trust_net', 'MA5', 'MA10', 'MA20', 'MA60', 
-                    'K', 'D', 'MACD_OSC', 'DIF', 'total_score', 'signal_list']
+                    'K', 'D', 'MACD_OSC', 'DIF', 'total_score', 'signal_list', 'Vol_Ratio']
     
     df_final = df[cols_to_keep].dropna(subset=['close'])
     
