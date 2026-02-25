@@ -99,6 +99,15 @@ def transform_data(df, df_rev):
     
     df['prev_close'] = g['close'].shift(1)
     df['prev_volume'] = g['volume'].shift(1)
+
+    # 👇👇👇 [新增這一段] 預先算好量增比 👇👇👇
+    df['Vol_Ratio'] = np.where(
+        (df['prev_volume'] > 0) & df['prev_volume'].notna(),
+        df['volume'] / df['prev_volume'],
+        np.nan
+    )
+    # 👆👆👆 [新增結束] 👆👆👆
+
     df['pct_change'] = (df['close'] - df['prev_close']) / df['prev_close'] * 100
     df['pct_change_3d'] = g['close'].pct_change(3) * 100
     df['pct_change_5d'] = g['close'].pct_change(5) * 100
@@ -231,9 +240,10 @@ def transform_data(df, df_rev):
 # ===========================
 def load_data(df):
     print("📤 [4/4] 覆寫至資料庫中...")
+    # 👇 在這個陣列的最後面加上 'Vol_Ratio'
     cols_to_keep = ['date', 'symbol', 'name', 'industry', 'open', 'high', 'low', 'close', 'volume', 
                     'pct_change', 'foreign_net', 'trust_net', 'yoy_pct', 'MA5', 'MA10', 'MA20', 'MA60', 
-                    'K', 'D', 'MACD_OSC', 'DIF', 'MACD', 'total_score', 'signal_list']
+                    'K', 'D', 'MACD_OSC', 'DIF', 'MACD', 'total_score', 'signal_list', 'Vol_Ratio']
     
     df_final = df[cols_to_keep].dropna(subset=['close'])
     
