@@ -7,7 +7,7 @@ import sqlalchemy
 import time
 import random
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import insert
 
@@ -19,7 +19,8 @@ SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 if not SUPABASE_DB_URL:
     raise RuntimeError("❌ 請設定環境變數 SUPABASE_DB_URL")
 
-engine = create_engine(SUPABASE_DB_URL)
+# 加上 pool_pre_ping 防止連線中斷
+engine = create_engine(SUPABASE_DB_URL, pool_pre_ping=True)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -81,7 +82,7 @@ def upsert_to_supabase(df, table_name, unique_cols):
     print(f"   ✅ [{table_name}] Upsert 成功: {len(records)} 筆")
 
 # ===========================
-# 3. 模組 A: 股票清單 (強效修復版)
+# 3. 模組 A: 股票清單
 # ===========================
 def fetch_market_data_with_retry(url, retries=3):
     for i in range(retries):
@@ -96,9 +97,8 @@ def fetch_market_data_with_retry(url, retries=3):
     return None
 
 def sync_stock_info():
-    print("\n🚀 [1/2] 更新股票代號與產業分類 (含 ETF 修正)...")
+    print("\n🚀 [1/2] 更新股票代號與產業分類...")
     all_data = []
-    # 模式: 上市=2, 上櫃=4, 興櫃=5
     configs = [("上市", 2, ".TW"), ("上櫃", 4, ".TWO"), ("興櫃", 5, ".TWO")]
 
     for market_name, mode, suffix in configs:
@@ -116,11 +116,9 @@ def sync_stock_info():
             df = dfs[0]
             
             count = 0
-            found_00731 = False
             
             for _, row in df.iterrows():
                 try:
-                    # 1. 取得第一欄 (代號+名稱)
                     raw_str = str(row.iloc[0]).strip()
                     parts = re.split(r'[\s\u3000]+', raw_str, maxsplit=1)
                     
@@ -128,13 +126,9 @@ def sync_stock_info():
                         code = parts[0].strip()
                         name = parts[1].strip()
                         
-                        # 2. 判斷代號格式 (4~6碼)
                         if re.match(r'^\d{4,6}$', code): 
-                            
-                            # 3. 嘗試取得產業別 (如果失敗，根據代號判斷)
                             industry = '其他'
                             try:
-                                # 有些列可能沒有第5欄 (index 4)，這裡加強防護
                                 if len(row) > 4:
                                     ind_val = str(row.iloc[4]).strip()
                                     if ind_val and ind_val.lower() != 'nan':
@@ -142,14 +136,8 @@ def sync_stock_info():
                             except:
                                 pass
                             
-                            # 4. 特殊修正：如果是 00 開頭，強制標記為 ETF (即使原本抓不到產業)
                             if code.startswith('00'):
                                 industry = 'ETF'
-                                
-                            # Debug: 檢查是否抓到 00731
-                            if '00731' in code:
-                                found_00731 = True
-                                print(f"      👀 發現目標: {code} - {name} ({industry})")
 
                             all_data.append({
                                 'symbol': f"{code}{suffix}",
@@ -157,12 +145,8 @@ def sync_stock_info():
                                 'industry': industry
                             })
                             count += 1
-                except Exception as e:
-                    # 這一行如果失敗，不要影響其他行
+                except Exception:
                     continue
-            
-            if not found_00731 and market_name == "上市":
-                print("      ⚠️ 警告: 本次掃描尚未發現 00731，請檢查來源網頁格式是否變更。")
                 
             print(f"      ✅ 取得 {count} 筆")
             
@@ -171,16 +155,19 @@ def sync_stock_info():
         
         time.sleep(random.uniform(2, 4))
 
-    # 安全閥
     if len(all_data) < 1000:
         print(f"\n🛑 [危險] 抓取數量過少 ({len(all_data)} 筆)，跳過更新。")
-        return []
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("SELECT symbol FROM stock_info"))
+                return [r[0] for r in res]
+        except: 
+            return []
 
     if all_data:
         df_info = pd.DataFrame(all_data).drop_duplicates(subset=['symbol'])
         print(f"   💾 寫入資料庫: 共 {len(df_info)} 筆...")
         upsert_to_supabase(df_info, 'stock_info', ['symbol'])
-        # 確保索引存在
         try:
             with engine.begin() as conn:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stock_info_symbol ON stock_info (symbol)"))
@@ -191,11 +178,11 @@ def sync_stock_info():
         return []
 
 # ===========================
-# 4. 模組 B: 日 K 股價
+# 4. 模組 B: 日 K 股價 (盤中防呆版)
 # ===========================
 def sync_daily_prices(symbols):
     print("\n🚀 [2/2] 下載最新股價 (yfinance)...")
-    if not symbols: 
+    if not symbols:
         print("   ⚠️ 無股票代號，略過更新")
         return
 
@@ -203,11 +190,12 @@ def sync_daily_prices(symbols):
         chunk_size = 500
         total_inserted = 0
 
+        # 強制抓取最近 5 天，確保涵蓋跨時區的「今天」
         for i in range(0, len(symbols), chunk_size):
             batch = symbols[i:i+chunk_size]
             print(f"   📡 下載進度 {i}/{len(symbols)}...", end="\r")
 
-            data = yf.download(batch, period="2d", progress=False, threads=True, auto_adjust=False)
+            data = yf.download(batch, period="5d", progress=False, threads=True, auto_adjust=False)
 
             if data.empty: continue
 
@@ -224,9 +212,12 @@ def sync_daily_prices(symbols):
 
             df_upload = data[req_cols].copy()
             df_upload['date'] = pd.to_datetime(df_upload['date']).dt.strftime('%Y-%m-%d')
-            df_upload.dropna(inplace=True)
 
-            # Upsert 寫入
+            # 🔥 關鍵：只剔除沒有收盤價的廢資料，若成交量為空則補 0，不整筆刪除
+            df_upload.dropna(subset=['close'], inplace=True)
+            df_upload.fillna(0, inplace=True)
+
+            # Upsert 寫入 (相同日期與代號自動覆蓋最新盤中報價)
             upsert_to_supabase(df_upload, 'stock_prices', ['date', 'symbol'])
 
             total_inserted += len(df_upload)
@@ -241,12 +232,15 @@ def sync_daily_prices(symbols):
 # ===========================
 if __name__ == "__main__":
     print("="*60)
-    print(f"📅 ETF 名稱修復工具")
+    print(f"📅 基礎資料更新 (Basic Pipeline)")
     print(f"⏰ 時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 
+    # 1. 更新股票清單
     symbols = sync_stock_info()
     
-    print("\n🎉 修復完成！現在回到 Streamlit 網頁：")
-    print("1. 點擊右上角 '...' -> 'Clear Cache'")
-    print("2. 重新整理網頁 (F5)")
+    # 🔥 剛剛被漏掉的最關鍵一行：
+    # 2. 下載股價
+    sync_daily_prices(symbols)
+    
+    print("\n🎉 基礎資料更新完成！")
