@@ -622,23 +622,23 @@ def main_app():
 
         st.divider()
 
-# ===========================
+        # ===========================
         # 🔥 圖表動態設定面板與繪圖
         # ===========================
         st.markdown("### 🎛️ 圖表指標設定")
         opt_col1, opt_col2, opt_col3 = st.columns(3)
-        
+
         with opt_col1:
             st.markdown("**K線均線**")
             ma_options = ['3MA', '5MA', '10MA', '20MA', '60MA', '120MA']
             selected_mas = st.multiselect("顯示均線 (依照勾選順序)", ma_options, default=['5MA', '10MA', '20MA', '60MA'])
             show_ma_cross = st.checkbox("標記 20MA / 60MA 交叉", value=False, key="chk_ma_cross")
-            
+
         with opt_col2:
             st.markdown("**成交量均線**")
             show_vol_ma5 = st.checkbox("顯示 5日均量", value=False)
             show_vol_ma10 = st.checkbox("顯示 10日均量", value=False)
-            
+
         with opt_col3:
             st.markdown("**下方技術與籌碼指標**")
             show_kd = st.checkbox("顯示 KD (9,3,3)", value=False)
@@ -658,24 +658,24 @@ def main_app():
         st.selectbox("選擇股票 (亦可使用上方按鈕切換)", options=opts, key="stock_selector", on_change=on_dropdown_change)
 
         current_sym_str = st.session_state.stock_selector
-        
+
         if current_sym_str:
             sym = current_sym_str.split(" - ")[0]
             cur_info = df_sorted[df_sorted['symbol'] == sym].iloc[0]
             chart = df_full[(df_full['symbol'] == sym) & (df_full['date'].dt.date <= sel_date)].copy()
-            
+
             if not chart.empty:
                 signals_str = cur_info['Signal_List'] if cur_info['Signal_List'] else '無特別訊號'
-                
+
                 title_html = f"{current_sym_str} | 評分: {cur_info['Total_Score']}"
                 if is_past_date and pd.notna(cur_info['Backtest_Return']):
                     color = "#FF4B4B" if cur_info['Backtest_Return'] > 0 else "#26a69a"
                     title_html += f" | 回測報酬: <span style='color: {color};'>{cur_info['Backtest_Return']:.2f}%</span>"
-                
+
                 pe_str = f"{cur_info['pe_ratio']:.2f}" if pd.notna(cur_info['pe_ratio']) else "-"
                 eps_str = f"{cur_info['eps2026']:.2f}" if pd.notna(cur_info['eps2026']) else "-"
                 cap_str = f"{cur_info['capital']:.1f}" if pd.notna(cur_info['capital']) else "-"
-                    
+
                 html_dashboard = (
                     '<div style="margin: 20px 0;">'
                     f'<h2 style="text-align: center; color: #FF4B4B; margin-bottom: 15px; font-weight: bold;">{title_html}</h2>'
@@ -696,13 +696,13 @@ def main_app():
                 st.markdown(html_dashboard, unsafe_allow_html=True)
 
                 for c in ['open','high','low','close', 'volume']: chart[c] = pd.to_numeric(chart[c])
-                
+
                 chart['MA3'] = chart['close'].rolling(3).mean()
-                
+
                 is_same = chart['symbol'] == chart['symbol'].shift(1)
                 chart['prev_MA20'] = np.where(is_same, chart['MA20'].shift(1), np.nan)
                 chart['prev_MA60'] = np.where(is_same, chart['MA60'].shift(1), np.nan)
-                
+
                 chart['Golden_Cross'] = (chart['MA20'] > chart['MA60']) & (chart['prev_MA20'] <= chart['prev_MA60'])
                 chart['Death_Cross'] = (chart['MA20'] < chart['MA60']) & (chart['prev_MA20'] >= chart['prev_MA60'])
 
@@ -713,7 +713,7 @@ def main_app():
                 ema_down6 = down.ewm(com=5, adjust=False).mean()
                 rs6 = ema_up6 / ema_down6
                 chart['RSI6'] = 100 - (100 / (1 + rs6))
-                
+
                 ema_up12 = up.ewm(com=11, adjust=False).mean()
                 ema_down12 = down.ewm(com=11, adjust=False).mean()
                 rs12 = ema_up12 / ema_down12
@@ -722,7 +722,7 @@ def main_app():
                 if 'K' not in chart.columns or chart['K'].isnull().all():
                     chart['9d_high'] = chart['high'].rolling(9, min_periods=1).max()
                     chart['9d_low'] = chart['low'].rolling(9, min_periods=1).min()
-                    chart['RSV'] = np.where((chart['9d_high'] - chart['9d_low']) == 0, 50, 
+                    chart['RSV'] = np.where((chart['9d_high'] - chart['9d_low']) == 0, 50,
                                             100 * (chart['close'] - chart['9d_low']) / (chart['9d_high'] - chart['9d_low']))
                     k_list, d_list = [50], [50]
                     for rsv in chart['RSV'].tolist()[1:]:
@@ -750,7 +750,7 @@ def main_app():
                 chart['std20'] = chart['close'].rolling(20).std()
                 chart['BB_upper'] = chart['MA20'] + 3 * chart['std20']
                 chart['BB_lower'] = chart['MA20'] - 3 * chart['std20']
-                
+
                 active_subplots = []
                 if show_kd: active_subplots.append("KD (9,3,3)")
                 if show_rsi: active_subplots.append("RSI (6,12)")
@@ -760,56 +760,58 @@ def main_app():
 
                 total_rows = 2 + len(active_subplots)
                 row_heights = [0.4, 0.15] + [0.45 / max(1, len(active_subplots))] * len(active_subplots)
-                
+
                 base_height = 500
                 fig_height = base_height + (150 * len(active_subplots))
 
                 subplot_titles = [f"日K線圖 (3倍布林帶寬)", "成交量"] + active_subplots
 
-                # 顯示近 150 天 K 線
+                # 切割 150 天繪圖
                 chart = chart.tail(150).copy()
                 chart_dates = chart['date'].dt.strftime('%Y-%m-%d')
 
                 fig = make_subplots(
-                    rows=total_rows, cols=1, 
-                    shared_xaxes=True, 
-                    vertical_spacing=0.03, 
-                    row_heights=row_heights, 
+                    rows=total_rows, cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.03,
+                    row_heights=row_heights,
                     subplot_titles=subplot_titles
                 )
 
+                # 🔥 隱藏 K 線圖例 (保留 Hover)
                 fig.add_trace(go.Candlestick(
-                    x=chart_dates, open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'], 
-                    increasing_line_color='#ef5350', decreasing_line_color='#26a69a', name='K線'
+                    x=chart_dates, open=chart['open'], high=chart['high'], low=chart['low'], close=chart['close'],
+                    increasing_line_color='#ef5350', decreasing_line_color='#26a69a', name='K線', showlegend=False
                 ), row=1, col=1)
-                
+
                 ma_col_map = {'3MA': 'MA3', '5MA': 'MA5', '10MA': 'MA10', '20MA': 'MA20', '60MA': 'MA60', '120MA': 'MA120'}
                 ma_colors = {'3MA': '#FF69B4', '5MA': 'orange', '10MA': '#00FFFF', '20MA': 'purple', '60MA': 'blue', '120MA': 'green'}
-                
+
                 y_range = chart['high'].max() - chart['low'].min()
                 y_offset = y_range * 0.08
-                
+
                 for ma_name in selected_mas:
                     col_name = ma_col_map.get(ma_name)
                     if col_name and col_name in chart.columns:
                         is_up = chart[col_name].iloc[-1] > chart[col_name].iloc[-2]
                         trend_icon = "🔺" if is_up else "▼"
                         display_name = f"{ma_name} {trend_icon}"
-                        
+
+                        # 🔥 唯一保留圖例的項目：MA 均線 (讓使用者能辨識顏色)
                         fig.add_trace(go.Scatter(
-                            x=chart_dates, y=chart[col_name], 
-                            line=dict(color=ma_colors.get(ma_name, 'black'), width=1.5), 
+                            x=chart_dates, y=chart[col_name],
+                            line=dict(color=ma_colors.get(ma_name, 'black'), width=1.5),
                             name=display_name
                         ), row=1, col=1)
-                        
+
                         N = int(ma_name.replace('MA', ''))
                         if len(chart) >= N:
-                            deduct_idx = -N 
+                            deduct_idx = -N
                             x_val = chart_dates.iloc[deduct_idx]
                             c_low = chart['low'].iloc[deduct_idx]
                             color = ma_colors.get(ma_name, 'black')
                             y_marker = c_low - y_offset
-                            
+
                             fig.add_trace(go.Scatter(
                                 x=[x_val, x_val],
                                 y=[y_marker, c_low],
@@ -818,7 +820,7 @@ def main_app():
                                 hoverinfo='skip',
                                 showlegend=False
                             ), row=1, col=1)
-                            
+
                             fig.add_trace(go.Scatter(
                                 x=[x_val],
                                 y=[y_marker],
@@ -833,83 +835,90 @@ def main_app():
                 if show_ma_cross:
                     gc_df = chart[chart['Golden_Cross']]
                     if not gc_df.empty:
+                        # 🔥 隱藏交叉圖例
                         fig.add_trace(go.Scatter(
                             x=gc_df['date'].dt.strftime('%Y-%m-%d'), y=gc_df['MA20'],
                             mode='markers',
                             marker=dict(symbol='triangle-up', size=14, color='gold', line=dict(width=1, color='darkgoldenrod')),
-                            name='20MA金叉60MA'
+                            name='20MA金叉60MA', showlegend=False
                         ), row=1, col=1)
-                    
+
                     dc_df = chart[chart['Death_Cross']]
                     if not dc_df.empty:
+                        # 🔥 隱藏交叉圖例
                         fig.add_trace(go.Scatter(
                             x=dc_df['date'].dt.strftime('%Y-%m-%d'), y=dc_df['MA20'],
                             mode='markers',
                             marker=dict(symbol='triangle-down', size=14, color='green', line=dict(width=1, color='darkgreen')),
-                            name='20MA死叉60MA'
+                            name='20MA死叉60MA', showlegend=False
                         ), row=1, col=1)
 
                 fig.add_trace(go.Scatter(
-                    x=chart_dates, y=chart['BB_upper'], 
-                    line=dict(color='rgba(150, 150, 150, 0.5)', width=1, dash='dash'), 
+                    x=chart_dates, y=chart['BB_upper'],
+                    line=dict(color='rgba(150, 150, 150, 0.5)', width=1, dash='dash'),
                     name='上軌 (3σ)', hoverinfo='skip', showlegend=False
                 ), row=1, col=1)
-                
+
                 fig.add_trace(go.Scatter(
-                    x=chart_dates, y=chart['BB_lower'], 
-                    line=dict(color='rgba(150, 150, 150, 0.5)', width=1, dash='dash'), 
-                    name='下軌 (3σ)', fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)', 
+                    x=chart_dates, y=chart['BB_lower'],
+                    line=dict(color='rgba(150, 150, 150, 0.5)', width=1, dash='dash'),
+                    name='下軌 (3σ)', fill='tonexty', fillcolor='rgba(200, 200, 200, 0.1)',
                     hoverinfo='skip', showlegend=False
                 ), row=1, col=1)
 
+                # 🔥 隱藏成交量圖例
                 vol_colors = ['#ef5350' if c >= o else '#26a69a' for c, o in zip(chart['close'], chart['open'])]
                 fig.add_trace(go.Bar(
-                    x=chart_dates, y=chart['volume'], marker_color=vol_colors, name='成交量'
+                    x=chart_dates, y=chart['volume'], marker_color=vol_colors, name='成交量', showlegend=False
                 ), row=2, col=1)
-                
+
                 if show_vol_ma5:
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['Vol_MA5'], line=dict(color='orange', width=1.5), name='5日均量'), row=2, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['Vol_MA5'], line=dict(color='orange', width=1.5), name='5日均量', showlegend=False), row=2, col=1)
                 if show_vol_ma10:
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['Vol_MA10'], line=dict(color='#00FFFF', width=1.5), name='10日均量'), row=2, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['Vol_MA10'], line=dict(color='#00FFFF', width=1.5), name='10日均量', showlegend=False), row=2, col=1)
 
                 current_row = 3
-                
+
+                # 🔥 隱藏 KD 圖例
                 if show_kd:
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['K'], name='K', line=dict(color='orange')), row=current_row, col=1)
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['D'], name='D', line=dict(color='cyan')), row=current_row, col=1)
-                    current_row += 1
-                    
-                if show_rsi:
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['RSI6'], name='RSI 6', line=dict(color='orange')), row=current_row, col=1)
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['RSI12'], name='RSI 12', line=dict(color='cyan')), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['K'], name='K', line=dict(color='orange'), showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['D'], name='D', line=dict(color='cyan'), showlegend=False), row=current_row, col=1)
                     current_row += 1
 
+                # 🔥 隱藏 RSI 圖例
+                if show_rsi:
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['RSI6'], name='RSI 6', line=dict(color='orange'), showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['RSI12'], name='RSI 12', line=dict(color='cyan'), showlegend=False), row=current_row, col=1)
+                    current_row += 1
+
+                # 🔥 隱藏 MACD 圖例
                 if show_macd:
                     osc_colors = ['#ef5350' if v >= 0 else '#26a69a' for v in chart['MACD_OSC']]
-                    fig.add_trace(go.Bar(x=chart_dates, y=chart['MACD_OSC'], marker_color=osc_colors, name='OSC'), row=current_row, col=1)
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['DIF'], name='DIF', line=dict(color='orange')), row=current_row, col=1)
-                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['MACD'], name='MACD', line=dict(color='cyan')), row=current_row, col=1)
+                    fig.add_trace(go.Bar(x=chart_dates, y=chart['MACD_OSC'], marker_color=osc_colors, name='OSC', showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['DIF'], name='DIF', line=dict(color='orange'), showlegend=False), row=current_row, col=1)
+                    fig.add_trace(go.Scatter(x=chart_dates, y=chart['MACD'], name='MACD', line=dict(color='cyan'), showlegend=False), row=current_row, col=1)
                     current_row += 1
 
+                # 🔥 隱藏籌碼圖例
                 if show_foreign:
                     foreign_colors = ['#ef5350' if v >= 0 else '#26a69a' for v in chart['foreign_net']]
-                    fig.add_trace(go.Bar(x=chart_dates, y=chart['foreign_net'], marker_color=foreign_colors, name='外資買賣超'), row=current_row, col=1)
+                    fig.add_trace(go.Bar(x=chart_dates, y=chart['foreign_net'], marker_color=foreign_colors, name='外資買賣超', showlegend=False), row=current_row, col=1)
                     current_row += 1
-                    
+
                 if show_trust:
                     trust_colors = ['#ef5350' if v >= 0 else '#26a69a' for v in chart['trust_net']]
-                    fig.add_trace(go.Bar(x=chart_dates, y=chart['trust_net'], marker_color=trust_colors, name='投信買賣超'), row=current_row, col=1)
+                    fig.add_trace(go.Bar(x=chart_dates, y=chart['trust_net'], marker_color=trust_colors, name='投信買賣超', showlegend=False), row=current_row, col=1)
                     current_row += 1
 
                 fig.update_xaxes(type='category', nticks=15)
                 fig.update_layout(
-                    xaxis_rangeslider_visible=False, 
-                    height=fig_height, 
-                    margin=dict(t=30,b=0,l=0,r=0), 
+                    xaxis_rangeslider_visible=False,
+                    height=fig_height,
+                    margin=dict(t=30,b=0,l=0,r=0),
                     legend=dict(orientation="h", y=1.01, x=0.5, xanchor='center'),
                     hovermode='x unified'
                 )
-                
+
                 st.plotly_chart(fig, use_container_width=True)
 
 # ===========================
@@ -922,4 +931,3 @@ if not st.session_state['logged_in']:
     login_page()
 else:
     main_app()
-
