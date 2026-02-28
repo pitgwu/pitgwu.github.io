@@ -485,8 +485,15 @@ def main_app():
     col_in, col_act = st.sidebar.columns([1.5, 2])
     col_in.text_input("代號/名稱", key="symbol_input_widget")
     with col_act:
-        c1, c2, c3 = st.columns(3)
-        c1.button("新", on_click=action_add); c2.button("刪", on_click=action_del); c3.button("查", on_click=action_search)
+        c1, c2, c3, c4 = st.columns(4) # 多加一格給重整按鈕
+        c1.button("新", on_click=action_add)
+        c2.button("刪", on_click=action_del)
+        c3.button("查", on_click=action_search)
+        
+        # 👇 補上這個強制清除快取的按鈕
+        if c4.button("🔄"):
+            st.cache_data.clear()
+            st.rerun()
 
     if st.session_state.action_msg:
         m_type, m_txt = st.session_state.action_msg
@@ -542,7 +549,7 @@ def main_app():
 
     st.sidebar.header("📅 戰情參數")
     sel_date = st.sidebar.selectbox("日期", avail_dates, 0)
-    is_past_date = pd.Timestamp(sel_date) < max_date
+    is_past_date = pd.Timestamp(sel < max_date
 
     sort_opts = ["強勢總分", "加入日期", "漲跌幅", "外資買超", "投信買超", "量增比"]
     if is_past_date: sort_opts.append("回測報酬率")
@@ -555,7 +562,7 @@ def main_app():
 
     if st.session_state.query_mode_symbol:
         target_syms = [st.session_state.query_mode_symbol]
-        title = f"🔍 查詢：{target_syms[0]}"
+        查詢：{target_syms[0]}"
     else:
         target_syms = current_symbols
         title = f"📊 {selected_list}：{len(target_syms)} 檔"
@@ -569,8 +576,7 @@ def main_app():
         df_day['added_date'] = '查詢'
 
     if df_day.empty:
-        st.warning("⚠️ 無符合資料")
-        return
+        st.warning("⚠️ 無符合資æ       return
 
     # 🚀 極速回測計算：用 map 代替 pandas 的跨日大掃描
     if is_past_date:
@@ -581,20 +587,18 @@ def main_app():
         df_day = df_day[df_day['Total_Score'] >= min_sc]
 
     if not st.session_state.query_mode_symbol:
-        if "強勢總分" in sort_opt: df_day = df_day.sort_values(['Total_Score','symbol'], ascending=[False,True])
+        if "強勢總分" in sort_opt: df_day = df_day.sor'Total_Score','symbol'], ascending=[False,True])
         elif "加入" in sort_opt: df_day = df_day.sort_values(['added_date','symbol'], ascending=[False,True])
         elif "漲跌" in sort_opt: df_day = df_day.sort_values(['pct_change','symbol'], ascending=[False,True])
         elif "外資" in sort_opt: df_day = df_day.sort_values(['foreign_net','symbol'], ascending=[False,True])
         elif "投信" in sort_opt: df_day = df_day.sort_values(['trust_net','symbol'], ascending=[False,True])
-        elif "量增比" in sort_opt: df_day = df_day.sort_values(['Vol_Ratio','symbol'], ascending=[False,True])
+        elif "é比" in sort_opt: df_day = df_day.sort_values(['Vol_Ratio','symbol'], ascending=[False,True])
         elif "回測報酬率" in sort_opt: df_day = df_day.sort_values(['Backtest_Return','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
     display_cols = ['symbol','name','added_date','industry','close','pct_change', 'Vol_Ratio']
     if is_past_date: display_cols.append('Backtest_Return')
-    display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List'])
-
-    display_df = df_day[display_cols].reset_index(drop=True)
+    display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_isplay_df = df_day[display_cols].reset_index(drop=True)
     sym_list = display_df['symbol'].tolist()
 
     if st.session_state.query_mode_symbol:
@@ -609,14 +613,14 @@ def main_app():
         if x >= 2.0: return f"🔥 {x:.1f}x"
         return f"{x:.1f}x"
 
-    fmt_dict = {"pct_change": "{:.2f}%", "close": "{:.2f}", "Capital": "{:.1f}", "2026EPS": "{:.2f}", "PE_Ratio": "{:.2f}", "Total_Score": "{:.0f}", "Vol_Ratio": format_vol_ratio}
+    fmt_dict = {"pct_change": "{:.2f}%", "cl:.2f}", "Capital": "{:.1f}", "2026EPS": "{:.2f}", "PE_Ratio": "{:.2f}", "Total_Score": "{:.0f}", "Vol_Ratio": format_vol_ratio}
     col_cfg = {"Capital": "股本", "2026EPS": "2026EPS", "PE_Ratio": "本益比", "Vol_Ratio": "量增比", "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
     if is_past_date:
         fmt_dict["Backtest_Return"] = "{:.2f}%"
         col_cfg["Backtest_Return"] = "回測報酬率"
 
     evt = st.dataframe(
-        display_df.style.format(fmt_dict, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
+        display_df.style.format(fmt_dict, na_rep="-.background_gradient(subset=['Total_Score'], cmap='Reds'),
         on_select="rerun", selection_mode="single-row", use_container_width=True,
         column_config=col_cfg
     )
@@ -630,8 +634,7 @@ def main_app():
     if st.session_state.ticker_index is None or st.session_state.ticker_index >= len(sym_list):
         st.session_state.ticker_index = 0
 
-    st.markdown("---")
-    c1,c2,c3,c4,c5 = st.columns([1,1,4,1,1])
+    st.markdow   c1,c2,c3,c4,c5 = st.columns([1,1,4,1,1])
     if c1.button("⏮️"): st.session_state.ticker_index = 0
     if c2.button("⬅️"): st.session_state.ticker_index = (st.session_state.ticker_index - 1) % len(sym_list)
     if c4.button("➡️"): st.session_state.ticker_index = (st.session_state.ticker_index + 1) % len(sym_list)
@@ -646,7 +649,7 @@ def main_app():
         else:
             st.markdown(f"<h3 style='text-align:center;color:#FF4B4B'>{cur_sym} {cur_info['name']} | 分:{int(cur_info['Total_Score'])}</h3>", unsafe_allow_html=True)
 
-        st.info(f"⚡ {cur_info['Signal_List']}")
+        st.info(f"â['Signal_List']}")
 
         col_m, col_k, col_r = st.columns(3)
         with col_m: st.checkbox("MACD", key="show_macd")
@@ -657,7 +660,7 @@ def main_app():
     chart_src = df_dict_by_symbol.get(cur_sym, pd.DataFrame()).copy()
     chart_src = chart_src[chart_src['date'] <= pd.Timestamp(sel_date)]
 
-    if len(chart_src) < 30: st.error("資料不足以繪圖")
+    if len(chart_src) < 30: st.error("資料圖")
     else:
         fig = plot_stock_kline(chart_src, cur_sym, cur_info['name'], st.session_state['show_macd'], st.session_state['show_kd'], st.session_state['show_rsi'])
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{cur_sym}_{uuid.uuid4()}")
