@@ -103,36 +103,70 @@ STATIC_TICKERS = {
 ALL_TICKER_INFO = STATIC_TICKERS.copy()
 
 # ==========================================
-# 2. 功能模組：抓取市場情緒
+# 2. 功能模組：抓取市場情緒 (修復版)
 # ==========================================
 def fetch_fear_and_greed():
-    print("正在抓取 CNN Fear & Greed 指數...")
-    headers = {"User-Agent": "Mozilla/5.0"}
+    print("🔍 正在抓取 CNN Fear & Greed 指數...")
+    
+    # 🌟 關鍵修正：加入完整的瀏覽器偽裝與 Referer，突破 CNN 的防爬蟲機制
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://edition.cnn.com/",
+        "Accept": "application/json, text/plain, */*"
+    }
+    
     result = None
+    
+    # 策略 1: 嘗試呼叫 CNN Dataviz API
     try:
         url_api = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        resp = requests.get(url_api, headers=headers, timeout=5)
+        resp = requests.get(url_api, headers=headers, timeout=10)
+        
         if resp.status_code == 200:
-            data = resp.json(); latest = data['fear_and_greed']
-            result = {"score": int(latest['score']), "rating": latest['rating'].capitalize(), "timestamp": latest['timestamp']}
-    except: pass
+            data = resp.json()
+            latest = data.get('fear_and_greed', {})
+            if 'score' in latest and 'rating' in latest:
+                result = {
+                    "score": int(latest['score']), 
+                    "rating": latest['rating'].capitalize(), 
+                    "timestamp": latest.get('timestamp', datetime.datetime.now().isoformat())
+                }
+                print(f"✅ 成功從 API 取得情緒指數: {result['score']} ({result['rating']})")
+        else:
+            print(f"⚠️ API 阻擋請求 (狀態碼: {resp.status_code})")
+    except Exception as e:
+        print(f"⚠️ API 請求錯誤: {e}")
 
+    # 策略 2: 若 API 失敗，啟動網頁爬蟲備用方案
     if result is None:
+        print("🔄 改用網頁爬蟲模式尋找數值...")
         try:
             url_web = "https://edition.cnn.com/markets/fear-and-greed"
             resp = requests.get(url_web, headers=headers, timeout=10)
             if resp.status_code == 200:
-                match_score = re.search(r'"score":([\d\.]+)', resp.text)
-                match_rating = re.search(r'"rating":"([a-zA-Z\s]+)"', resp.text)
-                if match_score:
-                    result = {"score": int(float(match_score.group(1))), "rating": match_rating.group(1).capitalize(), "timestamp": datetime.datetime.now().isoformat()}
-        except: pass
+                # 使用 Regex 尋找藏在網頁原始碼裡的 JSON 數據
+                match_score = re.search(r'"score":\s*([0-9.]+)', resp.text)
+                match_rating = re.search(r'"rating":\s*"([^"]+)"', resp.text)
+                
+                if match_score and match_rating:
+                    result = {
+                        "score": int(float(match_score.group(1))), 
+                        "rating": match_rating.group(1).capitalize(), 
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+                    print(f"✅ 成功從網頁原始碼取得情緒指數: {result['score']} ({result['rating']})")
+        except Exception as e:
+            print(f"⚠️ 網頁爬蟲失敗: {e}")
 
+    # 防呆機制：如果都失敗，給予預設值避免報表生成報錯
+    if result is None:
+        print("❌ 無法取得情緒指數，寫入預設值 (Neutral: 50)")
+        result = {"score": 50, "rating": "Neutral", "timestamp": datetime.datetime.now().isoformat()}
+
+    # 寫入 JSON
     filepath = os.path.join(TARGET_DIR, f"sentiment_{DATE_STR}.json")
-    if result:
-        with open(filepath, "w", encoding="utf-8") as f: json.dump(result, f, indent=4)
-    else:
-        with open(filepath, "w", encoding="utf-8") as f: json.dump({"score": 50, "rating": "N/A"}, f)
+    with open(filepath, "w", encoding="utf-8") as f: 
+        json.dump(result, f, indent=4)
 
 # ==========================================
 # 3. 功能模組：Yahoo 爬蟲
