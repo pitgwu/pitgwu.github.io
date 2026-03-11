@@ -1,0 +1,43 @@
+name: TW Stock Daily ETL Update
+
+on:
+  schedule:
+# 台灣時間 17:00 = UTC 09:00 (GitHub Actions 使用 UTC 時間)
+    # 分 時 日 月 週
+    - cron: '0 9 * * 0-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    # 設定環境變數 (從 Secrets 讀取)
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+      TZ: 'Asia/Taipei' # 設定時區 (雖主要影響 log 顯示)
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.3'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas yfinance requests sqlalchemy psycopg2-binary plotly tqdm lxml
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: 1. Daily update ETL data
+        # 更新強勢訊號
+        run: |
+          # 更新強勢訊號
+          python etl_daily_calc.py
+          python etl_strongbuy.py
