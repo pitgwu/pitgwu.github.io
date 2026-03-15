@@ -23,7 +23,7 @@ def download_excel_from_drive(folder_id, target_filename):
     credentials = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     service = build('drive', 'v3', credentials=credentials)
 
-    # 步驟 A: 透過 Folder ID 與檔名進行搜尋
+    # 透過 Folder ID 與檔名進行搜尋
     query = f"'{folder_id}' in parents and name = '{target_filename}' and trashed = false"
     
     results = service.files().list(q=query, spaces='drive', fields='files(id, name, mimeType)').execute()
@@ -37,15 +37,13 @@ def download_excel_from_drive(folder_id, target_filename):
     mime_type = items[0]['mimeType']
     print(f"   ✅ 找到檔案！(File ID: {file_id})，準備下載...")
 
-    # 步驟 B: 下載檔案
-    # 判斷是否為 Google 原生試算表
+    # 下載檔案
     if mime_type == 'application/vnd.google-apps.spreadsheet':
         request = service.files().export_media(
             fileId=file_id, 
             mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
     else:
-        # 一般上傳的 .xlsx 實體檔案
         request = service.files().get_media(fileId=file_id)
     
     fh = io.BytesIO()
@@ -55,7 +53,7 @@ def download_excel_from_drive(folder_id, target_filename):
         status, done = downloader.next_chunk()
         print(f"   下載進度: {int(status.progress() * 100)}%")
         
-    fh.seek(0) # 將指標移回檔案開頭，準備給 pandas 讀取
+    fh.seek(0)
     print("✅ 檔案下載完成！")
     return fh
 
@@ -65,11 +63,9 @@ def download_excel_from_drive(folder_id, target_filename):
 def generate_html_report(file_stream, output_file):
     print("正在為你讀取 Excel 資料...")
     
-    # 從第 6 列（header=5）開始讀取標題，加上 engine='openpyxl' 確保能讀記憶體中的 xlsx
     df = pd.read_excel(file_stream, header=5, engine='openpyxl')
 
     print("正在幫「買賣超」欄位微調成整數格式，並加上千分位逗號...")
-    # 針對所有欄位進行檢查
     for col in df.columns:
         if '外資買賣超' in str(col) or '投信買賣超' in str(col):
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -148,7 +144,6 @@ def generate_html_report(file_stream, output_file):
     </html>
     """
 
-    # 自動建立資料夾（如果 snowbaby 資料夾不存在會自動產生）
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -160,20 +155,16 @@ def generate_html_report(file_stream, output_file):
 # 3. 主程式執行區
 # ===========================
 if __name__ == "__main__":
-    # ⚠️ 1. 請在這裡填入您的 Google Drive「資料夾 ID」
-    GDRIVE_FOLDER_ID = "請在這裡填入您的資料夾_ID" 
+    # 🔥 修正：改用 os.environ.get 讀取環境變數
+    GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
+    if not GDRIVE_FOLDER_ID:
+        raise ValueError("❌ 找不到 GDRIVE_FOLDER_ID 環境變數，請確認 GitHub Secrets 與 YAML 設定。")
     
-    # ⚠️ 2. 指定您要尋找的檔名
     TARGET_FILENAME = "給andy的報表.xlsx"
-    
-    # 🔥 輸出檔名已修正
     output_html = 'snowbaby/法人成本.html'    
     
     try:
-        # 1. 搜尋資料夾並下載檔案到記憶體
         file_stream = download_excel_from_drive(GDRIVE_FOLDER_ID, TARGET_FILENAME)
-        
-        # 2. 將記憶體中的檔案交給報表生成函數處理
         generate_html_report(file_stream, output_html)
         
     except Exception as e:
