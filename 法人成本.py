@@ -3,6 +3,7 @@ import json
 import io
 import pandas as pd
 import numpy as np
+from datetime import datetime  # 🔥 新增：用來取得現在時間
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -23,7 +24,7 @@ def download_excel_from_drive(folder_id, target_filename):
     credentials = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     service = build('drive', 'v3', credentials=credentials)
 
-    # 透過 Folder ID 與檔名進行搜尋
+    # 步驟 A: 透過 Folder ID 與檔名進行搜尋
     query = f"'{folder_id}' in parents and name = '{target_filename}' and trashed = false"
     
     results = service.files().list(q=query, spaces='drive', fields='files(id, name, mimeType)').execute()
@@ -37,13 +38,15 @@ def download_excel_from_drive(folder_id, target_filename):
     mime_type = items[0]['mimeType']
     print(f"   ✅ 找到檔案！(File ID: {file_id})，準備下載...")
 
-    # 下載檔案
+    # 步驟 B: 下載檔案
+    # 判斷是否為 Google 原生試算表
     if mime_type == 'application/vnd.google-apps.spreadsheet':
         request = service.files().export_media(
             fileId=file_id, 
             mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
     else:
+        # 一般上傳的 .xlsx 實體檔案
         request = service.files().get_media(fileId=file_id)
     
     fh = io.BytesIO()
@@ -53,7 +56,7 @@ def download_excel_from_drive(folder_id, target_filename):
         status, done = downloader.next_chunk()
         print(f"   下載進度: {int(status.progress() * 100)}%")
         
-    fh.seek(0)
+    fh.seek(0) # 將指標移回檔案開頭，準備給 pandas 讀取
     print("✅ 檔案下載完成！")
     return fh
 
@@ -63,9 +66,11 @@ def download_excel_from_drive(folder_id, target_filename):
 def generate_html_report(file_stream, output_file):
     print("正在為你讀取 Excel 資料...")
     
+    # 從第 6 列（header=5）開始讀取標題，加上 engine='openpyxl' 確保能讀記憶體中的 xlsx
     df = pd.read_excel(file_stream, header=5, engine='openpyxl')
 
     print("正在幫「買賣超」欄位微調成整數格式，並加上千分位逗號...")
+    # 針對所有欄位進行檢查
     for col in df.columns:
         if '外資買賣超' in str(col) or '投信買賣超' in str(col):
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -77,13 +82,17 @@ def generate_html_report(file_stream, output_file):
 
     print("正在套用更聰明的「最適欄寬」版型...")
     
+    # 🔥 取得現在的日期與時間 (例如: 2026-03-15 20:00)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    # 🔥 在 <title> 與 <h3> 標籤中都加入 now_str
     html_template = f"""
     <!DOCTYPE html>
     <html lang="zh-Hant">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>法人成本與籌碼追蹤表</title>
+        <title>法人成本與籌碼追蹤表 - {now_str}</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <link href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
         <style>
@@ -118,7 +127,10 @@ def generate_html_report(file_stream, output_file):
     </head>
     <body>
         <div class="container-fluid table-container">
-            <h3 class="mb-4" style="color: #2c3e50; font-weight: bold;">📊 法人成本與籌碼追蹤表</h3>
+            <h3 class="mb-4" style="color: #2c3e50; font-weight: bold;">
+                📊 法人成本與籌碼追蹤表 
+                <small style="font-size: 0.6em; color: #7f8c8d; margin-left: 10px;">更新時間: {now_str}</small>
+            </h3>
             <div class="table-responsive">
                 {html_table}
             </div>
@@ -144,18 +156,19 @@ def generate_html_report(file_stream, output_file):
     </html>
     """
 
+    # 自動建立資料夾（如果 snowbaby 資料夾不存在會自動產生）
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html_template)
         
-    print(f"搞定囉！🎉 網頁已存為：{output_file}")
+    print(f"搞定囉！🎉 網頁已存為：{output_file} (標記時間: {now_str})")
 
 # ===========================
 # 3. 主程式執行區
 # ===========================
 if __name__ == "__main__":
-    # 🔥 修正：改用 os.environ.get 讀取環境變數
+    # 使用 os.environ.get 讀取環境變數
     GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
     if not GDRIVE_FOLDER_ID:
         raise ValueError("❌ 找不到 GDRIVE_FOLDER_ID 環境變數，請確認 GitHub Secrets 與 YAML 設定。")
@@ -164,7 +177,10 @@ if __name__ == "__main__":
     output_html = 'snowbaby/法人成本.html'    
     
     try:
+        # 1. 搜尋資料夾並下載檔案到記憶體
         file_stream = download_excel_from_drive(GDRIVE_FOLDER_ID, TARGET_FILENAME)
+        
+        # 2. 將記憶體中的檔案交給報表生成函數處理
         generate_html_report(file_stream, output_html)
         
     except Exception as e:
