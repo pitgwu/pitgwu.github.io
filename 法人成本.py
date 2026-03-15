@@ -3,7 +3,7 @@ import json
 import io
 import pandas as pd
 import numpy as np
-from datetime import datetime  # 🔥 新增：用來取得現在時間
+from datetime import datetime, timezone, timedelta  # 🔥 新增 timezone, timedelta 處理台灣時間
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -14,7 +14,6 @@ from googleapiclient.http import MediaIoBaseDownload
 def download_excel_from_drive(folder_id, target_filename):
     print(f"🔍 正在 Google Drive 資料夾中尋找檔案: {target_filename} ...")
     
-    # 從環境變數讀取金鑰
     creds_json_str = os.environ.get("GDRIVE_SERVICE_ACCOUNT")
     if not creds_json_str:
         raise ValueError("❌ 找不到 GDRIVE_SERVICE_ACCOUNT 環境變數，請確認 GitHub Secrets 設定。")
@@ -24,7 +23,6 @@ def download_excel_from_drive(folder_id, target_filename):
     credentials = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     service = build('drive', 'v3', credentials=credentials)
 
-    # 步驟 A: 透過 Folder ID 與檔名進行搜尋
     query = f"'{folder_id}' in parents and name = '{target_filename}' and trashed = false"
     
     results = service.files().list(q=query, spaces='drive', fields='files(id, name, mimeType)').execute()
@@ -33,20 +31,16 @@ def download_excel_from_drive(folder_id, target_filename):
     if not items:
         raise FileNotFoundError(f"❌ 在資料夾 (ID:{folder_id}) 中找不到名為 '{target_filename}' 的檔案！")
     
-    # 取得搜尋結果的第一個檔案的 ID
     file_id = items[0]['id']
     mime_type = items[0]['mimeType']
     print(f"   ✅ 找到檔案！(File ID: {file_id})，準備下載...")
 
-    # 步驟 B: 下載檔案
-    # 判斷是否為 Google 原生試算表
     if mime_type == 'application/vnd.google-apps.spreadsheet':
         request = service.files().export_media(
             fileId=file_id, 
             mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
     else:
-        # 一般上傳的 .xlsx 實體檔案
         request = service.files().get_media(fileId=file_id)
     
     fh = io.BytesIO()
@@ -56,7 +50,7 @@ def download_excel_from_drive(folder_id, target_filename):
         status, done = downloader.next_chunk()
         print(f"   下載進度: {int(status.progress() * 100)}%")
         
-    fh.seek(0) # 將指標移回檔案開頭，準備給 pandas 讀取
+    fh.seek(0)
     print("✅ 檔案下載完成！")
     return fh
 
@@ -66,11 +60,36 @@ def download_excel_from_drive(folder_id, target_filename):
 def generate_html_report(file_stream, output_file):
     print("正在為你讀取 Excel 資料...")
     
-    # 從第 6 列（header=5）開始讀取標題，加上 engine='openpyxl' 確保能讀記憶體中的 xlsx
-    df = pd.read_excel(file_stream, header=5, engine='openpyxl')
+    # 先將整個工作表讀進來，不預設標題
+    df_raw = pd.read_excel(file_stream, header=None, engine='openpyxl')
+
+    # 🔥 優化 1：自動搜尋標題列
+    header_row_idx = -1
+    # 往下掃描前 15 列，尋找特徵關鍵字
+    for i in range(min(15, len(df_raw))):
+        row_str = "".join([str(val) for val in df_raw.iloc[i].dropna()])
+        if "外資買賣超" in row_str or "股票代號" in row_str:
+            header_row_idx = i
+            break
+            
+    if header_row_idx != -1:
+        print(f"   ✅ 在第 {header_row_idx + 1} 列找到標題，自動套用！")
+        df = df_raw.iloc[header_row_idx + 1:].reset_index(drop=True)
+        df.columns = df_raw.iloc[header_row_idx]
+        # 清除標題可能含有的換行符號或空白
+        df.columns = [str(c).replace('\n', '').strip() for c in df.columns]
+    else:
+        print("   ⚠️ 找不到標準標題列，啟動備案：跳過前 5 列並強制指定正確標題！")
+        # 直接跳過前 5 列 (即從索引 5 開始)
+        df = df_raw.iloc[5:].reset_index(drop=True)
+        # 強制補上正確的 9 個標題
+        df.columns = [
+            "股票代號", "股票名稱", "收盤價", 
+            "外資買賣超", "外資成本", "投信買賣超", 
+            "投信持股比率(%)", "投信成本", "投信浮盈"
+        ]
 
     print("正在幫「買賣超」欄位微調成整數格式，並加上千分位逗號...")
-    # 針對所有欄位進行檢查
     for col in df.columns:
         if '外資買賣超' in str(col) or '投信買賣超' in str(col):
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -82,10 +101,10 @@ def generate_html_report(file_stream, output_file):
 
     print("正在套用更聰明的「最適欄寬」版型...")
     
-    # 🔥 取得現在的日期與時間 (例如: 2026-03-15 20:00)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # 🔥 優化 2：強制轉換為台灣時間 (UTC+8)
+    tz_taiwan = timezone(timedelta(hours=8))
+    now_str = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
     
-    # 🔥 在 <title> 與 <h3> 標籤中都加入 now_str
     html_template = f"""
     <!DOCTYPE html>
     <html lang="zh-Hant">
@@ -156,19 +175,17 @@ def generate_html_report(file_stream, output_file):
     </html>
     """
 
-    # 自動建立資料夾（如果 snowbaby 資料夾不存在會自動產生）
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html_template)
         
-    print(f"搞定囉！🎉 網頁已存為：{output_file} (標記時間: {now_str})")
+    print(f"搞定囉！🎉 網頁已存為：{output_file} (台灣時間標記: {now_str})")
 
 # ===========================
 # 3. 主程式執行區
 # ===========================
 if __name__ == "__main__":
-    # 使用 os.environ.get 讀取環境變數
     GDRIVE_FOLDER_ID = os.environ.get("GDRIVE_FOLDER_ID")
     if not GDRIVE_FOLDER_ID:
         raise ValueError("❌ 找不到 GDRIVE_FOLDER_ID 環境變數，請確認 GitHub Secrets 與 YAML 設定。")
@@ -177,10 +194,7 @@ if __name__ == "__main__":
     output_html = 'snowbaby/法人成本.html'    
     
     try:
-        # 1. 搜尋資料夾並下載檔案到記憶體
         file_stream = download_excel_from_drive(GDRIVE_FOLDER_ID, TARGET_FILENAME)
-        
-        # 2. 將記憶體中的檔案交給報表生成函數處理
         generate_html_report(file_stream, output_html)
         
     except Exception as e:
