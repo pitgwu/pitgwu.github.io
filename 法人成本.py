@@ -60,19 +60,38 @@ def download_excel_from_drive(folder_id, target_filename):
 def generate_html_report(file_stream, output_file):
     print("正在為你讀取 Excel 資料...")
     
-    # 🔥 關鍵修正：直接跳過前 5 列 (skiprows=5)，完全不讀取原檔案的標題 (header=None)
     df = pd.read_excel(file_stream, skiprows=5, header=None, engine='openpyxl')
 
-    # 🔥 關鍵修正：強制塞入您指定的 9 個乾淨標題
-    df.columns = [
-        "股票代號", "股票名稱", "收盤價", 
-        "外資買賣超", "外資成本", "投信買賣超", 
-        "投信持股比率(%)", "投信成本", "投信浮盈"
-    ]
+    # 智慧判斷：如果 Excel 匯出的是 11 欄就直接套用，如果是 9 欄就由 Python 自動計算
+    if len(df.columns) == 11:
+        df.columns = [
+            "股票代號", "股票名稱", "收盤價", 
+            "外資買賣超（張）", "外資買賣超（金額）", "外資成本", 
+            "投信買賣超（張）", "投信買賣超（金額）", "投信持股比率(%)", "投信成本", "投信浮盈"
+        ]
+    elif len(df.columns) == 9:
+        print("   💡 偵測到原本的 9 欄格式，自動為您計算買賣超（金額）...")
+        df.columns = [
+            "股票代號", "股票名稱", "收盤價", 
+            "外資買賣超（張）", "外資成本", "投信買賣超（張）", 
+            "投信持股比率(%)", "投信成本", "投信浮盈"
+        ]
+        
+        df['收盤價'] = pd.to_numeric(df['收盤價'], errors='coerce')
+        df['外資買賣超（張）'] = pd.to_numeric(df['外資買賣超（張）'], errors='coerce')
+        df['投信買賣超（張）'] = pd.to_numeric(df['投信買賣超（張）'], errors='coerce')
+        
+        外資金額 = df['外資買賣超（張）'] * df['收盤價'] * 1000
+        投信金額 = df['投信買賣超（張）'] * df['收盤價'] * 1000
+        
+        df.insert(4, "外資買賣超（金額）", 外資金額)
+        df.insert(7, "投信買賣超（金額）", 投信金額)
+    else:
+        print(f"   ⚠️ 警告：欄位數量為 {len(df.columns)}，與預期不符，可能會有錯位風險。")
 
     print("正在幫「買賣超」欄位微調成整數格式，並加上千分位逗號...")
     for col in df.columns:
-        if '外資買賣超' in str(col) or '投信買賣超' in str(col):
+        if '買賣超' in str(col):
             df[col] = pd.to_numeric(df[col], errors='coerce')
             df[col] = df[col].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else x)
 
@@ -80,9 +99,8 @@ def generate_html_report(file_stream, output_file):
 
     html_table = df.to_html(classes='table table-hover table-striped custom-table', index=False, border=0)
 
-    print("正在套用更聰明的「最適欄寬」版型...")
+    print("正在套用更聰明的「最適欄寬」與「紅綠上色」版型...")
     
-    # 取得台灣時間 (UTC+8)
     tz_taiwan = timezone(timedelta(hours=8))
     now_str = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
     
@@ -148,7 +166,38 @@ def generate_html_report(file_stream, output_file):
                     "autoWidth": false,     
                     "scrollX": true,        
                     "pageLength": 50,       
-                    "order": []             
+                    "order": [],
+                    // 🔥 網頁渲染時的動態上色邏輯
+                    "createdRow": function(row, data, dataIndex) {{
+                        // 目標欄位的索引 (由左至右從 0 開始算)
+                        // 3: 外資(張), 4: 外資(金額), 6: 投信(張), 7: 投信(金額), 10: 投信浮盈
+                        let targetCols = [3, 4, 6, 7, 10];
+                        
+                        targetCols.forEach(function(colIdx) {{
+                            let cell = $('td', row).eq(colIdx);
+                            let text = cell.text().trim();
+                            
+                            // 略過空值或無效符號
+                            if (text !== '-' && text !== '') {{
+                                // 把千分位逗號拔掉，轉成純數字判斷
+                                let num = parseFloat(text.replace(/,/g, ''));
+                                
+                                if (num > 0) {{
+                                    // 台股紅 (買超/獲利)
+                                    cell.css({{
+                                        'color': '#e74c3c',
+                                        'font-weight': 'bold'
+                                    }});
+                                }} else if (num < 0) {{
+                                    // 台股綠 (賣超/虧損)
+                                    cell.css({{
+                                        'color': '#2ecc71',
+                                        'font-weight': 'bold'
+                                    }});
+                                }}
+                            }}
+                        }});
+                    }}
                 }});
             }});
         </script>
