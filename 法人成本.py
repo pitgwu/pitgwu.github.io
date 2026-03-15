@@ -3,7 +3,7 @@ import json
 import io
 import pandas as pd
 import numpy as np
-from datetime import datetime, timezone, timedelta  # 🔥 新增 timezone, timedelta 處理台灣時間
+from datetime import datetime, timezone, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -60,34 +60,15 @@ def download_excel_from_drive(folder_id, target_filename):
 def generate_html_report(file_stream, output_file):
     print("正在為你讀取 Excel 資料...")
     
-    # 先將整個工作表讀進來，不預設標題
-    df_raw = pd.read_excel(file_stream, header=None, engine='openpyxl')
+    # 🔥 關鍵修正：直接跳過前 5 列 (skiprows=5)，完全不讀取原檔案的標題 (header=None)
+    df = pd.read_excel(file_stream, skiprows=5, header=None, engine='openpyxl')
 
-    # 🔥 優化 1：自動搜尋標題列
-    header_row_idx = -1
-    # 往下掃描前 15 列，尋找特徵關鍵字
-    for i in range(min(15, len(df_raw))):
-        row_str = "".join([str(val) for val in df_raw.iloc[i].dropna()])
-        if "外資買賣超" in row_str or "股票代號" in row_str:
-            header_row_idx = i
-            break
-            
-    if header_row_idx != -1:
-        print(f"   ✅ 在第 {header_row_idx + 1} 列找到標題，自動套用！")
-        df = df_raw.iloc[header_row_idx + 1:].reset_index(drop=True)
-        df.columns = df_raw.iloc[header_row_idx]
-        # 清除標題可能含有的換行符號或空白
-        df.columns = [str(c).replace('\n', '').strip() for c in df.columns]
-    else:
-        print("   ⚠️ 找不到標準標題列，啟動備案：跳過前 5 列並強制指定正確標題！")
-        # 直接跳過前 5 列 (即從索引 5 開始)
-        df = df_raw.iloc[5:].reset_index(drop=True)
-        # 強制補上正確的 9 個標題
-        df.columns = [
-            "股票代號", "股票名稱", "收盤價", 
-            "外資買賣超", "外資成本", "投信買賣超", 
-            "投信持股比率(%)", "投信成本", "投信浮盈"
-        ]
+    # 🔥 關鍵修正：強制塞入您指定的 9 個乾淨標題
+    df.columns = [
+        "股票代號", "股票名稱", "收盤價", 
+        "外資買賣超", "外資成本", "投信買賣超", 
+        "投信持股比率(%)", "投信成本", "投信浮盈"
+    ]
 
     print("正在幫「買賣超」欄位微調成整數格式，並加上千分位逗號...")
     for col in df.columns:
@@ -101,7 +82,7 @@ def generate_html_report(file_stream, output_file):
 
     print("正在套用更聰明的「最適欄寬」版型...")
     
-    # 🔥 優化 2：強制轉換為台灣時間 (UTC+8)
+    # 取得台灣時間 (UTC+8)
     tz_taiwan = timezone(timedelta(hours=8))
     now_str = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
     
