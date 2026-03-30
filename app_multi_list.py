@@ -567,11 +567,17 @@ def main_app():
         target_syms = current_symbols
         title = f"📊 {selected_list}：{len(target_syms)} 檔"
 
-    # 🚀 O(1) 篩選出目前群組的股票 (免去了 merge 的龐大負擔)
+    # 🚀 O(1) 篩選出目前群組的股票
     df_day = df_day[df_day['symbol'].isin(target_syms)]
 
     if not st.session_state.query_mode_symbol:
-        df_day = pd.merge(df_day, watchlist_df, on='symbol', how='left')
+        # 🔥 修正：以您的自選股清單 (watchlist_df) 71 檔為主體去 Left Join 數據表
+        df_day = pd.merge(watchlist_df, df_day, on='symbol', how='left')
+        
+        # 由於有些股票在資料庫裡沒資料，會產生 NaN (空值)，幫它們補上預設值避免報錯
+        df_day['Total_Score'] = df_day['Total_Score'].fillna(0)
+        df_day['Signal_List'] = df_day['Signal_List'].fillna("無後端指標資料")
+        df_day['name'] = df_day['name'].fillna("未知名稱")
     else:
         df_day['added_date'] = '查詢'
 
