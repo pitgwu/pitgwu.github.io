@@ -5,12 +5,25 @@ import os
 import time
 import requests
 import concurrent.futures
+import sqlalchemy
+from sqlalchemy import text
 
-# 設定存檔目錄
+# ===========================
+# 1. 基本設定與資料庫連線
+# ===========================
 DATA_DIR = 'data'
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
+SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
+if not SUPABASE_DB_URL:
+    raise ValueError("❌ 未偵測到 SUPABASE_DB_URL，請設定環境變數。")
+
+engine = sqlalchemy.create_engine(SUPABASE_DB_URL)
+
+# ===========================
+# 2. 爬蟲工作函式
+# ===========================
 def fetch_batch_data(codes):
     """
     單一執行緒的工作函式：負責查詢一批股票
@@ -21,92 +34,140 @@ def fetch_batch_data(codes):
         query_list.append(f"tse_{c}.tw")
         query_list.append(f"otc_{c}.tw")
     
-    # 組合 API URL
     url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={'|'.join(query_list)}"
     
     try:
-        # 設定 timeout，避免卡住
         res = requests.get(url, timeout=3)
         res_json = res.json()
         
         result_list = []
         if 'msgArray' in res_json:
             for item in res_json['msgArray']:
-                # 這裡只回傳原始資料，過濾邏輯交給主程式
                 result_list.append(item)
         return result_list
     except Exception:
-        # 網路超時或錯誤直接回傳空list，不讓程式崩潰
         return []
 
+# ===========================
+# 3. 資料庫更新函式 (漲停紀錄表)
+# ===========================
+def update_limit_up_db(limit_up_list, today_str):
+    if not limit_up_list:
+        return
+        
+    print(f"🔄 準備更新資料庫 `limit_up_records`...")
+    with engine.begin() as conn:
+        for item in limit_up_list:
+            sym = item['Code']
+            
+            # 使用 PostgreSQL 的 ON CONFLICT 達成 UPSERT：
+            # 如果 symbol 不存在就 INSERT；如果存在，且日期字串不包含今天，就把今天逗號串接上去
+            sql = text("""
+                INSERT INTO limit_up_records (symbol, limit_up_dates)
+                VALUES (:sym, :dt)
+                ON CONFLICT (symbol) 
+                DO UPDATE SET limit_up_dates = 
+                    CASE 
+                        WHEN limit_up_records.limit_up_dates LIKE '%' || :dt || '%' THEN limit_up_records.limit_up_dates
+                        ELSE limit_up_records.limit_up_dates || ',' || :dt
+                    END
+            """)
+            conn.execute(sql, {"sym": sym, "dt": today_str})
+            
+    print("✅ `limit_up_records` 漲停歷史紀錄表更新完成！")
+
+# ===========================
+# 4. 資料庫更新函式 (自選股戰情室)
+# ===========================
+def update_watchlist_db(limit_up_list, today_str, username="pitg"):
+    if not limit_up_list:
+        return
+        
+    # 產生 YYYYMM 格式 (例如 "202604")
+    yymm_str = today_str.replace("-", "")[:6]
+    menu_name = f"{yymm_str}漲停股清單"
+    
+    print(f"🔄 準備派發至戰情室群組: 「{menu_name}」 (使用者: {username})...")
+    
+    with engine.begin() as conn:
+        # 1. 檢查群組是否存在，若無則建立
+        menu_id = conn.execute(
+            text("SELECT id FROM watchlist_menus WHERE name = :mname AND username = :u"),
+            {"mname": menu_name, "u": username}
+        ).scalar()
+        
+        if not menu_id:
+            menu_id = conn.execute(
+                text("INSERT INTO watchlist_menus (name, username) VALUES (:mname, :u) RETURNING id"),
+                {"mname": menu_name, "u": username}
+            ).scalar()
+            print(f"   🆕 發現新月份，已自動建立群組: {menu_name}")
+
+        # 2. 將漲停股寫入群組 (若重複則忽略 DO NOTHING)
+        added_count = 0
+        for item in limit_up_list:
+            sym = item['Code']
+            res = conn.execute(
+                text("""
+                    INSERT INTO watchlist_items (menu_id, symbol, added_date)
+                    VALUES (:mid, :sym, :dt)
+                    ON CONFLICT (menu_id, symbol) DO NOTHING
+                    RETURNING 1
+                """),
+                {"mid": menu_id, "sym": sym, "dt": today_str}
+            ).fetchone()
+            
+            if res:
+                added_count += 1
+                
+    print(f"✅ 成功將 {added_count} 檔新的漲停股加入「{menu_name}」！(重複已自動忽略)")
+
+# ===========================
+# 5. 主程式
+# ===========================
 def scan_limit_up_stocks_fast():
     start_time = time.time()
     today_str = str(datetime.date.today())
-    print(f"🚀 [程式 A - V4 極速版] 開始掃描今日 ({today_str}) 漲停板...")
+    print(f"🚀 [自動化工作流] 開始掃描今日 ({today_str}) 漲停板...")
 
     current_month = datetime.datetime.now().strftime('%Y_%m')
     filename = os.path.join(DATA_DIR, f'limit_up_{current_month}.csv')
     
-    # 1. 準備清單 (含手動補強)
-    target_codes = []
-    for code, info in twstock.codes.items():
-        if info.type == '股票' and len(code) == 4:
-            target_codes.append(code)
-    
-    # 補強漏網之魚
-    if '3135' not in target_codes:
-        target_codes.append('3135')
+    # 準備清單
+    target_codes = [code for code, info in twstock.codes.items() if info.type == '股票' and len(code) == 4]
+    if '3135' not in target_codes: target_codes.append('3135')
 
-    total_stocks = len(target_codes)
-    
-    # 2. 設定批次參數
-    # 雙盲查詢 URL 較長，建議一批 60-80 檔，這裡設 70
     BATCH_SIZE = 70
-    # 將清單切分成多個小批次
     batches = [target_codes[i:i + BATCH_SIZE] for i in range(0, len(target_codes), BATCH_SIZE)]
     
     raw_results = []
-    print(f"⚡ 啟動多執行緒掃描: 共 {len(batches)} 批次，目標 {total_stocks} 檔...")
+    print(f"⚡ 啟動多執行緒掃描: 共 {len(batches)} 批次，目標 {len(target_codes)} 檔...")
 
-    # 3. 多執行緒平行處理
-    # max_workers=10 代表同時發送 10 個請求，速度極快
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        # 提交任務
         futures = {executor.submit(fetch_batch_data, batch): batch for batch in batches}
-        
         completed = 0
         for future in concurrent.futures.as_completed(futures):
-            data = future.result()
-            raw_results.extend(data)
-            
+            raw_results.extend(future.result())
             completed += 1
-            # 顯示進度條 (因為並發很快，這行會跳很快)
             print(f"   處理進度: {completed}/{len(batches)} 批...", end='\r')
 
     print(f"\n✅ 網路請求完成，開始解析數據...")
 
-    # 4. 解析數據與篩選 (在本地端處理，速度極快)
     limit_up_list = []
-    
-    # 用 set 避免雙盲查詢可能造成的極少數重複 (雖然 API 通常會濾掉)
     seen_codes = set()
 
     for item in raw_results:
         code = item.get('c')
         if not code or code in seen_codes: continue
         
-        # 檢查必要欄位
         if 'z' not in item or 'y' not in item: continue
         if item['z'] == '-' or item['y'] == '-': continue
         
         try:
             price = float(item['z'])
             prev_close = float(item['y'])
-            
-            # 計算漲幅
             pct_change = ((price - prev_close) / prev_close) * 100
             
-            # 漲停判斷 (漲幅 > 9.4% 且 現價 == 最高價)
             is_high = False
             if 'h' in item and item['h'] != '-':
                 if price == float(item['h']):
@@ -127,14 +188,13 @@ def scan_limit_up_stocks_fast():
         except ValueError:
             continue
 
-    # 5. 存檔
     duration = time.time() - start_time
     print(f"⏱️ 總耗時: {duration:.2f} 秒")
-    print(f"✅ 掃描完成！共發現 {len(limit_up_list)} 檔漲停股。")
+    print(f"🎯 掃描完成！共發現 {len(limit_up_list)} 檔漲停股。")
     
     if limit_up_list:
+        # 1. 存入本地 CSV 備份
         df_new = pd.DataFrame(limit_up_list)
-        
         if os.path.exists(filename):
             df_old = pd.read_csv(filename)
             df_old = df_old[df_old['Date'] != today_str]
@@ -143,10 +203,16 @@ def scan_limit_up_stocks_fast():
             df_final = df_new
             
         df_final.to_csv(filename, index=False, encoding='utf-8-sig')
-        print(f"📁 資料已存入: {filename}")
-        print(df_new[['Code', 'Name', 'EntryPrice', 'PctChange']].to_string(index=False))
+        print(f"📁 資料已備份至: {filename}")
+        
+        # 2. 更新 Supabase 漲停字串紀錄表
+        update_limit_up_db(limit_up_list, today_str)
+        
+        # 3. 自動派發至戰情室 (使用者: pitg)
+        update_watchlist_db(limit_up_list, today_str, username="pitg")
+        
     else:
-        print("⚠️ 今日無發現漲停股。")
+        print("⚠️ 今日無發現漲停股，無須更新資料庫。")
 
 if __name__ == "__main__":
     scan_limit_up_stocks_fast()
