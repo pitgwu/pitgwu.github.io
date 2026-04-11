@@ -1,5 +1,6 @@
 import twstock
 import pandas as pd
+import numpy as np
 import datetime
 import os
 import time
@@ -59,9 +60,6 @@ def update_limit_up_db(limit_up_list, today_str):
     with engine.begin() as conn:
         for item in limit_up_list:
             sym = item['Code']
-            
-            # 使用 PostgreSQL 的 ON CONFLICT 達成 UPSERT：
-            # 如果 symbol 不存在就 INSERT；如果存在，且日期字串不包含今天，就把今天逗號串接上去
             sql = text("""
                 INSERT INTO limit_up_records (symbol, limit_up_dates)
                 VALUES (:sym, :dt)
@@ -83,14 +81,12 @@ def update_watchlist_db(limit_up_list, today_str, username="pitg"):
     if not limit_up_list:
         return
         
-    # 產生 YYYYMM 格式 (例如 "202604")
     yymm_str = today_str.replace("-", "")[:6]
     menu_name = f"{yymm_str}漲停股清單"
     
     print(f"🔄 準備派發至戰情室群組: 「{menu_name}」 (使用者: {username})...")
     
     with engine.begin() as conn:
-        # 1. 檢查群組是否存在，若無則建立
         menu_id = conn.execute(
             text("SELECT id FROM watchlist_menus WHERE name = :mname AND username = :u"),
             {"mname": menu_name, "u": username}
@@ -103,7 +99,6 @@ def update_watchlist_db(limit_up_list, today_str, username="pitg"):
             ).scalar()
             print(f"   🆕 發現新月份，已自動建立群組: {menu_name}")
 
-        # 2. 將漲停股寫入群組 (若重複則忽略 DO NOTHING)
         added_count = 0
         for item in limit_up_list:
             sym = item['Code']
@@ -133,7 +128,6 @@ def scan_limit_up_stocks_fast():
     current_month = datetime.datetime.now().strftime('%Y_%m')
     filename = os.path.join(DATA_DIR, f'limit_up_{current_month}.csv')
     
-    # 準備清單
     target_codes = [code for code, info in twstock.codes.items() if info.type == '股票' and len(code) == 4]
     if '3135' not in target_codes: target_codes.append('3135')
 
@@ -153,13 +147,23 @@ def scan_limit_up_stocks_fast():
 
     print(f"\n✅ 網路請求完成，開始解析數據...")
 
+    # 🔥 1. 建立全市場最新價格字典 (用來更新舊股票)
+    price_map = {}
+    for item in raw_results:
+        c = item.get('c')
+        z = item.get('z')
+        if c and z and z != '-':
+            try:
+                price_map[c] = float(z)
+            except ValueError:
+                pass
+
     limit_up_list = []
     seen_codes = set()
 
     for item in raw_results:
         code = item.get('c')
         if not code or code in seen_codes: continue
-        
         if 'z' not in item or 'y' not in item: continue
         if item['z'] == '-' or item['y'] == '-': continue
         
@@ -177,12 +181,15 @@ def scan_limit_up_stocks_fast():
                 seen_codes.add(code)
                 name = item.get('n', code)
                 
+                # 加入新增的欄位：最新價、報酬率、持有天數
                 limit_up_list.append({
                     'Date': today_str,
                     'Code': code,
                     'Name': name,
                     'EntryPrice': price,
-                    'PctChange': round(pct_change, 2),
+                    'LatestPrice': price,
+                    'ReturnPct': 0.0,
+                    'HoldDays': 1,
                     'Note': '漲停'
                 })
         except ValueError:
@@ -191,28 +198,64 @@ def scan_limit_up_stocks_fast():
     duration = time.time() - start_time
     print(f"⏱️ 總耗時: {duration:.2f} 秒")
     print(f"🎯 掃描完成！共發現 {len(limit_up_list)} 檔漲停股。")
-    
+
+    df_final = pd.DataFrame()
+
+    # 🔥 2. 更新 CSV 歷史紀錄的「最新價」與「報酬率」！
+    if os.path.exists(filename):
+        print(f"🔄 正在更新歷史紀錄的最新價與報酬率 ({filename})...")
+        # 確保讀取時 Code 是字串，避免 0050 被轉成 50
+        df_old = pd.read_csv(filename, dtype={'Code': str})
+        
+        # 濾掉今天可能已經重複跑過的資料
+        df_old = df_old[df_old['Date'] != today_str].copy()
+        
+        if not df_old.empty:
+            # 確保舊檔案擁有所有計算欄位
+            for col in ['LatestPrice', 'ReturnPct', 'HoldDays']:
+                if col not in df_old.columns:
+                    df_old[col] = 0.0
+            
+            # 逐列更新報價
+            for idx, row in df_old.iterrows():
+                code_str = str(row['Code']).zfill(4)
+                entry_price = float(row['EntryPrice'])
+                date_str = str(row['Date'])
+                
+                # 更新最新價與累積報酬率
+                if code_str in price_map:
+                    latest_p = price_map[code_str]
+                    df_old.at[idx, 'LatestPrice'] = latest_p
+                    if entry_price > 0:
+                        df_old.at[idx, 'ReturnPct'] = round(((latest_p - entry_price) / entry_price) * 100, 2)
+                
+                # 計算持有天數 (日曆天)
+                try:
+                    days_diff = (pd.to_datetime(today_str) - pd.to_datetime(date_str)).days + 1
+                    df_old.at[idx, 'HoldDays'] = max(1, days_diff)
+                except Exception:
+                    df_old.at[idx, 'HoldDays'] = 1
+                    
+        df_final = df_old
+
+    # 3. 將今日新漲停股接在最後面
     if limit_up_list:
-        # 1. 存入本地 CSV 備份
         df_new = pd.DataFrame(limit_up_list)
-        if os.path.exists(filename):
-            df_old = pd.read_csv(filename)
-            df_old = df_old[df_old['Date'] != today_str]
-            df_final = pd.concat([df_old, df_new], ignore_index=True)
+        if not df_final.empty:
+            df_final = pd.concat([df_final, df_new], ignore_index=True)
         else:
             df_final = df_new
-            
+
+    # 4. 存檔與派發
+    if not df_final.empty:
         df_final.to_csv(filename, index=False, encoding='utf-8-sig')
-        print(f"📁 資料已備份至: {filename}")
+        print(f"📁 CSV 本地端報表已更新至: {filename}")
         
-        # 2. 更新 Supabase 漲停字串紀錄表
+    if limit_up_list:
         update_limit_up_db(limit_up_list, today_str)
-        
-        # 3. 自動派發至戰情室 (使用者: pitg)
         update_watchlist_db(limit_up_list, today_str, username="pitg")
-        
     else:
-        print("⚠️ 今日無發現漲停股，無須更新資料庫。")
+        print("⚠️ 今日無發現漲停股，無須派發至戰情室與資料庫。")
 
 if __name__ == "__main__":
     scan_limit_up_stocks_fast()
