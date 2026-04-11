@@ -59,7 +59,8 @@ def update_limit_up_db(limit_up_list, today_str):
     print(f"🔄 準備更新資料庫 `limit_up_records`...")
     with engine.begin() as conn:
         for item in limit_up_list:
-            sym = item['Code']
+            # 🔥 關鍵修改：使用帶有後綴的 DbSymbol 寫入資料庫
+            sym = item['DbSymbol'] 
             sql = text("""
                 INSERT INTO limit_up_records (symbol, limit_up_dates)
                 VALUES (:sym, :dt)
@@ -101,7 +102,8 @@ def update_watchlist_db(limit_up_list, today_str, username="pitg"):
 
         added_count = 0
         for item in limit_up_list:
-            sym = item['Code']
+            # 🔥 關鍵修改：使用帶有後綴的 DbSymbol 寫入自選股清單
+            sym = item['DbSymbol'] 
             res = conn.execute(
                 text("""
                     INSERT INTO watchlist_items (menu_id, symbol, added_date)
@@ -115,7 +117,7 @@ def update_watchlist_db(limit_up_list, today_str, username="pitg"):
             if res:
                 added_count += 1
                 
-    print(f"✅ 成功將 {added_count} 檔新的漲停股加入「{menu_name}」！(重複已自動忽略)")
+    print(f"✅ 成功將 {added_count} 檔新的漲停股加入「{menu_name}」！")
 
 # ===========================
 # 5. 主程式
@@ -147,7 +149,7 @@ def scan_limit_up_stocks_fast():
 
     print(f"\n✅ 網路請求完成，開始解析數據...")
 
-    # 🔥 1. 建立全市場最新價格字典 (用來更新舊股票)
+    # 建立全市場最新價格字典 (純數字代號，給 CSV 更新用)
     price_map = {}
     for item in raw_results:
         c = item.get('c')
@@ -181,10 +183,23 @@ def scan_limit_up_stocks_fast():
                 seen_codes.add(code)
                 name = item.get('n', code)
                 
-                # 加入新增的欄位：最新價、報酬率、持有天數
+                # 🔥 判斷上市上櫃，產生正確的資料庫代號 (DbSymbol)
+                market_type = twstock.codes[code].market if code in twstock.codes else ''
+                if market_type == '上市':
+                    db_symbol = f"{code}.TW"
+                elif market_type == '上櫃':
+                    db_symbol = f"{code}.TWO"
+                else:
+                    # 備用機制：透過 API 回傳的 ex 欄位判斷
+                    ex_type = item.get('ex', '')
+                    if ex_type == 'tse': db_symbol = f"{code}.TW"
+                    elif ex_type == 'otc': db_symbol = f"{code}.TWO"
+                    else: db_symbol = code
+                
                 limit_up_list.append({
                     'Date': today_str,
-                    'Code': code,
+                    'Code': code,               # 純數字 (給 CSV 報表用)
+                    'DbSymbol': db_symbol,      # 帶有 .TW/.TWO 的格式 (給資料庫用)
                     'Name': name,
                     'EntryPrice': price,
                     'LatestPrice': price,
@@ -201,35 +216,27 @@ def scan_limit_up_stocks_fast():
 
     df_final = pd.DataFrame()
 
-    # 🔥 2. 更新 CSV 歷史紀錄的「最新價」與「報酬率」！
     if os.path.exists(filename):
         print(f"🔄 正在更新歷史紀錄的最新價與報酬率 ({filename})...")
-        # 確保讀取時 Code 是字串，避免 0050 被轉成 50
         df_old = pd.read_csv(filename, dtype={'Code': str})
-        
-        # 濾掉今天可能已經重複跑過的資料
         df_old = df_old[df_old['Date'] != today_str].copy()
         
         if not df_old.empty:
-            # 確保舊檔案擁有所有計算欄位
             for col in ['LatestPrice', 'ReturnPct', 'HoldDays']:
                 if col not in df_old.columns:
                     df_old[col] = 0.0
             
-            # 逐列更新報價
             for idx, row in df_old.iterrows():
                 code_str = str(row['Code']).zfill(4)
                 entry_price = float(row['EntryPrice'])
                 date_str = str(row['Date'])
                 
-                # 更新最新價與累積報酬率
                 if code_str in price_map:
                     latest_p = price_map[code_str]
                     df_old.at[idx, 'LatestPrice'] = latest_p
                     if entry_price > 0:
                         df_old.at[idx, 'ReturnPct'] = round(((latest_p - entry_price) / entry_price) * 100, 2)
                 
-                # 計算持有天數 (日曆天)
                 try:
                     days_diff = (pd.to_datetime(today_str) - pd.to_datetime(date_str)).days + 1
                     df_old.at[idx, 'HoldDays'] = max(1, days_diff)
@@ -238,15 +245,15 @@ def scan_limit_up_stocks_fast():
                     
         df_final = df_old
 
-    # 3. 將今日新漲停股接在最後面
     if limit_up_list:
-        df_new = pd.DataFrame(limit_up_list)
+        # 將 DbSymbol 欄位從要寫入 CSV 的 DataFrame 中移除，保持報表乾淨
+        clean_limit_up_list = [{k: v for k, v in d.items() if k != 'DbSymbol'} for d in limit_up_list]
+        df_new = pd.DataFrame(clean_limit_up_list)
         if not df_final.empty:
             df_final = pd.concat([df_final, df_new], ignore_index=True)
         else:
             df_final = df_new
 
-    # 4. 存檔與派發
     if not df_final.empty:
         df_final.to_csv(filename, index=False, encoding='utf-8-sig')
         print(f"📁 CSV 本地端報表已更新至: {filename}")
