@@ -6,6 +6,7 @@ import re
 import sqlalchemy
 import time
 import random
+import concurrent.futures
 from io import StringIO
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine, text
@@ -41,7 +42,6 @@ def ensure_primary_key(table_name, unique_cols):
 def upsert_to_supabase(df, table_name, unique_cols):
     """
     使用 PostgreSQL 的 INSERT ON CONFLICT DO UPDATE (Upsert)
-    這是最安全的寫入方式，不會誤刪資料。
     """
     if df.empty: return
     
@@ -51,15 +51,12 @@ def upsert_to_supabase(df, table_name, unique_cols):
     try:
         target_table = sqlalchemy.Table(table_name, metadata, autoload_with=engine)
     except sqlalchemy.exc.NoSuchTableError:
-        # 表格不存在，直接建立
         df.to_sql(table_name, engine, if_exists='replace', index=False)
         ensure_primary_key(table_name, unique_cols)
         print(f"   ✨ 已建立新表 [{table_name}] 並寫入 {len(records)} 筆")
         return
     
-    # 建立 Upsert 語句
     stmt = insert(target_table).values(records)
-    # 定義衝突時更新的欄位 (排除 Primary Key)
     update_dict = {c.name: c for c in stmt.excluded if c.name not in unique_cols}
     
     if update_dict:
@@ -78,8 +75,6 @@ def upsert_to_supabase(df, table_name, unique_cols):
                 conn.execute(on_conflict_stmt)
         else:
             raise e
-            
-    print(f"   ✅ [{table_name}] Upsert 成功: {len(records)} 筆")
 
 # ===========================
 # 3. 模組 A: 股票清單
@@ -97,7 +92,7 @@ def fetch_market_data_with_retry(url, retries=3):
     return None
 
 def sync_stock_info():
-    print("\n🚀 [1/2] 更新股票代號與產業分類...")
+    print("\n🚀 [1/3] 更新股票代號與產業分類...")
     all_data = []
     configs = [("上市", 2, ".TW"), ("上櫃", 4, ".TWO"), ("興櫃", 5, ".TWO")]
 
@@ -106,15 +101,12 @@ def sync_stock_info():
         url = f"https://isin.twse.com.tw/isin/C_public.jsp?strMode={mode}"
         
         html_text = fetch_market_data_with_retry(url)
-        if not html_text:
-            print(f"   ❌ {market_name} 下載失敗")
-            continue
+        if not html_text: continue
 
         try:
             dfs = pd.read_html(StringIO(html_text), header=0)
             if not dfs: continue
             df = dfs[0]
-            
             count = 0
             
             for _, row in df.iterrows():
@@ -133,64 +125,36 @@ def sync_stock_info():
                                     ind_val = str(row.iloc[4]).strip()
                                     if ind_val and ind_val.lower() != 'nan':
                                         industry = ind_val
-                            except:
-                                pass
+                            except: pass
                             
-                            if code.startswith('00'):
-                                industry = 'ETF'
+                            if code.startswith('00'): industry = 'ETF'
 
-                            all_data.append({
-                                'symbol': f"{code}{suffix}",
-                                'name': name,
-                                'industry': industry
-                            })
+                            all_data.append({'symbol': f"{code}{suffix}", 'name': name, 'industry': industry})
                             count += 1
-                except Exception:
-                    continue
+                except Exception: continue
                 
             print(f"      ✅ 取得 {count} 筆")
-            
         except Exception as e:
             print(f"   ❌ {market_name} 解析失敗: {e}")
-        
         time.sleep(random.uniform(2, 4))
-
-    if len(all_data) < 1000:
-        print(f"\n🛑 [危險] 抓取數量過少 ({len(all_data)} 筆)，跳過更新。")
-        try:
-            with engine.connect() as conn:
-                res = conn.execute(text("SELECT symbol FROM stock_info"))
-                return [r[0] for r in res]
-        except: 
-            return []
 
     if all_data:
         df_info = pd.DataFrame(all_data).drop_duplicates(subset=['symbol'])
-        print(f"   💾 寫入資料庫: 共 {len(df_info)} 筆...")
         upsert_to_supabase(df_info, 'stock_info', ['symbol'])
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stock_info_symbol ON stock_info (symbol)"))
-        except: pass
-        print(f"   ✅ stock_info 更新完成")
         return df_info['symbol'].tolist()
-    else:
-        return []
+    return []
 
 # ===========================
-# 4. 模組 B: 日 K 股價 (盤中防呆版)
+# 4. 模組 B: 日 K 股價 (yfinance 歷史批量)
 # ===========================
 def sync_daily_prices(symbols):
-    print("\n🚀 [2/2] 下載最新股價 (yfinance)...")
-    if not symbols:
-        print("   ⚠️ 無股票代號，略過更新")
-        return
+    print("\n🚀 [2/3] 下載歷史與最新股價 (yfinance)...")
+    if not symbols: return
 
     try:
         chunk_size = 500
         total_inserted = 0
 
-        # 強制抓取最近 5 天，確保涵蓋跨時區的「今天」
         for i in range(0, len(symbols), chunk_size):
             batch = symbols[i:i+chunk_size]
             print(f"   📡 下載進度 {i}/{len(symbols)}...", end="\r")
@@ -200,32 +164,107 @@ def sync_daily_prices(symbols):
             if data.empty: continue
 
             if isinstance(data.columns, pd.MultiIndex):
-                data = data.stack(level=1).reset_index()
-                data.rename(columns={'Ticker': 'symbol', 'Date': 'date'}, inplace=True)
+                # 解決新舊版 yfinance Ticker 層級位置不同的 Bug
+                if 'Ticker' in data.columns.names:
+                    ticker_level = data.columns.names.index('Ticker')
+                    data = data.stack(level=ticker_level).reset_index()
+                else:
+                    data = data.stack(level=1).reset_index()
+                
+                rename_map = {col: 'symbol' if str(col).lower() == 'ticker' else 'date' if str(col).lower() == 'date' else col for col in data.columns}
+                data.rename(columns=rename_map, inplace=True)
             else:
                 data = data.reset_index()
+                data.rename(columns={col: 'date' for col in data.columns if str(col).lower() == 'date'}, inplace=True)
+                if 'symbol' not in data.columns: data['symbol'] = batch[0]
 
             data.columns = [str(c).lower() for c in data.columns]
-
             req_cols = ['date', 'symbol', 'open', 'high', 'low', 'close', 'volume']
             if not set(req_cols).issubset(data.columns): continue
 
             df_upload = data[req_cols].copy()
             df_upload['date'] = pd.to_datetime(df_upload['date']).dt.strftime('%Y-%m-%d')
-
-            # 🔥 關鍵：只剔除沒有收盤價的廢資料，若成交量為空則補 0，不整筆刪除
             df_upload.dropna(subset=['close'], inplace=True)
             df_upload.fillna(0, inplace=True)
 
-            # Upsert 寫入 (相同日期與代號自動覆蓋最新盤中報價)
             upsert_to_supabase(df_upload, 'stock_prices', ['date', 'symbol'])
-
             total_inserted += len(df_upload)
 
-        print(f"\n   ✅ 股價更新完成 (共處理 {total_inserted} 筆數據)")
-
+        print(f"\n   ✅ yfinance 股價更新完成 (共處理 {total_inserted} 筆數據)")
     except Exception as e:
-        print(f"   ❌ 股價下載錯誤: {e}")
+        print(f"   ❌ yfinance 下載錯誤: {e}")
+
+# ===========================
+# 5. 模組 C: 台股官方 API 補齊防呆機制 (🔥 解決 5536* 漏抓的終極武器)
+# ===========================
+def patch_today_prices_via_twse(symbols):
+    print("\n🚀 [3/3] 啟動台股防呆機制：補齊 yfinance 漏抓的今日精準報價...")
+    if not symbols: return
+
+    codes = []
+    symbol_map = {}
+    for sym in symbols:
+        code = sym.split('.')[0]
+        codes.append(code)
+        symbol_map[code] = sym
+
+    BATCH_SIZE = 70
+    batches = [codes[i:i + BATCH_SIZE] for i in range(0, len(codes), BATCH_SIZE)]
+    all_records = []
+    
+    def fetch_twse(batch):
+        q = [f"tse_{c}.tw" for c in batch] + [f"otc_{c}.tw" for c in batch]
+        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={'|'.join(q)}"
+        try:
+            res = requests.get(url, timeout=5).json()
+            return res.get('msgArray', [])
+        except Exception:
+            return []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_twse, batch): batch for batch in batches}
+        completed = 0
+        for future in concurrent.futures.as_completed(futures):
+            for item in future.result():
+                code = item.get('c')
+                z = item.get('z')
+                if not z or z == '-': continue # 排除沒開盤或無成交的股票
+                
+                try:
+                    date_str = item.get('d') # '20260415'
+                    if not date_str: continue
+                    date_fmt = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                    
+                    price = float(str(z).replace(',', ''))
+                    open_p = float(str(item.get('o')).replace(',', '')) if item.get('o') != '-' else price
+                    high_p = float(str(item.get('h')).replace(',', '')) if item.get('h') != '-' else price
+                    low_p = float(str(item.get('l')).replace(',', '')) if item.get('l') != '-' else price
+                    vol = int(str(item.get('v')).replace(',', '')) if item.get('v') != '-' else 0
+                    
+                    db_symbol = symbol_map.get(code)
+                    if db_symbol:
+                        all_records.append({
+                            'date': date_fmt,
+                            'symbol': db_symbol,
+                            'open': open_p,
+                            'high': high_p,
+                            'low': low_p,
+                            'close': price,
+                            'volume': vol * 1000  # 官方API回傳為「張」，需轉換為「股」
+                        })
+                except Exception: pass
+            
+            completed += 1
+            print(f"   📡 防呆補齊進度 {completed}/{len(batches)}...", end="\r")
+
+    if all_records:
+        df_patch = pd.DataFrame(all_records)
+        df_patch.drop_duplicates(subset=['date', 'symbol'], inplace=True)
+        print(f"\n   💾 寫入官方精準校正報價: 共 {len(df_patch)} 筆")
+        # 利用 Upsert 機制，把今日最新正確的價格強制覆寫上去
+        upsert_to_supabase(df_patch, 'stock_prices', ['date', 'symbol'])
+    else:
+        print("\n   ⚠️ 無法取得今日校正報價")
 
 # ===========================
 # 主程式
@@ -239,8 +278,10 @@ if __name__ == "__main__":
     # 1. 更新股票清單
     symbols = sync_stock_info()
     
-    # 🔥 剛剛被漏掉的最關鍵一行：
-    # 2. 下載股價
+    # 2. 下載歷史股價 (yfinance 大量且快速，但可能漏接)
     sync_daily_prices(symbols)
+    
+    # 3. 官方防呆補齊 (強制補齊今日最新報價)
+    patch_today_prices_via_twse(symbols)
     
     print("\n🎉 基礎資料更新完成！")
