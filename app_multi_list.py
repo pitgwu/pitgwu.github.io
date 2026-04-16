@@ -526,8 +526,6 @@ def main_app():
     selected_list = st.session_state.selected_list_widget
 
     watchlist_df = get_list_data_db(selected_list, current_user)
-    # 🔥 強制將自選清單的 symbol 也轉為純數字，確保與上面的 SQL 完全對齊
-    watchlist_df['symbol'] = watchlist_df['symbol'].astype(str).str.strip().str.split('.').str[0]
     current_symbols = watchlist_df['symbol'].tolist()
 
     with st.sidebar.expander(f"📋 查看群組 ({len(current_symbols)})", expanded=True):
