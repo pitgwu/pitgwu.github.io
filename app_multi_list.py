@@ -543,7 +543,9 @@ def main_app():
         c2.button("刪", on_click=action_del)
         c3.button("查", on_click=action_search)
         if c4.button("🔄"):
+            # 🔥 必須同時清除兩種快取，才能強制讀取資料庫最新資料
             st.cache_data.clear()
+            st.cache_resource.clear()
             st.rerun()
 
     if st.session_state.action_msg:
