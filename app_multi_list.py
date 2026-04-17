@@ -198,17 +198,18 @@ def resolve_stock_symbol(input_val, mapping):
 @st.cache_resource(ttl=600, show_spinner=False)
 def load_precalculated_data():
     query = """
-    SELECT d.date, d.symbol, d.name, d.industry, d.open, d.high, d.low, d.close, d.volume,
+    SELECT d.date, split_part(d.symbol, '.', 1) as symbol, d.name, d.industry, d.open, d.high, d.low, d.close, d.volume,
            d.pct_change, d.foreign_net, d.trust_net,
            d."MA5", d."MA10", d."MA20", d."MA60",
            d."K", d."D", d."MACD_OSC", d."DIF",
            d.total_score as "Total_Score",
            d.signal_list as "Signal_List",
            e."Capital", e."2026EPS", d."Vol_Ratio",
-           lu.limit_up_dates   -- 🔥 撈出漲停日期字串
-    FROM strongbuy_indicators d
-    LEFT JOIN stock_eps e ON d.symbol = e."Symbol"
-    LEFT JOIN limit_up_records lu ON d.symbol = lu.symbol
+           d.yoy_pct,   -- 🔥 營收年增率在這裡
+           lu.limit_up_dates
+    FROM strongbuy_indicators d  -- 🛠️ 關鍵修正：改回這張擁有所有指標與營收的大表！
+    LEFT JOIN stock_eps e ON split_part(d.symbol, '.', 1) = split_part(e."Symbol", '.', 1)
+    LEFT JOIN limit_up_records lu ON split_part(d.symbol, '.', 1) = split_part(lu.symbol, '.', 1)
     WHERE d.date >= current_date - INTERVAL '200 days'
     """
     with engine.connect() as conn:
@@ -224,6 +225,12 @@ def load_precalculated_data():
     df['Capital'] = pd.to_numeric(df['Capital'], errors='coerce')
     df['2026EPS'] = pd.to_numeric(df['2026EPS'], errors='coerce')
     df['PE_Ratio'] = np.where((df['2026EPS'] > 0) & df['2026EPS'].notna(), df['close'] / df['2026EPS'], np.nan)
+
+    # 🔥 新增：計算 PEG (本益比 / 營收年增率)。排除營收衰退的負值。
+    df['yoy_pct'] = pd.to_numeric(df['yoy_pct'], errors='coerce')
+    df['PEG'] = np.where((df['PE_Ratio'] > 0) & (df['yoy_pct'] > 0), df['PE_Ratio'] / df['yoy_pct'], np.nan)
+
+    # ... 下面保留您原本的「極速比對漲停日期」與「計算 MA120、糾結度」等程式碼，完全不用動 ...
 
     # 🔥 極速比對漲停日期
     date_strs = df['date'].dt.strftime('%Y-%m-%d').values
@@ -259,8 +266,8 @@ def load_precalculated_data():
 
     df['is_kd_gc'] = (df['K'] > df['D']) & (df['prev_K'] <= df['prev_D'])
     df['is_kd_gc_mid'] = df['is_kd_gc'] & (df['K'] >= 35) & (df['K'] <= 65)
-    kd_mid_1 = df['is_kd_gc_mid'].shift(1).fillna(False) & is_same
-    kd_mid_2 = df['is_kd_gc_mid'].shift(2).fillna(False) & (df['symbol'] == df['symbol'].shift(2))
+    kd_mid_1 = df['is_kd_gc_mid'].shift(1).fillna(False).astype(bool) & is_same
+    kd_mid_2 = df['is_kd_gc_mid'].shift(2).fillna(False).astype(bool) & (df['symbol'] == df['symbol'].shift(2))
     df['kd_gc_3d_mid_flag'] = df['is_kd_gc_mid'] | kd_mid_1 | kd_mid_2
 
     # 字典打包
@@ -525,11 +532,14 @@ def main_app():
     st.sidebar.selectbox("📂 選擇群組", all_lists, index=0, key="selected_list_widget")
     selected_list = st.session_state.selected_list_widget
 
+    # 👇 替換為以下這段 (洗掉 .TW 尾巴，並修復 Streamlit 的寬度警告)：
     watchlist_df = get_list_data_db(selected_list, current_user)
+    # 🔥 關鍵修正：把自選清單的代號小尾巴切掉，才能跟資料庫乾淨的代號對齊！
+    watchlist_df['symbol'] = watchlist_df['symbol'].astype(str).str.strip().str.split('.').str[0]
     current_symbols = watchlist_df['symbol'].tolist()
 
     with st.sidebar.expander(f"📋 查看群組 ({len(current_symbols)})", expanded=True):
-        event = st.dataframe(watchlist_df, hide_index=True, on_select="rerun", selection_mode="single-row", use_container_width=True)
+        event = st.dataframe(watchlist_df, hide_index=True, on_select="rerun", selection_mode="single-row", width="stretch")
         if event.selection.rows != st.session_state.last_df_selection:
             st.session_state.last_df_selection = event.selection.rows
             if event.selection.rows:
@@ -745,9 +755,11 @@ def main_app():
         elif "回測報酬率" in sort_opt: df_day = df_day.sort_values(['Backtest_Return','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
+    # 找到這幾行並替換：
     display_cols = ['symbol','name','added_date','close','pct_change', 'Vol_Ratio', 'Squeeze_Display']
     if is_past_date: display_cols.append('Backtest_Return')
-    display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'Total_Score','Signal_List'])
+    # 🔥 在這裡加上 'PEG'
+    display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'PEG', 'Total_Score','Signal_List'])
 
     display_df = df_day[display_cols].reset_index(drop=True)
     sym_list = display_df['symbol'].tolist()
@@ -763,15 +775,18 @@ def main_app():
         if pd.isna(x): return "-"
         return f"🔥 {x:.1f}x" if x >= 2.0 else f"{x:.1f}x"
 
-    fmt_dict = {"pct_change": "{:.2f}%", "close": "{:.2f}", "Capital": "{:.1f}", "2026EPS": "{:.2f}", "PE_Ratio": "{:.2f}", "Total_Score": "{:.0f}", "Vol_Ratio": format_vol_ratio, "Squeeze_Display": "{:.2f}%"}
-    col_cfg = {"Capital": "股本(億)", "2026EPS": "預估EPS", "PE_Ratio": "本益比", "Vol_Ratio": "量增比", "Squeeze_Display": "糾結度(%)", "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
+    # 🔥 字典裡面補上 "PEG" 的格式化定義
+    fmt_dict = {"pct_change": "{:.2f}%", "close": "{:.2f}", "Capital": "{:.1f}", "2026EPS": "{:.2f}", "PE_Ratio": "{:.2f}", "PEG": "{:.2f}", "Total_Score": "{:.0f}", "Vol_Ratio": format_vol_ratio, "Squeeze_Display": "{:.2f}%"}
+    col_cfg = {"Capital": "股本(億)", "2026EPS": "預估EPS", "PE_Ratio": "本益比", "PEG": "PEG", "Vol_Ratio": "量增比", "Squeeze_Display": "糾結度(%)", "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
+
     if is_past_date:
         fmt_dict["Backtest_Return"] = "{:.2f}%"
         col_cfg["Backtest_Return"] = "回測報酬率"
 
+    # 🔥 把 use_container_width=True 改成 width="stretch"
     evt = st.dataframe(
         display_df.style.format(fmt_dict, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
-        on_select="rerun", selection_mode="single-row", use_container_width=True,
+        on_select="rerun", selection_mode="single-row", width="stretch",
         column_config=col_cfg
     )
 
@@ -814,8 +829,10 @@ def main_app():
     b3.button("➡️ 下一檔", on_click=lambda: update_state(min(len(sym_list) - 1, st.session_state.ticker_index + 1)), width="stretch")
     b4.button("⏭️ 最後一檔", on_click=lambda: update_state(len(sym_list) - 1), width="stretch")
 
-    # HTML 數據標頭
+
+    # 找到這段 HTML 數據標頭設定，並補上 peg_str
     pe_str = f"{cur_info['PE_Ratio']:.2f}" if pd.notna(cur_info['PE_Ratio']) else "-"
+    peg_str = f"{cur_info['PEG']:.2f}" if pd.notna(cur_info['PEG']) else "-"  # 🔥 新增這行
     eps_str = f"{cur_info['2026EPS']:.2f}" if pd.notna(cur_info['2026EPS']) else "-"
     cap_str = f"{cur_info['Capital']:.1f}" if pd.notna(cur_info['Capital']) else "-"
     vol_ratio_str = f"🔥 {cur_info['Vol_Ratio']:.1f}x" if pd.notna(cur_info['Vol_Ratio']) and cur_info['Vol_Ratio'] >= 2.0 else f"{cur_info['Vol_Ratio']:.1f}x" if pd.notna(cur_info['Vol_Ratio']) else "-"
@@ -828,6 +845,7 @@ def main_app():
 
     pct_color = "#FF4B4B" if pd.notna(cur_info['pct_change']) and cur_info['pct_change'] > 0 else "#26a69a" if pd.notna(cur_info['pct_change']) and cur_info['pct_change'] < 0 else "#888"
 
+    # 🔥 在 HTML 字串中多插入一個 DIV 來顯示 PEG (字體設定為顯眼的橘色)
     st.markdown(
         '<div style="margin: 20px 0;">'
         f'<h2 style="text-align: center; color: #FF4B4B; margin-bottom: 15px;">{title_html}</h2>'
@@ -837,6 +855,7 @@ def main_app():
         f'<div style="flex: 1; border-right: 1px solid #eee;"><span style="font-size:13px; color:#888;">糾結度</span><br><span style="font-size:18px; font-weight:bold; color:#2196F3;">{sq_str}</span></div>'
         f'<div style="flex: 1; border-right: 1px solid #eee;"><span style="font-size:13px; color:#888;">量增比</span><br><span style="font-size:18px; font-weight:bold; color:#FF4B4B;">{vol_ratio_str}</span></div>'
         f'<div style="flex: 1; border-right: 1px solid #eee;"><span style="font-size:13px; color:#888;">本益比</span><br><span style="font-size:18px; font-weight:bold;">{pe_str}</span></div>'
+        f'<div style="flex: 1; border-right: 1px solid #eee;"><span style="font-size:13px; color:#888;">PEG</span><br><span style="font-size:18px; font-weight:bold; color:#FF8C00;">{peg_str}</span></div>'
         f'<div style="flex: 1; border-right: 1px solid #eee;"><span style="font-size:13px; color:#888;">預估EPS</span><br><span style="font-size:18px; font-weight:bold;">{eps_str}</span></div>'
         f'<div style="flex: 1;"><span style="font-size:13px; color:#888;">股本(億)</span><br><span style="font-size:18px; font-weight:bold;">{cap_str}</span></div>'
         '</div>'
