@@ -8,21 +8,52 @@ import numpy as np
 SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 engine = sqlalchemy.create_engine(SUPABASE_DB_URL)
 
+# ===========================
+# 2. 擷取資料 (Extract) - 優化版
+# ===========================
 def extract_data():
-    print("📥 [1/4] 開始撈取近 200 天歷史資料...")
-    query = """
-    SELECT sp.date, sp.symbol, sp.open, sp.high, sp.low, sp.close, sp.volume, 
-           si.name, si.industry, 
-           COALESCE(ii.foreign_net, 0) as foreign_net,
-           COALESCE(ii.trust_net, 0) as trust_net
-    FROM stock_prices sp
-    JOIN stock_info si ON sp.symbol = si.symbol
-    LEFT JOIN institutional_investors ii ON sp.date = ii.date AND sp.symbol = ii.symbol
-    WHERE sp.date >= current_date - INTERVAL '200 days' 
-    ORDER BY sp.symbol, sp.date
+    print("📥 [1/4] 開始撈取近 200 天歷史資料 (分批下載模式)...")
+    
+    # 1. 單獨下載股價
+    q_price = """
+    SELECT date, symbol, open, high, low, close, volume 
+    FROM stock_prices 
+    WHERE date >= current_date - INTERVAL '200 days'
     """
+    
+    # 2. 單獨下載籌碼
+    q_inst = """
+    SELECT date, symbol, foreign_net, trust_net 
+    FROM institutional_investors 
+    WHERE date >= current_date - INTERVAL '200 days'
+    """
+    
+    # 3. 單獨下載基本資料
+    q_info = "SELECT symbol, name, industry FROM stock_info"
+    
     with engine.connect() as conn:
-        df = pd.read_sql(query, conn)
+        print("   -> 下載股價資料...")
+        df_price = pd.read_sql(text(q_price), conn)
+        
+        print("   -> 下載籌碼資料...")
+        df_inst = pd.read_sql(text(q_inst), conn)
+        
+        print("   -> 下載基本資料...")
+        df_info = pd.read_sql(text(q_info), conn)
+        
+    print("   -> 使用 Pandas 進行記憶體高速合併與排序...")
+    
+    # 在 Python 記憶體中進行合併 (速度比資料庫 JOIN 快非常多)
+    df = pd.merge(df_price, df_info, on='symbol', how='inner')
+    df = pd.merge(df, df_inst, on=['date', 'symbol'], how='left')
+    
+    # 填補籌碼空值
+    df['foreign_net'] = df['foreign_net'].fillna(0)
+    df['trust_net'] = df['trust_net'].fillna(0)
+    
+    # 進行全表排序，確保後續均線計算正確
+    df = df.sort_values(['symbol', 'date']).reset_index(drop=True)
+    
     return df
 
 def transform_data(df):
