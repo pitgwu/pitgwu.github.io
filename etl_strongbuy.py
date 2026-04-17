@@ -68,7 +68,7 @@ def transform_data(df, df_rev):
         df_rev = df_rev.sort_values('date')
         g_rev = df_rev.groupby('symbol')
         
-        df_rev['rev_max'] = g_rev['rev_current'].expanding().max()
+        df_rev['rev_max'] = g_rev['rev_current'].transform(lambda x: x.cummax())
         df_rev['rev_is_ath'] = (df_rev['rev_current'] >= df_rev['rev_max']) & (df_rev['rev_current'] > 0)
         df_rev['yoy_pos'] = (df_rev['yoy_pct'] > 0).astype(int)
         df_rev['yoy_streak'] = g_rev['yoy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
