@@ -220,6 +220,8 @@ def load_precalculated_data():
 
     df['symbol'] = df['symbol'].astype(str).str.strip()
     df['date'] = pd.to_datetime(df['date'])
+    # 👇 補上這行：如果在同一天出現兩個 7734 (例如一個TW一個TWO)，強制只保留一筆最新資料
+    df = df.drop_duplicates(subset=['date', 'symbol'], keep='last')
     df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
     df['Signal_List'] = df['Signal_List'].fillna("")
     df['Capital'] = pd.to_numeric(df['Capital'], errors='coerce')
@@ -536,6 +538,8 @@ def main_app():
     watchlist_df = get_list_data_db(selected_list, current_user)
     # 🔥 關鍵修正：把自選清單的代號小尾巴切掉，才能跟資料庫乾淨的代號對齊！
     watchlist_df['symbol'] = watchlist_df['symbol'].astype(str).str.strip().str.split('.').str[0]
+    # 👇 補上這行：強制剔除同一個代號的重複自選股
+    watchlist_df = watchlist_df.drop_duplicates(subset=['symbol'], keep='first')
     current_symbols = watchlist_df['symbol'].tolist()
 
     with st.sidebar.expander(f"📋 查看群組 ({len(current_symbols)})", expanded=True):
