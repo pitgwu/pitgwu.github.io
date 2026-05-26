@@ -1,9 +1,15 @@
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert
 import os
 import numpy as np
+import gc
 from datetime import datetime, timedelta
+from sqlalchemy.pool import NullPool
+
+# 關閉 Pandas 未來版本的警告提示
+pd.set_option('future.no_silent_downcasting', True)
 
 # ===========================
 # 1. 資料庫連線設定
@@ -12,7 +18,8 @@ SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 if not SUPABASE_DB_URL:
     raise ValueError("❌ 未偵測到 SUPABASE_DB_URL，請設定環境變數。")
 
-engine = sqlalchemy.create_engine(SUPABASE_DB_URL)
+# ✅ 替換為這行 (加入 NullPool，並將等待時間延長到 30 秒以策安全)：
+engine = sqlalchemy.create_engine(SUPABASE_DB_URL, poolclass=NullPool, connect_args={'connect_timeout': 30})
 
 # ===========================
 # 2. 擷取資料 (Extract)
@@ -20,11 +27,15 @@ engine = sqlalchemy.create_engine(SUPABASE_DB_URL)
 def extract_data():
     print("📥 [1/4] 開始撈取股價、籌碼與營收資料...")
     
-    # --- 1. 撈取基本資訊 (獨立連線) ---
+    # --- 1. 撈取基本資訊 ---
     with engine.connect() as conn:
         df_info = pd.read_sql("SELECT symbol, name, industry FROM stock_info", conn)
+        # 🔥 防呆機制：將代號統一為純數字 (去除 .TW / .TWO)
+        df_info['symbol'] = df_info['symbol'].astype(str).str.split('.').str[0]
+        # 👇 補上這一行：強制剔除重複的代號，確保每一檔股票只有一行基本資料！
+        df_info = df_info.drop_duplicates(subset=['symbol'], keep='first')
         
-    # --- 2. 營收查詢區塊 (獨立連線 + 防呆機制) ---
+    # --- 2. 營收查詢 ---
     q_rev = """
     SELECT report_month, symbol, rev_current, yoy_pct, yoy_accumulated_pct 
     FROM monthly_revenue 
@@ -33,11 +44,13 @@ def extract_data():
     try:
         with engine.connect() as conn:
             df_rev = pd.read_sql(text(q_rev), conn)
+            # 🔥 防呆機制：去除後綴
+            df_rev['symbol'] = df_rev['symbol'].astype(str).str.split('.').str[0]
     except Exception as e:
         print(f"⚠️ 營收資料表尚未準備好，暫時 pending (略過營收訊號)。")
         df_rev = pd.DataFrame(columns=['report_month', 'symbol', 'rev_current', 'yoy_pct', 'yoy_accumulated_pct'])
 
-    # --- 3. 股價與籌碼查詢區塊 (獨立連線) ---
+    # --- 3. 股價與籌碼大表 (限縮 150 天以節省記憶體) ---
     q_price = """
     SELECT sp.date, sp.symbol, sp.open, sp.high, sp.low, sp.close, sp.volume, 
            COALESCE(ii.foreign_net, 0) as foreign_net,
@@ -50,7 +63,10 @@ def extract_data():
     """
     with engine.connect() as conn:
         df_price = pd.read_sql(text(q_price), conn)
+        # 🔥 防呆機制：去除後綴，保證合併時完全對準
+        df_price['symbol'] = df_price['symbol'].astype(str).str.split('.').str[0]
 
+    # 合併基本資料
     df = pd.merge(df_price, df_info, on='symbol', how='left')
     return df, df_rev
 
@@ -58,22 +74,24 @@ def extract_data():
 # 3. 轉換與運算 (Transform)
 # ===========================
 def transform_data(df, df_rev):
-    print("⚙️ [2/4] 計算均線、技術指標與週K...")
+    print("⚙️ [2/4] 計算均線與指標 (啟動分批護城河，防止記憶體爆表)...")
     df['symbol'] = df['symbol'].astype(str).str.strip()
     df['date'] = pd.to_datetime(df['date'])
     
-    # --- 營收處理 ---
+    # ==========================
+    # 步驟 A: 處理營收資料 (全表處理)
+    # ==========================
     if not df_rev.empty:
         df_rev['date'] = pd.to_datetime(df_rev['report_month'])
         df_rev = df_rev.sort_values('date')
         g_rev = df_rev.groupby('symbol')
         
+        # 🔥 修正 Expanding Bug：改用 transform(cummax)
         df_rev['rev_max'] = g_rev['rev_current'].transform(lambda x: x.cummax())
         df_rev['rev_is_ath'] = (df_rev['rev_current'] >= df_rev['rev_max']) & (df_rev['rev_current'] > 0)
         df_rev['yoy_pos'] = (df_rev['yoy_pct'] > 0).astype(int)
         df_rev['yoy_streak'] = g_rev['yoy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
         
-        # 🔥 merge_asof 前，確保雙方依 date 排序
         df = df.sort_values('date')
         df = pd.merge_asof(df, df_rev[['date','symbol','rev_is_ath','yoy_streak','yoy_pct','yoy_accumulated_pct']], 
                            on='date', by='symbol', direction='backward')
@@ -81,80 +99,102 @@ def transform_data(df, df_rev):
         for c in ['rev_is_ath','yoy_streak','yoy_pct','yoy_accumulated_pct']: 
             df[c] = 0
 
-    df['rev_is_ath'] = df['rev_is_ath'].fillna(False)
+    df['rev_is_ath'] = df['rev_is_ath'].fillna(False).astype(bool)
     df[['yoy_pct','yoy_accumulated_pct']] = df[['yoy_pct','yoy_accumulated_pct']].fillna(0)
 
-    # --- 基本股價與技術指標 ---
-    # 🔥 計算前必須強制切換回「股票代號 -> 日期」的排序，否則 shift(1) 會亂掉
-    df = df.sort_values(['symbol', 'date'])
-    g = df.groupby('symbol')
-    
-    df['MA5'] = g['close'].transform(lambda x: x.rolling(5).mean())
-    df['MA10'] = g['close'].transform(lambda x: x.rolling(10).mean())
-    df['MA20'] = g['close'].transform(lambda x: x.rolling(20).mean())
-    df['MA60'] = g['close'].transform(lambda x: x.rolling(60).mean())
-    df['Vol_MA5'] = g['volume'].transform(lambda x: x.rolling(5).mean())
-    df['Vol_MA10'] = g['volume'].transform(lambda x: x.rolling(10).mean())
-    df['Vol_MA20'] = g['volume'].transform(lambda x: x.rolling(20).mean())
-    
-    df['prev_close'] = g['close'].shift(1)
-    df['prev_volume'] = g['volume'].shift(1)
-
-    # 👇👇👇 [新增這一段] 預先算好量增比 👇👇👇
-    df['Vol_Ratio'] = np.where(
-        (df['prev_volume'] > 0) & df['prev_volume'].notna(),
-        df['volume'] / df['prev_volume'],
-        np.nan
-    )
-    # 👆👆👆 [新增結束] 👆👆👆
-
-    df['pct_change'] = (df['close'] - df['prev_close']) / df['prev_close'] * 100
-    df['pct_change_3d'] = g['close'].pct_change(3) * 100
-    df['pct_change_5d'] = g['close'].pct_change(5) * 100
-    df['high_3d'] = g['high'].transform(lambda x: x.rolling(3).max())
-    df['vol_max_3d'] = g['volume'].transform(lambda x: x.rolling(3).max())
-    
-    low_min = g['low'].transform(lambda x: x.rolling(9).min())
-    high_max = g['high'].transform(lambda x: x.rolling(9).max())
-    rsv = (df['close'] - low_min) / (high_max - low_min) * 100
-    df['K'] = rsv.ewm(com=2, adjust=False).mean()
-    df['D'] = df['K'].ewm(com=2, adjust=False).mean()
-    
-    ema12 = g['close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
-    ema26 = g['close'].transform(lambda x: x.ewm(span=26, adjust=False).mean())
-    df['DIF'] = ema12 - ema26
-    df['MACD'] = g['DIF'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
-    df['MACD_OSC'] = df['DIF'] - df['MACD']
-    
-    df['bias_ma5'] = (df['close'] - df['MA5']) / df['MA5'] * 100
-    df['bias_ma20'] = (df['close'] - df['MA20']) / df['MA20'] * 100
-    df['bias_ma60'] = (df['close'] - df['MA60']) / df['MA60'] * 100
-    df['vol_bias_ma5'] = (df['volume'] - df['Vol_MA5']) / df['Vol_MA5'] * 100
-    df['vol_bias_ma10'] = (df['volume'] - df['Vol_MA10']) / df['Vol_MA10'] * 100
-    df['vol_bias_ma20'] = (df['volume'] - df['Vol_MA20']) / df['Vol_MA20'] * 100
-    
-    df['above_ma20'] = (df['close'] > df['MA20']).astype(int)
-    df['days_above_ma20'] = g['above_ma20'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
-    df['above_ma60'] = (df['close'] > df['MA60']).astype(int)
-    df['days_above_ma60'] = g['above_ma60'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
-
-    df['f_buy_pos'] = (df['foreign_net'] > 0).astype(int)
-    df['f_buy_streak'] = g['f_buy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
-    df['f_sum_5d'] = g['foreign_net'].transform(lambda x: x.rolling(5).sum())
-
-    # --- 週K運算 ---
-    df_w = df.set_index('date').groupby('symbol').resample('W-FRI').agg({'open': 'first', 'close': 'last'}).dropna().reset_index()
-    df_w['is_red'] = (df_w['close'] > df_w['open']).astype(int)
-    df_w['w_red_streak'] = df_w.groupby('symbol')['is_red'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
-    
-    # 🔥 merge_asof 前，強制重新依 date 排序
-    df = df.sort_values('date')
-    df_w = df_w.sort_values('date')
-    df = pd.merge_asof(df, df_w[['date','symbol','w_red_streak']], on='date', by='symbol', direction='backward')
-    df['w_red_streak'] = df['w_red_streak'].fillna(0)
+    # 釋放營收表記憶體
+    del df_rev
+    gc.collect()
 
     # ==========================
-    # 🔥 訊號與排名計算 (擷取近 30 天)
+    # 步驟 B: 計算時間序列指標 (🔥 分批處理，拯救記憶體)
+    # ==========================
+    unique_symbols = df['symbol'].unique()
+    batch_size = 250  # 每次處理 250 檔股票
+    batched_results = []
+    
+    for i in range(0, len(unique_symbols), batch_size):
+        batch_syms = unique_symbols[i : i + batch_size]
+        d_sub = df[df['symbol'].isin(batch_syms)].sort_values(['symbol', 'date']).copy()
+        
+        g = d_sub.groupby('symbol')
+        
+        d_sub['MA5'] = g['close'].transform(lambda x: x.rolling(5).mean())
+        d_sub['MA10'] = g['close'].transform(lambda x: x.rolling(10).mean())
+        d_sub['MA20'] = g['close'].transform(lambda x: x.rolling(20).mean())
+        d_sub['MA60'] = g['close'].transform(lambda x: x.rolling(60).mean())
+        d_sub['Vol_MA5'] = g['volume'].transform(lambda x: x.rolling(5).mean())
+        d_sub['Vol_MA10'] = g['volume'].transform(lambda x: x.rolling(10).mean())
+        d_sub['Vol_MA20'] = g['volume'].transform(lambda x: x.rolling(20).mean())
+        
+        d_sub['prev_close'] = g['close'].shift(1)
+        d_sub['prev_volume'] = g['volume'].shift(1)
+
+        d_sub['Vol_Ratio'] = np.where(
+            (d_sub['prev_volume'] > 0) & d_sub['prev_volume'].notna(),
+            d_sub['volume'] / d_sub['prev_volume'],
+            np.nan
+        )
+
+        d_sub['pct_change'] = (d_sub['close'] - d_sub['prev_close']) / d_sub['prev_close'] * 100
+        d_sub['pct_change_3d'] = g['close'].pct_change(3) * 100
+        d_sub['pct_change_5d'] = g['close'].pct_change(5) * 100
+        d_sub['high_3d'] = g['high'].transform(lambda x: x.rolling(3).max())
+        d_sub['vol_max_3d'] = g['volume'].transform(lambda x: x.rolling(3).max())
+        
+        low_min = g['low'].transform(lambda x: x.rolling(9).min())
+        high_max = g['high'].transform(lambda x: x.rolling(9).max())
+        rsv = (d_sub['close'] - low_min) / (high_max - low_min) * 100
+        d_sub['K'] = rsv.ewm(com=2, adjust=False).mean()
+        d_sub['D'] = d_sub['K'].ewm(com=2, adjust=False).mean()
+        
+        ema12 = g['close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
+        ema26 = g['close'].transform(lambda x: x.ewm(span=26, adjust=False).mean())
+        d_sub['DIF'] = ema12 - ema26
+        d_sub['MACD'] = g['DIF'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
+        d_sub['MACD_OSC'] = d_sub['DIF'] - d_sub['MACD']
+        
+        d_sub['bias_ma5'] = (d_sub['close'] - d_sub['MA5']) / d_sub['MA5'] * 100
+        d_sub['bias_ma20'] = (d_sub['close'] - d_sub['MA20']) / d_sub['MA20'] * 100
+        d_sub['bias_ma60'] = (d_sub['close'] - d_sub['MA60']) / d_sub['MA60'] * 100
+        d_sub['vol_bias_ma5'] = (d_sub['volume'] - d_sub['Vol_MA5']) / d_sub['Vol_MA5'] * 100
+        d_sub['vol_bias_ma10'] = (d_sub['volume'] - d_sub['Vol_MA10']) / d_sub['Vol_MA10'] * 100
+        d_sub['vol_bias_ma20'] = (d_sub['volume'] - d_sub['Vol_MA20']) / d_sub['Vol_MA20'] * 100
+        
+        d_sub['above_ma20'] = (d_sub['close'] > d_sub['MA20']).astype(int)
+        d_sub['days_above_ma20'] = g['above_ma20'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
+        d_sub['above_ma60'] = (d_sub['close'] > d_sub['MA60']).astype(int)
+        d_sub['days_above_ma60'] = g['above_ma60'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
+
+        d_sub['f_buy_pos'] = (d_sub['foreign_net'] > 0).astype(int)
+        d_sub['f_buy_streak'] = g['f_buy_pos'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
+        d_sub['f_sum_5d'] = g['foreign_net'].transform(lambda x: x.rolling(5).sum())
+
+        # --- 週K運算 ---
+        df_w = d_sub.set_index('date').groupby('symbol').resample('W-FRI').agg({'open': 'first', 'close': 'last'}).dropna().reset_index()
+        df_w['is_red'] = (df_w['close'] > df_w['open']).astype(int)
+        df_w['w_red_streak'] = df_w.groupby('symbol')['is_red'].transform(lambda x: x.groupby((x != x.shift()).cumsum()).cumsum())
+        
+        d_sub = d_sub.sort_values('date')
+        df_w = df_w.sort_values('date')
+        d_sub = pd.merge_asof(d_sub, df_w[['date','symbol','w_red_streak']], on='date', by='symbol', direction='backward')
+        d_sub['w_red_streak'] = d_sub['w_red_streak'].fillna(0)
+
+        # 存入批次清單
+        batched_results.append(d_sub)
+        
+        # 垃圾回收：強制清空記憶體
+        del d_sub
+        del df_w
+        gc.collect()
+
+    # 合併所有批次結果
+    df = pd.concat(batched_results, ignore_index=True)
+    del batched_results
+    gc.collect()
+
+    # ==========================
+    # 步驟 C: 橫向訊號與排名計算 (擷取近 30 天)
     # ==========================
     print("📊 [3/4] 產生動態訊號與排名...")
     cutoff_date = df['date'].max() - pd.Timedelta(days=30)
@@ -236,25 +276,46 @@ def transform_data(df, df_rev):
     return df
 
 # ===========================
-# 4. 寫入資料庫 (Load)
+# 4. 寫入資料庫 (Load) - Delete & Append (最穩定的 ETL 作法)
 # ===========================
 def load_data(df):
-    print("📤 [4/4] 覆寫至資料庫中...")
-    # 👇 在這個陣列的最後面加上 'Vol_Ratio'
+    print("📤 [4/4] 執行資料庫覆寫 (Delete & Append 模式)...")
+    
     cols_to_keep = ['date', 'symbol', 'name', 'industry', 'open', 'high', 'low', 'close', 'volume', 
                     'pct_change', 'foreign_net', 'trust_net', 'yoy_pct', 'MA5', 'MA10', 'MA20', 'MA60', 
                     'K', 'D', 'MACD_OSC', 'DIF', 'MACD', 'total_score', 'signal_list', 'Vol_Ratio']
     
-    df_final = df[cols_to_keep].dropna(subset=['close'])
-    
-    with engine.begin() as conn:
-        min_date = df_final['date'].min()
-        # 清除舊有重疊區間的資料
-        conn.execute(text("DELETE FROM strongbuy_indicators WHERE date >= :d"), {"d": min_date})
-        # 寫入最新算好的結果
-        df_final.to_sql('strongbuy_indicators', conn, if_exists='append', index=False, chunksize=5000)
-    print("✅ 更新完成！")
+    # 確保關閉不必要的警告並過濾空值
+    df_final = df[cols_to_keep].dropna(subset=['close']).copy()
 
+    # 👇 補上這一行：這是最後的絕對防線！確保同一天、同一個代號絕對只有一筆資料
+    df_final = df_final.drop_duplicates(subset=['date', 'symbol'], keep='last')
+    
+    if df_final.empty:
+        print("⚠️ 無有效資料可寫入。")
+        return
+
+    # 1. 取得這批運算資料的「起始日期」
+    min_date = df_final['date'].min()
+    min_date_str = min_date.strftime('%Y-%m-%d')
+    print(f"   -> 準備清理 {min_date_str} (含) 之後的重疊舊資料...")
+
+    # 2. 刪除資料庫中重疊的舊資料，為新資料騰出空間 (完美避開 UniqueViolation)
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM strongbuy_indicators WHERE date >= :d"), {"d": min_date_str})
+        
+    print(f"   -> 舊資料清理完成，準備寫入 {len(df_final)} 筆最新資料...")
+    
+    # 3. 使用 Pandas 原生的 to_sql 寫入 (自動處理型別與 NaN，並且自動分批)
+    # chunksize=2000 代表每次塞 2000 筆，不會讓記憶體爆掉
+    df_final.to_sql('strongbuy_indicators', engine, if_exists='append', index=False, chunksize=2000)
+    
+    print("✅ 資料覆寫完成！戰情室資料庫已是最新狀態。")
+
+
+# ===========================
+# 執行主程式
+# ===========================
 if __name__ == "__main__":
     df_p, df_r = extract_data()
     df_transformed = transform_data(df_p, df_r)
