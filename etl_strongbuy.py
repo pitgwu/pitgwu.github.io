@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.pool import NullPool
 
 # 關閉 Pandas 未來版本的警告提示
-pd.set_option('future.no_silent_downcasting', True)
+# pd.set_option('future.no_silent_downcasting', True)
 
 # ===========================
 # 1. 資料庫連線設定
@@ -82,6 +82,8 @@ def transform_data(df, df_rev):
     # 步驟 A: 處理營收資料 (全表處理)
     # ==========================
     if not df_rev.empty:
+        # 🔥 關鍵修正：強制把營收表的 symbol 也轉成一模一樣的標準字串！
+        df_rev['symbol'] = df_rev['symbol'].astype(str).str.strip()
         df_rev['date'] = pd.to_datetime(df_rev['report_month'])
         df_rev = df_rev.sort_values('date')
         g_rev = df_rev.groupby('symbol')
