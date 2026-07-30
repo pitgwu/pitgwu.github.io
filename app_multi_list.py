@@ -205,9 +205,9 @@ def load_precalculated_data():
            d.total_score as "Total_Score",
            d.signal_list as "Signal_List",
            e."Capital", e."2026EPS", d."Vol_Ratio",
-           d.yoy_pct,   -- 🔥 營收年增率在這裡
+           d.yoy_pct,
            lu.limit_up_dates
-    FROM strongbuy_indicators d  -- 🛠️ 關鍵修正：改回這張擁有所有指標與營收的大表！
+    FROM strongbuy_indicators d
     LEFT JOIN stock_eps e ON split_part(d.symbol, '.', 1) = split_part(e."Symbol", '.', 1)
     LEFT JOIN limit_up_records lu ON split_part(d.symbol, '.', 1) = split_part(lu.symbol, '.', 1)
     WHERE d.date >= current_date - INTERVAL '200 days'
@@ -220,7 +220,6 @@ def load_precalculated_data():
 
     df['symbol'] = df['symbol'].astype(str).str.strip()
     df['date'] = pd.to_datetime(df['date'])
-    # 👇 補上這行：如果在同一天出現兩個 7734 (例如一個TW一個TWO)，強制只保留一筆最新資料
     df = df.drop_duplicates(subset=['date', 'symbol'], keep='last')
     df['Total_Score'] = df['Total_Score'].fillna(0).astype(int)
     df['Signal_List'] = df['Signal_List'].fillna("")
@@ -228,18 +227,13 @@ def load_precalculated_data():
     df['2026EPS'] = pd.to_numeric(df['2026EPS'], errors='coerce')
     df['PE_Ratio'] = np.where((df['2026EPS'] > 0) & df['2026EPS'].notna(), df['close'] / df['2026EPS'], np.nan)
 
-    # 🔥 新增：計算 PEG (本益比 / 營收年增率)。排除營收衰退的負值。
     df['yoy_pct'] = pd.to_numeric(df['yoy_pct'], errors='coerce')
     df['PEG'] = np.where((df['PE_Ratio'] > 0) & (df['yoy_pct'] > 0), df['PE_Ratio'] / df['yoy_pct'], np.nan)
 
-    # ... 下面保留您原本的「極速比對漲停日期」與「計算 MA120、糾結度」等程式碼，完全不用動 ...
-
-    # 🔥 極速比對漲停日期
     date_strs = df['date'].dt.strftime('%Y-%m-%d').values
     lu_dates = df['limit_up_dates'].fillna('').values
     df['is_limit_up'] = [1 if d in lu else 0 for d, lu in zip(date_strs, lu_dates)]
 
-    # 🔥 向量化計算進階篩選所需參數 (補回漏掉的糾結神器邏輯)
     df = df.sort_values(['symbol', 'date'])
     is_same = df['symbol'] == df['symbol'].shift(1)
 
@@ -252,7 +246,7 @@ def load_precalculated_data():
     df['prev_K'] = np.where(is_same, df['K'].shift(1), np.nan)
     df['prev_D'] = np.where(is_same, df['D'].shift(1), np.nan)
     df['prev_MACD_OSC'] = np.where(is_same, df['MACD_OSC'].shift(1), np.nan)
-    
+
     for col in ['MA5', 'MA10', 'MA20', 'MA60', 'MA120']:
         df[f'prev_{col}'] = np.where(is_same, df[col].shift(1), np.nan)
 
@@ -261,7 +255,6 @@ def load_precalculated_data():
         df[f'prev{i}_foreign_net'] = np.where(is_same_i, df['foreign_net'].shift(i), np.nan)
         df[f'prev{i}_trust_net'] = np.where(is_same_i, df['trust_net'].shift(i), np.nan)
 
-    # 確保 sq_pct 存在！
     df['max_ma'] = np.maximum(df['MA5'], np.maximum(df['MA10'], df['MA20']))
     df['min_ma'] = np.minimum(df['MA5'], np.minimum(df['MA10'], df['MA20']))
     df['sq_pct'] = (df['max_ma'] - df['min_ma']) / df['min_ma']
@@ -272,7 +265,6 @@ def load_precalculated_data():
     kd_mid_2 = df['is_kd_gc_mid'].shift(2).fillna(False).astype(bool) & (df['symbol'] == df['symbol'].shift(2))
     df['kd_gc_3d_mid_flag'] = df['is_kd_gc_mid'] | kd_mid_1 | kd_mid_2
 
-    # 字典打包
     max_date = df['date'].max()
     avail_dates = sorted(df['date'].dt.date.unique(), reverse=True)
     df_dict_by_date = {dt: group for dt, group in df.groupby('date')}
@@ -282,7 +274,7 @@ def load_precalculated_data():
     return df_dict_by_date, df_dict_by_symbol, latest_prices_map, max_date, avail_dates
 
 # --- 繪圖輔助 (✨旗艦白底專業版：修復交叉與扣抵標記) ---
-def plot_stock_kline(df_stock, symbol, name, selected_mas, show_ma_cross, show_limit_up, show_vol_ma5, show_vol_ma10, show_macd, show_kd, show_rsi, show_foreign, show_trust):
+def plot_stock_kline(df_stock, symbol, name, selected_mas, show_ma_cross, show_3d_hl, show_limit_ud, show_vol_ma5, show_vol_ma10, show_macd, show_kd, show_rsi, show_foreign, show_trust):
     df_calc = df_stock.copy()
 
     df_calc['MA3'] = df_calc['close'].rolling(window=3).mean()
@@ -292,6 +284,9 @@ def plot_stock_kline(df_stock, symbol, name, selected_mas, show_ma_cross, show_l
     df_calc['BB_low'] = df_calc['MA20'] - 3 * df_calc['std20']
     df_calc['prev_MA20'] = df_calc['MA20'].shift(1)
     df_calc['prev_MA60'] = df_calc['MA60'].shift(1)
+    
+    # 計算昨日收盤價 (供漲跌停判斷使用)
+    df_calc['prev_close_ud'] = df_calc['close'].shift(1).fillna(df_calc['open'])
 
     df_calc['Vol_MA5'] = df_calc['volume'].rolling(window=5).mean()
     df_calc['Vol_MA10'] = df_calc['volume'].rolling(window=10).mean()
@@ -304,6 +299,56 @@ def plot_stock_kline(df_stock, symbol, name, selected_mas, show_ma_cross, show_l
     rs = gain / loss.replace(0, float('nan'))
     df_calc['RSI'] = 100 - (100 / (1 + rs))
     df_calc['RSI'] = df_calc['RSI'].fillna(50)
+    
+    # 🔥 核心計算：三日高低點與撐壓給分機制
+    signal_3d = np.zeros(len(df_calc))
+    score_3d = np.array([""] * len(df_calc), dtype=object)
+    triangle_3d = np.zeros(len(df_calc))
+    key_high_3d = np.full(len(df_calc), np.nan)
+    key_low_3d = np.full(len(df_calc), np.nan)
+    key_date_3d = np.array([""] * len(df_calc), dtype=object)
+
+    highs, lows, closes, opens = df_calc['high'].values, df_calc['low'].values, df_calc['close'].values, df_calc['open'].values
+    dates_str = df_calc['date'].dt.strftime('%Y-%m-%d').values
+    consecutive_up, consecutive_down = 0, 0
+
+    for i in range(3, len(df_calc)):
+        past_highs, past_lows = highs[i-3:i], lows[i-3:i]
+        h3, l3 = np.max(past_highs), np.min(past_lows)
+        p_c, p_h, p_l = closes[i-1], highs[i-1], lows[i-1]
+        
+        is_limit_up = closes[i] >= p_c * 1.095
+        is_limit_down = closes[i] <= p_c * 0.905
+        is_gap_up, is_gap_down = lows[i] > p_h, highs[i] < p_l
+        
+        if closes[i] > h3:
+            signal_3d[i], consecutive_up, consecutive_down = 1, consecutive_up + 1, 0
+            k_idx = i - 3 + np.argmax(past_highs)
+            key_high_3d[i], key_low_3d[i], key_date_3d[i] = highs[k_idx], lows[k_idx], dates_str[k_idx]
+            if is_limit_up: score_3d[i] = "+2"
+            elif is_gap_up: score_3d[i] = "+1.5"
+            elif closes[i] > opens[i]: score_3d[i] = "+1"
+            else: score_3d[i] = "+0.5"
+            if consecutive_up >= 2: triangle_3d[i] = 1
+                
+        elif closes[i] < l3:
+            signal_3d[i], consecutive_down, consecutive_up = -1, consecutive_down + 1, 0
+            k_idx = i - 3 + np.argmin(past_lows)
+            key_high_3d[i], key_low_3d[i], key_date_3d[i] = highs[k_idx], lows[k_idx], dates_str[k_idx]
+            if is_limit_down: score_3d[i] = "-2"
+            elif is_gap_down: score_3d[i] = "-1.5"
+            elif closes[i] < opens[i]: score_3d[i] = "-1"
+            else: score_3d[i] = "-0.5"
+            if consecutive_down >= 2: triangle_3d[i] = -1
+        else:
+            consecutive_up, consecutive_down = 0, 0
+
+    df_calc['signal_3d'] = signal_3d
+    df_calc['score_3d'] = score_3d
+    df_calc['triangle_3d'] = triangle_3d
+    df_calc['key_high_3d'] = key_high_3d
+    df_calc['key_low_3d'] = key_low_3d
+    df_calc['key_date_3d'] = key_date_3d
 
     df_plot = df_calc.tail(130).copy()
     df_plot['date_str'] = df_plot['date'].dt.strftime('%Y-%m-%d')
@@ -355,20 +400,61 @@ def plot_stock_kline(df_stock, symbol, name, selected_mas, show_ma_cross, show_l
         dc_df = df_plot[(df_plot['MA20'] < df_plot['MA60']) & (df_plot['prev_MA20'] >= df_plot['prev_MA60'])]
         if not dc_df.empty: fig.add_trace(go.Scatter(x=dc_df['date_str'], y=dc_df['MA20'], mode='markers', marker=dict(symbol='triangle-down', size=14, color='green', line=dict(width=1, color='darkgreen')), name='20MA死叉60MA', showlegend=False), row=1, col=1)
 
-    # 🔥 新增：標記漲停 K 棒
-    if show_limit_up and 'is_limit_up' in df_plot.columns:
-        limit_up_df = df_plot[df_plot['is_limit_up'] == 1]
+    # 🔥 標記漲跌停 K 棒 (火焰與雷雨)
+    if show_limit_ud:
+        limit_up_df = df_plot[df_plot['close'] >= df_plot['prev_close_ud'] * 1.095]
+        limit_dn_df = df_plot[df_plot['close'] <= df_plot['prev_close_ud'] * 0.905]
+        
         if not limit_up_df.empty:
-            fig.add_trace(go.Scatter(
-                x=limit_up_df['date_str'],
-                y=limit_up_df['high'] + y_offset * 0.6,
-                mode='text',
-                text=['🔥'] * len(limit_up_df),
-                textfont=dict(size=18),
-                name='漲停',
-                hoverinfo='skip',
-                showlegend=False
-            ), row=1, col=1)
+            fig.add_trace(go.Scatter(x=limit_up_df['date_str'], y=limit_up_df['high'] + y_offset * 0.6, mode='text', text=['🔥'] * len(limit_up_df), textfont=dict(size=18), name='漲停', hoverinfo='skip', showlegend=False), row=1, col=1)
+        if not limit_dn_df.empty:
+            fig.add_trace(go.Scatter(x=limit_dn_df['date_str'], y=limit_dn_df['low'] - y_offset * 0.6, mode='text', text=['⛈️'] * len(limit_dn_df), textfont=dict(size=18), name='跌停', hoverinfo='skip', showlegend=False), row=1, col=1)
+
+    # 🔥 修正版：三日高低點 (撐壓與給分)
+    if show_3d_hl and 'signal_3d' in df_plot.columns:
+        for idx, row in df_plot.iterrows():
+            if row['signal_3d'] == 1:
+                lbl = f"<b>▲<br>{row['score_3d']}</b>" if row.get('triangle_3d', 0) == 1 else f"<b>{row['score_3d']}</b>"
+                fig.add_annotation(x=row['date_str'], y=row['high'], text=lbl, showarrow=True, arrowhead=1, arrowcolor="#FF3333", arrowsize=1, ax=0, ay=-35, font=dict(color="white", size=10), bgcolor="#FF3333", bordercolor="#FF3333", borderpad=2, row=1, col=1)
+            elif row['signal_3d'] == -1:
+                lbl = f"<b>▼<br>{row['score_3d']}</b>" if row.get('triangle_3d', 0) == -1 else f"<b>{row['score_3d']}</b>"
+                fig.add_annotation(x=row['date_str'], y=row['low'], text=lbl, showarrow=True, arrowhead=1, arrowcolor="#00AA00", arrowsize=1, ax=0, ay=35, font=dict(color="white", size=10), bgcolor="#00AA00", bordercolor="#00AA00", borderpad=2, row=1, col=1)
+
+        ups = df_plot[df_plot['signal_3d'] == 1].drop_duplicates(subset=['key_date_3d'])
+        downs = df_plot[df_plot['signal_3d'] == -1].drop_duplicates(subset=['key_date_3d'])
+        last_sig_idx = df_plot[df_plot['signal_3d'] != 0].last_valid_index()
+        
+        if last_sig_idx is not None:
+            last_sig = df_plot.loc[last_sig_idx, 'signal_3d']
+            valid_dates = df_plot['date_str'].values
+            x_end = valid_dates[-1]
+            
+            # 確保 X 軸字串有效，若起點超出視窗，則強制鎖定在畫面最左側 (避免線條斷裂)
+            def get_valid_x0(d_str):
+                return d_str if d_str in valid_dates else valid_dates[0]
+            
+            if last_sig == 1:
+                if not ups.empty:
+                    up_row = ups.iloc[-1]
+                    x0 = get_valid_x0(up_row['key_date_3d'])
+                    fig.add_shape(type="line", x0=x0, x1=x_end, y0=up_row['key_high_3d'], y1=up_row['key_high_3d'], line=dict(color="#FF3333", width=1.5, dash="dash"), row=1, col=1)
+                    fig.add_shape(type="line", x0=x0, x1=x_end, y0=up_row['key_low_3d'], y1=up_row['key_low_3d'], line=dict(color="#FF3333", width=1.5, dash="dash"), row=1, col=1)
+                
+                down_row = downs.iloc[-2] if len(downs) >= 2 else (downs.iloc[-1] if len(downs) == 1 else None)
+                if down_row is not None:
+                    x0 = get_valid_x0(down_row['key_date_3d'])
+                    fig.add_shape(type="line", x0=x0, x1=x_end, y0=down_row['key_high_3d'], y1=down_row['key_high_3d'], line=dict(color="#00AA00", width=1.5, dash="dash"), row=1, col=1)
+            
+            elif last_sig == -1:
+                if not downs.empty:
+                    down_row = downs.iloc[-1]
+                    x0 = get_valid_x0(down_row['key_date_3d'])
+                    fig.add_shape(type="line", x0=x0, x1=x_end, y0=down_row['key_high_3d'], y1=down_row['key_high_3d'], line=dict(color="#00AA00", width=1.5, dash="dash"), row=1, col=1)
+                
+                up_row = ups.iloc[-2] if len(ups) >= 2 else (ups.iloc[-1] if len(ups) == 1 else None)
+                if up_row is not None:
+                    x0 = get_valid_x0(up_row['key_date_3d'])
+                    fig.add_shape(type="line", x0=x0, x1=x_end, y0=up_row['key_high_3d'], y1=up_row['key_high_3d'], line=dict(color="#FF3333", width=1.5, dash="dash"), row=1, col=1)
 
     fig.add_trace(go.Candlestick(x=df_plot['date_str'], open=df_plot['open'], high=df_plot['high'], low=df_plot['low'], close=df_plot['close'], name='K線', increasing_line_color='#E13C3C', decreasing_line_color='#2CA045', showlegend=False), row=1, col=1)
 
@@ -401,9 +487,11 @@ def plot_stock_kline(df_stock, symbol, name, selected_mas, show_ma_cross, show_l
         current_row += 1
 
     for annotation in fig['layout']['annotations']:
-        annotation['font'] = dict(size=14, color="#333333") 
-        annotation['x'] = 0.01  
-        annotation['xanchor'] = 'left'
+        # 🔥 關鍵修復：確保「靠左對齊」的動作，只針對副圖標題 (帶有圖案的)，避開我們畫在 K 棒上的分數！
+        if 'text' in annotation and ('📈' in annotation['text'] or '📊' in annotation['text']):
+            annotation['font'] = dict(size=14, color="#333333") 
+            annotation['x'] = 0.01  
+            annotation['xanchor'] = 'left'
 
     fig.update_layout(
         template="plotly_white", height=850 + (100 * (len(panels)-2)), margin=dict(l=40, r=20, t=50, b=20), xaxis_rangeslider_visible=False,
@@ -534,11 +622,8 @@ def main_app():
     st.sidebar.selectbox("📂 選擇群組", all_lists, index=0, key="selected_list_widget")
     selected_list = st.session_state.selected_list_widget
 
-    # 👇 替換為以下這段 (洗掉 .TW 尾巴，並修復 Streamlit 的寬度警告)：
     watchlist_df = get_list_data_db(selected_list, current_user)
-    # 🔥 關鍵修正：把自選清單的代號小尾巴切掉，才能跟資料庫乾淨的代號對齊！
     watchlist_df['symbol'] = watchlist_df['symbol'].astype(str).str.strip().str.split('.').str[0]
-    # 👇 補上這行：強制剔除同一個代號的重複自選股
     watchlist_df = watchlist_df.drop_duplicates(subset=['symbol'], keep='first')
     current_symbols = watchlist_df['symbol'].tolist()
 
@@ -557,7 +642,6 @@ def main_app():
         c2.button("刪", on_click=action_del)
         c3.button("查", on_click=action_search)
         if c4.button("🔄"):
-            # 🔥 必須同時清除兩種快取，才能強制讀取資料庫最新資料
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()
@@ -614,7 +698,6 @@ def main_app():
             chk_bias_60 = st.checkbox("股價與60MA乖離不能太大", value=False)
             bias_60ma_limit = st.slider("季線乖離率上限 (%)", 1.0, 30.0, 15.0, 1.0) if chk_bias_60 else 15.0
 
-        # 🔥 補齊所有均線上揚選項
         with st.sidebar.expander("🔥 攻擊型態與技術指標", expanded=False):
             chk_attack_vol = st.checkbox("先前有出攻擊量 (近10日量增)", value=False)
             attack_vol_ratio = st.slider("量增倍數設定", 1.5, 5.0, 2.0, 0.1) if chk_attack_vol else 2.0
@@ -642,7 +725,7 @@ def main_app():
             trust_buy_vol = st.slider("投信大買張數設定", 50, 2000, 100, 50) if chk_trust_buy else 100
             chk_trust_first_buy = st.checkbox("投信買超第一天 (連5日未買後轉買)", value=False)
 
-    # ===========================
+# ===========================
     # 戰情室主畫面 (Dashboard)
     # ===========================
     st.title("🚀 自選股戰情室")
@@ -663,15 +746,25 @@ def main_app():
     sort_opt = st.sidebar.selectbox("排序", sort_opts)
     min_sc = st.sidebar.number_input("總分門檻", 0, 50, 0)
 
-    # 🚀 取出該日 DataFrame 並限縮於自選股
-    df_day = df_dict_by_date[pd.Timestamp(sel_date)].copy()
+    # 🚀 取出該日 DataFrame 並限縮於自選股 (加入自動向前補齊機制)
     target_syms = [st.session_state.query_mode_symbol] if st.session_state.query_mode_symbol else current_symbols
     title = f"🔍 查詢：{target_syms[0]}" if st.session_state.query_mode_symbol else f"📊 {selected_list}"
 
-    df_day = df_day[df_day['symbol'].isin(target_syms)]
+    latest_rows = []
+    for sym in target_syms:
+        if sym in df_dict_by_symbol:
+            hist = df_dict_by_symbol[sym]
+            hist = hist[hist['date'] <= pd.Timestamp(sel_date)]
+            if not hist.empty:
+                latest_rows.append(hist.iloc[-1])
+
+    if latest_rows:
+        df_day = pd.DataFrame(latest_rows)
+    else:
+        df_day = pd.DataFrame(columns=['symbol', 'date', 'close', 'volume', 'pct_change', 'Total_Score', 'Signal_List'])
 
     # 🚀 動態套用進階篩選邏輯
-    if use_adv_filter and not st.session_state.query_mode_symbol:
+    if use_adv_filter and not st.session_state.query_mode_symbol and not df_day.empty:
         cond = (df_day['volume'] >= min_vol) & (df_day['close'] >= min_price) & (df_day['sq_pct'] <= (threshold_pct/100.0))
         if filter_capital: cond &= (df_day['Capital'] <= capital_limit)
 
@@ -689,7 +782,6 @@ def main_app():
         if chk_macd_about_red: cond &= (df_day['MACD_OSC'] < 0) & (df_day['MACD_OSC'] > df_day['prev_MACD_OSC'])
         if chk_macd_red: cond &= (df_day['MACD_OSC'] > 0)
 
-        # 🔥 補齊篩選邏輯
         if chk_ma5_up: cond &= (df_day['MA5'] > df_day['prev_MA5'])
         if chk_ma10_up: cond &= (df_day['MA10'] > df_day['prev_MA10'])
         if chk_ma20_up: cond &= (df_day['MA20'] > df_day['prev_MA20'])
@@ -723,7 +815,7 @@ def main_app():
             df_day = df_day[df_day['symbol'].isin(valid_syms)]
 
     # 基礎清單合併
-    if not st.session_state.query_mode_symbol:
+    if not st.session_state.query_mode_symbol and not df_day.empty:
         df_day = pd.merge(watchlist_df, df_day, on='symbol', how='left')
         df_day['Total_Score'] = df_day['Total_Score'].fillna(0)
         df_day['Signal_List'] = df_day['Signal_List'].fillna("無後端指標資料")
@@ -759,10 +851,8 @@ def main_app():
         elif "回測報酬率" in sort_opt: df_day = df_day.sort_values(['Backtest_Return','symbol'], ascending=[False,True])
         else: df_day = df_day.sort_values('symbol')
 
-    # 找到這幾行並替換：
     display_cols = ['symbol','name','added_date','close','pct_change', 'Vol_Ratio', 'Squeeze_Display']
     if is_past_date: display_cols.append('Backtest_Return')
-    # 🔥 在這裡加上 'PEG'
     display_cols.extend(['Capital', '2026EPS', 'PE_Ratio', 'PEG', 'Total_Score','Signal_List'])
 
     display_df = df_day[display_cols].reset_index(drop=True)
@@ -779,7 +869,6 @@ def main_app():
         if pd.isna(x): return "-"
         return f"🔥 {x:.1f}x" if x >= 2.0 else f"{x:.1f}x"
 
-    # 🔥 字典裡面補上 "PEG" 的格式化定義
     fmt_dict = {"pct_change": "{:.2f}%", "close": "{:.2f}", "Capital": "{:.1f}", "2026EPS": "{:.2f}", "PE_Ratio": "{:.2f}", "PEG": "{:.2f}", "Total_Score": "{:.0f}", "Vol_Ratio": format_vol_ratio, "Squeeze_Display": "{:.2f}%"}
     col_cfg = {"Capital": "股本(億)", "2026EPS": "預估EPS", "PE_Ratio": "本益比", "PEG": "PEG", "Vol_Ratio": "量增比", "Squeeze_Display": "糾結度(%)", "Signal_List": st.column_config.TextColumn("觸發訊號", width="large")}
 
@@ -787,7 +876,6 @@ def main_app():
         fmt_dict["Backtest_Return"] = "{:.2f}%"
         col_cfg["Backtest_Return"] = "回測報酬率"
 
-    # 🔥 把 use_container_width=True 改成 width="stretch"
     evt = st.dataframe(
         display_df.style.format(fmt_dict, na_rep="-").background_gradient(subset=['Total_Score'], cmap='Reds'),
         on_select="rerun", selection_mode="single-row", width="stretch",
@@ -803,14 +891,15 @@ def main_app():
 
     st.divider()
 
-    # 🔥 圖表指標設定
+    # 🔥 圖表指標設定 (已更新三日高低點與漲跌停)
     st.markdown("### 🎛️ 圖表指標設定")
     opt_col1, opt_col2, opt_col3 = st.columns(3)
     with opt_col1:
         st.markdown("**K線均線**")
         selected_mas = st.multiselect("顯示均線 (依照勾選順序)", ['3MA', '5MA', '10MA', '20MA', '60MA', '120MA'], default=['5MA', '10MA', '20MA', '60MA'], key="ui_mas")
         show_ma_cross = st.checkbox("標記 20MA / 60MA 交叉", key="ui_cross")
-        show_limit_up = st.checkbox("標記漲停K棒 (🔥)", value=True, key="ui_limit_up")
+        show_3d_hl = st.checkbox("顯示三日高低點 (撐壓與給分)", value=True, key="ui_3d_hl")
+        show_limit_ud = st.checkbox("顯示漲跌停 (火焰與雷雨)", value=True, key="ui_limit_ud")
     with opt_col2:
         st.markdown("**成交量均線**")
         show_vol_ma5 = st.checkbox("顯示 5日均量", key="ui_v5")
@@ -834,9 +923,8 @@ def main_app():
     b4.button("⏭️ 最後一檔", on_click=lambda: update_state(len(sym_list) - 1), width="stretch")
 
 
-    # 找到這段 HTML 數據標頭設定，並補上 peg_str
     pe_str = f"{cur_info['PE_Ratio']:.2f}" if pd.notna(cur_info['PE_Ratio']) else "-"
-    peg_str = f"{cur_info['PEG']:.2f}" if pd.notna(cur_info['PEG']) else "-"  # 🔥 新增這行
+    peg_str = f"{cur_info['PEG']:.2f}" if pd.notna(cur_info['PEG']) else "-"
     eps_str = f"{cur_info['2026EPS']:.2f}" if pd.notna(cur_info['2026EPS']) else "-"
     cap_str = f"{cur_info['Capital']:.1f}" if pd.notna(cur_info['Capital']) else "-"
     vol_ratio_str = f"🔥 {cur_info['Vol_Ratio']:.1f}x" if pd.notna(cur_info['Vol_Ratio']) and cur_info['Vol_Ratio'] >= 2.0 else f"{cur_info['Vol_Ratio']:.1f}x" if pd.notna(cur_info['Vol_Ratio']) else "-"
@@ -849,7 +937,6 @@ def main_app():
 
     pct_color = "#FF4B4B" if pd.notna(cur_info['pct_change']) and cur_info['pct_change'] > 0 else "#26a69a" if pd.notna(cur_info['pct_change']) and cur_info['pct_change'] < 0 else "#888"
 
-    # 🔥 在 HTML 字串中多插入一個 DIV 來顯示 PEG (字體設定為顯眼的橘色)
     st.markdown(
         '<div style="margin: 20px 0;">'
         f'<h2 style="text-align: center; color: #FF4B4B; margin-bottom: 15px;">{title_html}</h2>'
@@ -868,7 +955,7 @@ def main_app():
         '</div></div>', unsafe_allow_html=True
     )
 
-    # 繪製 K 線圖
+    # 繪製 K 線圖 (帶入最新的 show_3d_hl 與 show_limit_ud 參數)
     chart_src = df_dict_by_symbol.get(cur_sym, pd.DataFrame()).copy()
     chart_src = chart_src[chart_src['date'] <= pd.Timestamp(sel_date)]
 
@@ -876,7 +963,7 @@ def main_app():
     else:
         fig = plot_stock_kline(
             chart_src, cur_sym, cur_info['name'],
-            selected_mas, show_ma_cross, show_limit_up, show_vol_ma5, show_vol_ma10,
+            selected_mas, show_ma_cross, show_3d_hl, show_limit_ud, show_vol_ma5, show_vol_ma10,
             show_macd, show_kd, show_rsi, show_foreign, show_trust
         )
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{cur_sym}_{uuid.uuid4()}")
