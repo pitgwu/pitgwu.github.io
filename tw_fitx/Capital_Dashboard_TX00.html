@@ -103,7 +103,7 @@ function ensureDrawState(id) {
   if(!gd.__drawHandlerReady) {
     gd.__drawHandlerReady=true;
     gd.on('plotly_relayout',ev=>handleDrawRelayout(id,ev));
-    gd.on('plotly_click',ev=>handlePlotClick(id,ev));
+    gd.on('plotly_click',ev=>{ const st=drawState[id]; if(st&&st.mode==='fib') return; handlePlotClick(id,ev); });
     gd.on('plotly_buttonclicked',ev=>{
       const label=ev&&ev.button?String(ev.button.label||''):'';
       const isWave=label.indexOf('波段')>=0;
@@ -203,23 +203,36 @@ function getPlotBox(gd) {
 function createFibHitLayer(id) {
   const gd=getChart(id); if(!gd) return null;
   const st=drawState[id]; if(!st) return null;
-  // V6.7: use chart-level pointer capture instead of a transparent overlay.
-  // This avoids browser/Plotly SVG stacking issues that prevented Fibonacci clicks.
-  if(!gd.__fibCaptureReady) {
-    gd.__fibCaptureReady=true;
-    gd.addEventListener('pointerdown', ev => {
-      const state=drawState[id];
-      if(!state || state.mode!=='fib') return;
-      const box=getPlotBox(gd);
-      const ax=gd._fullLayout&&gd._fullLayout.xaxis;
-      const ay=gd._fullLayout&&gd._fullLayout.yaxis;
-      if(!box||!ax||!ay) return;
-      const px=ev.clientX-box.screenLeft, py=ev.clientY-box.screenTop;
-      if(px<0||py<0||px>box.width||py>box.height) return;
-      const x=ax.p2l(px), y=ay.p2l(ay._length-py);
-      if(!Number.isFinite(x)||!Number.isFinite(y)) return;
-      ev.preventDefault(); ev.stopPropagation();
-      handlePlotClick(id,{xvals:[x],yvals:[y],points:[]});
+  // V6.8: Fibonacci uses a document-level capture listener.
+  // This is intentionally isolated to Fibonacci mode only, so the five
+  // already-stable drawing tools are untouched.
+  if(!window.__fibDocumentCapture) {
+    window.__fibDocumentCapture=true;
+    document.addEventListener('pointerdown', function(ev) {
+      const ids=['intraday-chart','daily-chart'];
+      for(const chartId of ids) {
+        const chart=getChart(chartId), state=drawState[chartId];
+        if(!chart || !state || state.mode!=='fib') continue;
+        const box=getPlotBox(chart);
+        const ax=chart._fullLayout&&chart._fullLayout.xaxis;
+        const ay=chart._fullLayout&&chart._fullLayout.yaxis;
+        if(!box||!ax||!ay) continue;
+        const inside=ev.clientX>=box.screenLeft && ev.clientX<=box.screenRight &&
+                     ev.clientY>=box.screenTop && ev.clientY<=box.screenBottom;
+        if(!inside) continue;
+        const px=ev.clientX-box.screenLeft;
+        const py=ev.clientY-box.screenTop;
+        const x=ax.p2l(px);
+        const y=ay.p2l(ay._length-py);
+        if(!Number.isFinite(x)||!Number.isFinite(y)) continue;
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
+        state.fibCaptureBusy=true;
+        handlePlotClick(chartId, {xvals:[x],yvals:[y],points:[],__fibCaptured:true});
+        // Only one active chart can consume this pointer event.
+        break;
+      }
     }, true);
   }
   st.fibHitLayer=null;
@@ -228,9 +241,8 @@ function createFibHitLayer(id) {
 
 function syncFibHitLayer(id) {
   const gd=getChart(id);
-  if(gd && !gd.__fibCaptureReady) createFibHitLayer(id);
+  if(gd && !window.__fibDocumentCapture) createFibHitLayer(id);
 }
-
 function syncPenCanvas(id) {
   const gd=getChart(id),st=drawState[id]; if(!gd||!st) return;
   const c=st.penCanvas||createPenCanvas(id); if(!c) return;
@@ -311,6 +323,7 @@ function handlePlotClick(id,ev) {
   }
 
   if(st.mode==='fib') {
+    if(!ev.__fibCaptured) return;
     // Candle trace is always the first main trace in this dashboard.
     // Keep this path independent from Plotly click/hover events.
     const c=gd.data&&gd.data[0];
@@ -387,7 +400,7 @@ function handleDrawRelayout(id,ev) {
 
 function clearDrawings(id) {
   const gd=ensureDrawState(id),st=drawState[id]; if(!gd||!st) return;
-  st.mode=null; st.busy=false; st.fibFirst=null; st.penDrawing=false;
+  st.mode=null; st.busy=false; st.fibFirst=null; st.penDrawing=false; st.fibCaptureBusy=false;
   if(st.penCtx&&st.penCanvas) {
     st.penCtx.clearRect(0,0,st.penCanvas.width,st.penCanvas.height);
   }
