@@ -103,6 +103,7 @@ function ensureDrawState(id) {
   if(!gd.__drawHandlerReady) {
     gd.__drawHandlerReady=true;
     gd.on('plotly_relayout',ev=>handleDrawRelayout(id,ev));
+    gd.on('plotly_click',ev=>handlePlotClick(id,ev)); // 🛠️ 恢復點擊事件（專門給水平線用）
     gd.on('plotly_buttonclicked',ev=>{
       const label=ev&&ev.button?String(ev.button.label||''):'';
       const isWave=label.indexOf('波段')>=0;
@@ -136,6 +137,17 @@ function getChartXBounds(gd) {
     if(Number.isFinite(Number(v))) xs.push(Number(v));
   }));
   return xs.length?[Math.min(...xs),Math.max(...xs)]:[0,1];
+}
+
+function getPlotClickData(ev) {
+  if(!ev) return null;
+  let x=null,y=null;
+  if(Array.isArray(ev.xvals)&&ev.xvals.length) x=Number(ev.xvals[0]);
+  if(Array.isArray(ev.yvals)&&ev.yvals.length) y=Number(ev.yvals[0]);
+  if((!Number.isFinite(x)||!Number.isFinite(y)) && ev.points && ev.points.length) {
+    x=Number(ev.points[0].x); y=Number(ev.points[0].y);
+  }
+  return Number.isFinite(x)&&Number.isFinite(y)?{x,y}:null;
 }
 
 function createPenCanvas(id) {
@@ -215,7 +227,7 @@ function setDrawMode(id,mode,btn) {
   if(mode==='line') {
     Plotly.relayout(gd,{dragmode:'drawline',newshape:{line:{color:color,width:2}}});
   } else if(mode==='horizontal') {
-    Plotly.relayout(gd,{dragmode:'drawline',newshape:{line:{color:color,width:2}}});
+    Plotly.relayout(gd,{dragmode:false}); // 🛠️ 取消拖曳模式，讓圖表能接收滑鼠單擊事件
   } else if(mode==='rect') {
     Plotly.relayout(gd,{dragmode:'drawrect',newshape:{line:{color:color,width:2},fillcolor:'rgba(0,0,0,0.03)'}});
   } else if(mode==='fib') {
@@ -234,12 +246,30 @@ function finishDrawMode(id) {
   document.querySelectorAll('.draw-toolbar button[data-chart="'+id+'"]').forEach(b=>b.classList.remove('active'));
 }
 
+// 🛠️ 專門用來處理水平線的點擊事件
+function handlePlotClick(id,ev) {
+  const gd=getChart(id),st=drawState[id];
+  if(!gd||!st||!st.mode||st.mode==='pen') return;
+
+  const p=getPlotClickData(ev); if(!p) return;
+
+  if(st.mode==='horizontal') {
+    const [xMin,xMax]=getChartXBounds(gd);
+    const color=getDrawColor(id);
+    let newShapes = gd.layout.shapes ? JSON.parse(JSON.stringify(gd.layout.shapes)) : [];
+    newShapes.push({
+      type:'line',xref:'x',yref:'y',x0:xMin,x1:xMax,y0:p.y,y1:p.y,
+      line:{color:color,width:2},name:'user_horizontal'
+    });
+    Plotly.relayout(gd,{shapes: newShapes}).then(()=>finishDrawMode(id));
+  }
+}
+
 function handleDrawRelayout(id,ev) {
   const gd=getChart(id),st=drawState[id];
   if(!gd||!st||!st.mode||st.busy) return;
 
   const keys=Object.keys(ev||{});
-  // 🛠️ 1. 放寬事件判斷條件：只要事件包含 'shapes' 就強制攔截處理
   if(!keys.some(k=>k.includes('shapes'))) return;
 
   const shapes=gd.layout.shapes||[];
@@ -248,18 +278,32 @@ function handleDrawRelayout(id,ev) {
   st.busy=true;
   const color=getDrawColor(id);
 
-  // 🛠️ 2. 深拷貝 shapes，避免直接修改 Plotly 內部陣列導致畫面凍結不更新
   let newShapes = JSON.parse(JSON.stringify(shapes));
   const shape = newShapes[newShapes.length - 1];
 
   // 攔截並展開「黃金切割率」
   if(st.mode==='fib' && shape.type==='line') {
-    const x0 = shape.x0, x1 = shape.x1;
-    const y0 = shape.y0, y1 = shape.y1;
-    newShapes.pop(); // 刪除你剛才拖曳出來的那條定位用的虛線
+    newShapes.pop(); // 刪除你剛才拖曳出來的那條虛線
 
-    const low = Math.min(y0, y1);
-    const high = Math.max(y0, y1);
+    // 🛠️ 磁吸對齊函數 (Auto-Snap)
+    function snap(x, y, isTop) {
+        const c = gd.data && gd.data[0];
+        if (!c || !c.high || !c.low) return {x, y};
+        const i = Math.round(x);
+        // 如果滑鼠拖曳點的 X 座標落在 K 棒範圍內(誤差小於0.45)，就強制抓取最高/最低點
+        if (i >= 0 && i < c.x.length && Math.abs(x - i) <= 0.45) {
+            return { x: i, y: isTop ? Number(c.high[i]) : Number(c.low[i]) };
+        }
+        return {x, y}; // 沒點到 K 棒就用原本座標
+    }
+
+    // 自動判斷拖曳的起終點誰是高點、誰是低點，並執行對齊
+    let isP0Top = shape.y0 >= shape.y1;
+    let p0 = snap(shape.x0, shape.y0, isP0Top);
+    let p1 = snap(shape.x1, shape.y1, !isP0Top);
+
+    const low = Math.min(p0.y, p1.y);
+    const high = Math.max(p0.y, p1.y);
     const range = high - low;
 
     if (range > 0) {
@@ -270,31 +314,19 @@ function handleDrawRelayout(id,ev) {
         newShapes = newShapes.filter(s=>!s||s.name!=='user_fib');
 
         levels.forEach(([r,label])=>{
-            const price=high-range*r;
+            // 🛠️ 翻轉比例：100% 在最上面，0% 在最下面
+            const price = low + range * r;
             newShapes.push({type:'line',xref:'x',yref:'y',x0:xMin,x1:xMax,y0:price,y1:price,line:{color,width:(r===0||r===1)?2:1.5,dash:(r===0||r===1)?'solid':'dot'},name:'user_fib'});
             anns.push({x:xMax,y:price,xref:'x',yref:'y',text:label+'  '+Math.round(price).toLocaleString(),showarrow:false,xanchor:'left',yanchor:'middle',font:{size:11,color},xshift:6,name:'user_fib'});
         });
-        anns.push({x:x0,y:y0,xref:'x',yref:'y',text:Math.round(y0).toLocaleString(),showarrow:true,arrowhead:2,ax:0,ay:(y0===low?28:-28),font:{size:11,color},name:'user_fib'});
-        anns.push({x:x1,y:y1,xref:'x',yref:'y',text:Math.round(y1).toLocaleString(),showarrow:true,arrowhead:2,ax:0,ay:(y1===high?-28:28),font:{size:11,color},name:'user_fib'});
-        anns.push({x:(Number(x0)+Number(x1))/2,y:high,xref:'x',yref:'y',text:'區間 '+Math.round(range).toLocaleString()+' 點',showarrow:false,yshift:14,font:{size:12,color},name:'user_fib'});
+        anns.push({x:p0.x,y:p0.y,xref:'x',yref:'y',text:Math.round(p0.y).toLocaleString(),showarrow:true,arrowhead:2,ax:0,ay:(p0.y===low?28:-28),font:{size:11,color},name:'user_fib'});
+        anns.push({x:p1.x,y:p1.y,xref:'x',yref:'y',text:Math.round(p1.y).toLocaleString(),showarrow:true,arrowhead:2,ax:0,ay:(p1.y===high?-28:28),font:{size:11,color},name:'user_fib'});
+        anns.push({x:(Number(p0.x)+Number(p1.x))/2,y:high,xref:'x',yref:'y',text:'區間 '+Math.round(range).toLocaleString()+' 點',showarrow:false,yshift:14,font:{size:12,color},name:'user_fib'});
 
         Plotly.relayout(gd,{shapes: newShapes, annotations: anns}).then(()=>finishDrawMode(id));
     } else {
         Plotly.relayout(gd,{shapes: newShapes}).then(()=>finishDrawMode(id));
     }
-    return;
-  }
-
-  // 攔截並展開「全螢幕水平線」
-  if(st.mode==='horizontal' && shape.type==='line') {
-    const y0 = shape.y0;
-    newShapes.pop(); // 刪除拖曳產生的短線段
-    const [xMin,xMax]=getChartXBounds(gd);
-    newShapes.push({
-      type:'line',xref:'x',yref:'y',x0:xMin,x1:xMax,y0:y0,y1:y0,
-      line:{color:color,width:2},name:'user_horizontal'
-    });
-    Plotly.relayout(gd,{shapes: newShapes}).then(()=>finishDrawMode(id));
     return;
   }
 
