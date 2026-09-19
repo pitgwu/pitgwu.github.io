@@ -237,28 +237,38 @@ function finishDrawMode(id) {
 function handleDrawRelayout(id,ev) {
   const gd=getChart(id),st=drawState[id];
   if(!gd||!st||!st.mode||st.busy) return;
-  const keys=Object.keys(ev||{});
-  if(!keys.some(k=>k.indexOf('shapes[')===0)) return;
-  const shapes=gd.layout.shapes||[]; if(!shapes.length) return;
-  const idx=shapes.length-1,shape=shapes[idx]; if(!shape) return;
-  const color=getDrawColor(id); st.busy=true;
 
-  // 攔截並轉換黃金切割率
+  const keys=Object.keys(ev||{});
+  // 🛠️ 1. 放寬事件判斷條件：只要事件包含 'shapes' 就強制攔截處理
+  if(!keys.some(k=>k.includes('shapes'))) return;
+
+  const shapes=gd.layout.shapes||[];
+  if(shapes.length === 0) return;
+
+  st.busy=true;
+  const color=getDrawColor(id);
+
+  // 🛠️ 2. 深拷貝 shapes，避免直接修改 Plotly 內部陣列導致畫面凍結不更新
+  let newShapes = JSON.parse(JSON.stringify(shapes));
+  const shape = newShapes[newShapes.length - 1];
+
+  // 攔截並展開「黃金切割率」
   if(st.mode==='fib' && shape.type==='line') {
     const x0 = shape.x0, x1 = shape.x1;
     const y0 = shape.y0, y1 = shape.y1;
-    shapes.pop(); // 刪除使用者剛拖曳出的那條直線
+    newShapes.pop(); // 刪除你剛才拖曳出來的那條定位用的虛線
 
     const low = Math.min(y0, y1);
     const high = Math.max(y0, y1);
     const range = high - low;
-    
+
     if (range > 0) {
         const [xMin,xMax] = getChartXBounds(gd);
         const levels = [[0,'0%'],[.236,'23.6%'],[.382,'38.2%'],[.5,'50%'],[.618,'61.8%'],[.786,'78.6%'],[1,'100%']];
-        const anns = (gd.layout.annotations||[]).filter(a=>!a||a.name!=='user_fib').slice();
-        const newShapes = shapes.filter(s=>!s||s.name!=='user_fib');
-        
+        let anns = JSON.parse(JSON.stringify(gd.layout.annotations||[]));
+        anns = anns.filter(a=>!a||a.name!=='user_fib');
+        newShapes = newShapes.filter(s=>!s||s.name!=='user_fib');
+
         levels.forEach(([r,label])=>{
             const price=high-range*r;
             newShapes.push({type:'line',xref:'x',yref:'y',x0:xMin,x1:xMax,y0:price,y1:price,line:{color,width:(r===0||r===1)?2:1.5,dash:(r===0||r===1)?'solid':'dot'},name:'user_fib'});
@@ -267,34 +277,36 @@ function handleDrawRelayout(id,ev) {
         anns.push({x:x0,y:y0,xref:'x',yref:'y',text:Math.round(y0).toLocaleString(),showarrow:true,arrowhead:2,ax:0,ay:(y0===low?28:-28),font:{size:11,color},name:'user_fib'});
         anns.push({x:x1,y:y1,xref:'x',yref:'y',text:Math.round(y1).toLocaleString(),showarrow:true,arrowhead:2,ax:0,ay:(y1===high?-28:28),font:{size:11,color},name:'user_fib'});
         anns.push({x:(Number(x0)+Number(x1))/2,y:high,xref:'x',yref:'y',text:'區間 '+Math.round(range).toLocaleString()+' 點',showarrow:false,yshift:14,font:{size:12,color},name:'user_fib'});
-        
-        Plotly.relayout(gd,{shapes: newShapes, annotations:anns}).then(()=>finishDrawMode(id));
+
+        Plotly.relayout(gd,{shapes: newShapes, annotations: anns}).then(()=>finishDrawMode(id));
     } else {
-        Plotly.relayout(gd,{shapes}).then(()=>finishDrawMode(id));
+        Plotly.relayout(gd,{shapes: newShapes}).then(()=>finishDrawMode(id));
     }
     return;
   }
 
-  // 攔截並轉換全螢幕水平線
+  // 攔截並展開「全螢幕水平線」
   if(st.mode==='horizontal' && shape.type==='line') {
     const y0 = shape.y0;
-    shapes.pop();
+    newShapes.pop(); // 刪除拖曳產生的短線段
     const [xMin,xMax]=getChartXBounds(gd);
-    shapes.push({
+    newShapes.push({
       type:'line',xref:'x',yref:'y',x0:xMin,x1:xMax,y0:y0,y1:y0,
       line:{color:color,width:2},name:'user_horizontal'
     });
-    Plotly.relayout(gd,{shapes})
-      .then(()=>finishDrawMode(id));
+    Plotly.relayout(gd,{shapes: newShapes}).then(()=>finishDrawMode(id));
     return;
   }
 
-  // 一般圖形處理
+  // 一般圖形處理 (直線 / 框)
   if(shape.type==='line' || shape.type==='rect') {
-    Plotly.relayout(gd,{['shapes['+idx+'].line.color']:color,['shapes['+idx+'].line.width']:2,['shapes['+idx+'].name']:'user_'+shape.type})
-      .then(()=>finishDrawMode(id));
+    shape.line.color = color;
+    shape.line.width = 2;
+    shape.name = 'user_' + shape.type;
+    Plotly.relayout(gd,{shapes: newShapes}).then(()=>finishDrawMode(id));
     return;
   }
+
   st.busy=false;
 }
 
